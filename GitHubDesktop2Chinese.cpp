@@ -1,4 +1,4 @@
-﻿// GitHubDesktop2Chinese.cpp: 定义应用程序的入口点。
+// GitHubDesktop2Chinese.cpp: 定义应用程序的入口点。
 
 
 #define _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING
@@ -262,7 +262,7 @@ int main(int argc, char* argv[])
         // 读取项目更新时间
         try {
             std::string repoinfo;
-            if(utils::ReadHttpDataString("https://api.github.com", "/repos/cngege/GitHubDesktop2Chinese", repoinfo, proxy)) {
+            if(utils::ReadHttpDataString("https://api.github.com", "/repos/Tupig/GitHubDesktop2Chinese", repoinfo, proxy)) {
                 auto infojson = json::parse(repoinfo);
                 std::optional<std::string> info = formatTime(infojson["updated_at"]);
                 if(info) {
@@ -274,13 +274,13 @@ int main(int argc, char* argv[])
     }
 
     // 检查更新
-    // https://api.github.com/repos/cngege/GitHubDesktop2Chinese/releases/latest
+    // https://api.github.com/repos/Tupig/GitHubDesktop2Chinese/releases/latest
     {
         if(FileVer.status != std::Version::Dev) {
             spdlog::info("检查更新中..");
             try {
                 std::string repoinfo;
-                if(utils::ReadHttpDataString("https://api.github.com" , "/repos/cngege/GitHubDesktop2Chinese/releases/latest", repoinfo, proxy)) {
+                if(utils::ReadHttpDataString("https://api.github.com" , "/repos/Tupig/GitHubDesktop2Chinese/releases/latest", repoinfo, proxy)) {
                     auto infojson = json::parse(repoinfo);
                     auto tag_name = infojson["tag_name"].get<std::string>();
                     std::Version remoteVer(tag_name.c_str());
@@ -298,8 +298,8 @@ int main(int argc, char* argv[])
                             spdlog::info("是否自动更新:");
                             bool autoupdate = utils::ReadUserInput_bool({ "n", "y" }, 0);
                             if(autoupdate) {
-                                //https://github.com/cngege/GitHubDesktop2Chinese/releases/download/v1.0.14/GitHubDesktop2Chinese.exe
-                                //https://api.github.com/repos/cngege/GitHubDesktop2Chinese/releases/assets/376558079
+                                //https://github.com/Tupig/GitHubDesktop2Chinese/releases/download/v1.0.14/GitHubDesktop2Chinese.exe
+                                //https://api.github.com/repos/Tupig/GitHubDesktop2Chinese/releases/assets/376558079
                                 std::regex url_regex(R"(^((?:https?://)[^/]+)(/.*)?$)");
                                 std::smatch matches;
                                 if(std::regex_match(downlink, matches, url_regex)) {
@@ -336,7 +336,7 @@ int main(int argc, char* argv[])
     if (only_read_from_remote) {
         spdlog::info("尝试从远程仓库中获取");
         std::string httpjson;
-        if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/cngege/GitHubDesktop2Chinese/master/json/localization.json", httpjson, proxy)) {
+        if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/Tupig/GitHubDesktop2Chinese/master/json/localization.json", httpjson, proxy)) {
             localization = json::parse(httpjson);
             spdlog::info("远程读取成功");
         }
@@ -354,7 +354,7 @@ int main(int argc, char* argv[])
             spdlog::warn("没有指定,或从指定位置没有发现 {} 文件", "localization.json");
             spdlog::info("尝试从远程仓库中获取");
             std::string httpjson;
-            if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/cngege/GitHubDesktop2Chinese/master/json/localization.json", httpjson, proxy)) {
+            if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/Tupig/GitHubDesktop2Chinese/master/json/localization.json", httpjson, proxy)) {
                 localization = json::parse(httpjson);
                 spdlog::info("远程读取成功");
             }
@@ -540,7 +540,7 @@ int main(int argc, char* argv[])
             if(FileVer < JsonVer) {
                 // 不符合要求
                 spdlog::warn("文件要求加载器版本至少为: {}, 但加载器版本为: {}", JsonVer.toString(), FileVer.toString());
-                spdlog::info("请更新：{}", "https://github.com/cngege/GitHubDesktop2Chinese/releases");
+                spdlog::info("请更新：{}", "https://github.com/Tupig/GitHubDesktop2Chinese/releases");
                 // 询问是否强制执行
 
                 if(!no_pause) {
@@ -884,11 +884,11 @@ int main(int argc, char* argv[])
 
 
     // 获取项目参与者:
-    // https://api.github.com/repos/cngege/GitHubDesktop2Chinese/contributors
+    // https://api.github.com/repos/Tupig/GitHubDesktop2Chinese/contributors
     try {
         spdlog::info("正在获取项目参与者");
         std::string contributors;
-        if(utils::ReadHttpDataString("https://api.github.com" , "/repos/cngege/GitHubDesktop2Chinese/contributors", contributors, proxy)) {
+        if(utils::ReadHttpDataString("https://api.github.com" , "/repos/Tupig/GitHubDesktop2Chinese/contributors", contributors, proxy)) {
             auto contributorsjson = json::parse(contributors);
             spdlog::info("人数: {}", contributorsjson.size());
             int num = 0;

@@ -1,10 +1,10 @@
-﻿# GitHubDesktop2Chinese
+# GitHubDesktop2Chinese
 
-![GitHub Actions](https://img.shields.io/github/actions/workflow/status/cngege/GitHubDesktop2Chinese/build.yml)
-![GitHub Actions](https://img.shields.io/github/actions/workflow/status/cngege/GitHubDesktop2Chinese/check.yml?label=json检查)
-![GitHub Release](https://img.shields.io/github/v/release/cngege/GitHubDesktop2Chinese)
+![GitHub Actions](https://img.shields.io/github/actions/workflow/status/Tupig/GitHubDesktop2Chinese/build.yml)
+![GitHub Actions](https://img.shields.io/github/actions/workflow/status/Tupig/GitHubDesktop2Chinese/check.yml?label=json检查)
+![GitHub Release](https://img.shields.io/github/v/release/Tupig/GitHubDesktop2Chinese)
 ![GitHub Release](https://img.shields.io/badge/Cpp-json-blue?logo=cplusplus)
-![GitHub License](https://img.shields.io/github/license/cngege/GitHubDesktop2Chinese)
+![GitHub License](https://img.shields.io/github/license/Tupig/GitHubDesktop2Chinese)
 
 
 
@@ -75,7 +75,7 @@
 
 ## 🧭其他
 
-> 如果报错提示找不到openssl 的dll文件，请更新到[最新版](https://github.com/cngege/GitHubDesktop2Chinese/releases)   
+> 如果报错提示找不到openssl 的dll文件，请更新到[最新版](https://github.com/Tupig/GitHubDesktop2Chinese/releases)   
   如果你有任何建议可以提issues.
 
 > [!tip]
@@ -112,10 +112,10 @@
  - [x] 读取GitHub Desktop的最新版和本地版本比较，如果有新版，则用其他颜色给出提示
 
 ## 🍬星标(收藏)历史
-![Star History Chart](https://star-history.dera.page/svg?repos=cngege/GitHubDesktop2Chinese&type=Date)
+![Star History Chart](https://star-history.dera.page/svg?repos=Tupig/GitHubDesktop2Chinese&type=Date)
 
 ## 🏘️感谢大家的群策群力  
-![Contributors](https://contrib.rocks/image?repo=cngege/GitHubDesktop2Chinese)
+![Contributors](https://contrib.rocks/image?repo=Tupig/GitHubDesktop2Chinese)
 
 <details>
     <summary>点击展开示例图片</summary>

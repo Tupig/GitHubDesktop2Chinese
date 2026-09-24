@@ -15,7 +15,7 @@
 ## 用法
 
 ```bash
-cd GitHubDesktop2Chinese/tools/auto-maintain
+cd tools/auto-maintain
 
 # 失效检测（默认使用 ./json/localization.json）
 node src/index.js check
