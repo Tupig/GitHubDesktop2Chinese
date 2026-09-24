@@ -236,12 +236,8 @@ int main(int argc, char* argv[])
     }
 
 
-    // 打印构建平台与版本
-#ifdef CURRENT_PLATFORM_ISX64
+    // 打印构建平台与版本（仅支持 x64）
     std::string arch_str("x64");
-#else
-    std::string arch_str("x86");
-#endif // CURRENT_PLATFORM_ISX64
 
     if(FileVer) {
         spdlog::info("程序架构：- {}  版本: - {}", arch_str,  FileVer.toString(true));
@@ -336,7 +332,7 @@ int main(int argc, char* argv[])
     if (only_read_from_remote) {
         spdlog::info("尝试从远程仓库中获取");
         std::string httpjson;
-        if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/Tupig/GitHubDesktop2Chinese/master/json/localization.json", httpjson, proxy)) {
+        if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/Tupig/GitHubDesktop2Chinese/main/json/localization.json", httpjson, proxy)) {
             localization = json::parse(httpjson);
             spdlog::info("远程读取成功");
         }
@@ -354,7 +350,7 @@ int main(int argc, char* argv[])
             spdlog::warn("没有指定,或从指定位置没有发现 {} 文件", "localization.json");
             spdlog::info("尝试从远程仓库中获取");
             std::string httpjson;
-            if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/Tupig/GitHubDesktop2Chinese/master/json/localization.json", httpjson, proxy)) {
+            if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/Tupig/GitHubDesktop2Chinese/main/json/localization.json", httpjson, proxy)) {
                 localization = json::parse(httpjson);
                 spdlog::info("远程读取成功");
             }

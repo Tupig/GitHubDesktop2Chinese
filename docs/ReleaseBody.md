@@ -11,6 +11,8 @@
 - 修复 更新版本，请求GitHub时没有走代理的问题（v1.2.4）
 - 新增 读取远程GithubDesktop最新版，和本地最新版比较，若有更新，则给出提示（v1.2.4）
 - 新增 JSON文件附加描述文本，在加载器中显示（v1.2.4）
+- 修复 自动维护误报（改用 Windows 版检测数据源），补充 84 条翻译（v1.2.5）
+- 仅支持 64 位构建与发布，移除 32 位版本（v1.2.6）
 
 <!--
 #### 修复BUG:
@@ -24,8 +26,7 @@
 
 ### 程序说明  
 1. 可以仅下载二进制程序,双击运行后自动汉化  
-2. 如果运行提示出错,可重试或下载[此JSON文件](https://github.com/cngege/GitHubDesktop2Chinese/blob/master/json/localization.json)后放在同目录后运行二进制程序  
+2. 如果运行提示出错,可重试或下载[此JSON文件](https://github.com/Tupig/GitHubDesktop2Chinese/blob/main/json/localization.json)后放在同目录后运行二进制程序  
 3. **若使用GitHub 仓库作为json文件源，请升级加载器到最新版本**
-4. `GitHubDesktop2Chinese.exe` 为64位程序
-5. `GitHubDesktop2Chinese_x86.exe` 为32位程序
-6. 如果汉化后主程序无法打开，请更新加载器后执行参数 `GitHubDesktop2Chinese.exe dev --translationfrombak` 或执行 x86.exe程序
+4. `GitHubDesktop2Chinese.exe` 为 64 位程序，**仅支持 64 位 Windows**，不再提供 32 位版本
+5. 如果汉化后主程序无法打开，请更新加载器后执行参数 `GitHubDesktop2Chinese.exe dev --translationfrombak`

@@ -28,4 +28,10 @@ $：匹配输入字符串的结束位置。
     所有可以利用正则模糊匹配这两个字符，使其适应性更强：如 Ee.createElement\\((..),null,this.props.repositoryName
     替换的时候使用$1表示第一个使用正则捕获到的内容 如：Ee.createElement\\($1,null,this.props.repositoryName
 
-8. 待补充..
+8. 可使用自动维护工具辅助补充翻译（会生成可直接粘贴的条目草稿）：
+     cd tools/auto-maintain
+     npm run all
+   报告位于系统临时目录 ghdesktop-auto-maintain/report.md，按「来源」列把条目放入 main（main.js）或 renderer（renderer.js）数组，
+   将草稿中的【待翻译】替换为中文译文即可（查找项已按字面量转义）。
+
+9. 待补充..

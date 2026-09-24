@@ -19,13 +19,13 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 
 
-if (CMAKE_GENERATOR_PLATFORM STREQUAL "x64" OR CMAKE_EXE_LINKER_FLAGS STREQUAL "/machine:x64")
+# 本项目仅支持 64 位（x64）构建
+if (NOT (CMAKE_GENERATOR_PLATFORM STREQUAL "x64" OR CMAKE_EXE_LINKER_FLAGS STREQUAL "/machine:x64"))
+    message(FATAL_ERROR "GitHubDesktop2Chinese 仅支持 64 位（x64）构建，请通过 -A x64 或 x64 预设进行配置")
+endif()
 message("当前是以x64模式编译")
 add_definitions(-DCURRENT_PLATFORM_ISX64)
 set(CURRENT_PLATFORM_ISX64 1)
-else()
-message("当前是以x86模式编译")
-endif()
 
 
 
@@ -49,21 +49,11 @@ include_directories(src)
 include_directories(third_party/include)
 
 if(DEFINED GitHubActions)
-    if(DEFINED CURRENT_PLATFORM_ISX64)
-        set(LIBSSL_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libssl.lib)
-        set(CRYPTO_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libcrypto.lib)
-    else()
-        set(LIBSSL_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libssl_x86.lib)
-        set(CRYPTO_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libcrypto_x86.lib)
-    endif()
+    set(LIBSSL_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libssl.lib)
+    set(CRYPTO_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libcrypto.lib)
 else()
-    if(DEFINED CURRENT_PLATFORM_ISX64)
-        set(LIBSSL_URL https://www.ghproxy.cc/https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libssl.lib)
-        set(CRYPTO_URL https://www.ghproxy.cc/https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libcrypto.lib)
-    else()
-        set(LIBSSL_URL https://www.ghproxy.cc/https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libssl_x86.lib)
-        set(CRYPTO_URL https://www.ghproxy.cc/https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libcrypto_x86.lib)
-    endif()
+    set(LIBSSL_URL https://www.ghproxy.cc/https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libssl.lib)
+    set(CRYPTO_URL https://www.ghproxy.cc/https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libcrypto.lib)
 endif()
 
 
@@ -83,11 +73,7 @@ if(NOT EXISTS "third_party/openssl/lib")
 endif()
 
 # /////////////////////////////////////ssl库lib名称////////////////////////////////////////////////
-if(DEFINED CURRENT_PLATFORM_ISX64)
-    SET(OPENSSL_SSL_NAME "libssl.lib")
-else()
-    SET(OPENSSL_SSL_NAME "libssl_x86.lib")
-endif()
+SET(OPENSSL_SSL_NAME "libssl.lib")
 
 # ssl远程下载地址
 SET(SSL_DOWNLOAD_URL ${LIBSSL_URL})
@@ -129,11 +115,7 @@ ENDIF()
 
 
 # /////////////////////////////////////crypto库lib名称////////////////////////////////////////////////
-if(DEFINED CURRENT_PLATFORM_ISX64)
-    SET(OPENSSL_CRYPTO_NAME "libcrypto.lib")
-else()
-    SET(OPENSSL_CRYPTO_NAME "libcrypto_x86.lib")
-endif()
+SET(OPENSSL_CRYPTO_NAME "libcrypto.lib")
 # ssl远程下载地址
 SET(CRYPTO_DOWNLOAD_URL ${CRYPTO_URL})
 MESSAGE(STATUS "Checking ${OPENSSL_CRYPTO_NAME}...")

@@ -40,13 +40,16 @@
 **方式二**：下载 `GitHubDesktop2Chinese.exe` 与 `localization.json`，放在同一文件夹后运行。
 
 > [!IMPORTANT]
-> GitHub Desktop 每次版本更新后，都需要重新运行一次本程序才能完成汉化。
+> - 本程序**仅支持 64 位 Windows**（x64），不提供 32 位版本。
+> - GitHub Desktop 每次版本更新后，都需要重新运行一次本程序才能完成汉化。
 
 ## 🏗️怎么编译源代码
 
+> 项目**仅支持 64 位（x64）构建**，使用其他架构配置会在 CMake 阶段直接报错。
+
 1. 克隆仓库
 2. 使用 **VS2022** 直接打开项目文件夹（通过 CMake 打开）
-3. 选择 `x64-debug` / `x64-release` / `x86-debug` / `x86-release` 预设进行构建
+3. 选择 `x64-debug` / `x64-release` 预设进行构建
 
 命令行构建（可选）：
 
@@ -95,7 +98,7 @@ cmake --build build --config Release
 
 | 功能 | 触发方式 | 说明 |
 | --- | --- | --- |
-| 构建 | PR / tag `v*` / 手动 | x64 + x86 双架构构建 |
+| 构建 | PR / tag `v*` / 手动 | 仅 64 位（x64）构建 |
 | JSON 质量校验 | PR / 手动 | 正则合法性、结构完整性、占位符检查 |
 | 工具自检 | PR / 手动 | 自动维护工具语法检查 + 单元测试 |
 | CodeQL 扫描 | PR / 手动 | C/C++ 安全扫描 |
@@ -104,6 +107,7 @@ cmake --build build --config Release
 
 > [!TIP]
 > 手动触发 `type=auto` 会跑完整链路（构建 → 检查 → 维护 → 发布），版本号自动升级补丁号（如 `1.2.4 → 1.2.5`）；也可在 `version` 输入框手动指定。
+> 若自上个版本以来 `json/`、`src/`、`third_party/`、CMake 均无变更，`auto` 模式会**自动跳过发布**，避免产生空版本；`type=release` 与 tag 推送则始终发布。
 
 自动维护工具位于 [`tools/auto-maintain`](tools/auto-maintain)，基于 **Windows 版** GitHub Desktop 的 `main.js` / `renderer.js` 检测；本地运行：
 
@@ -125,7 +129,7 @@ npm run all        # 失效检测 + 未翻译候选提取
 │   └── Utils/utils.hpp           # HTTP / 代理 / 文件等通用工具
 ├── third_party/                  # 第三方依赖（随仓库提交，构建无需联网下载）
 │   ├── include/                  # CLI11、cpp-httplib、nlohmann/json、spdlog、WinReg、VersionParse
-│   └── openssl/                  # OpenSSL 头文件与预编译库（x64 / x86）
+│   └── openssl/                  # OpenSSL 头文件与预编译库（x64）
 ├── json/
 │   └── localization.json         # 汉化映射（核心数据）
 ├── tools/auto-maintain/          # localization.json 自动维护工具（失效检测 / 候选提取）
@@ -161,11 +165,11 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 > [!TIP]
 > **找不到 openssl 的 DLL**：请更新到 [最新版本](https://github.com/Tupig/GitHubDesktop2Chinese/releases)。
 >
-> **程序不运行 / 一闪而过 / 缺失 `MSVCP140_ATOMIC_WAIT.dll`**：安装 [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/zh-cn/cpp/windows/latest-supported-vc-redist?view=msvc-170)，选择与系统匹配的版本（64 位选 `vc_redist.x64.exe`，32 位选 `vc_redist.x86.exe`）。
+> **程序不运行 / 一闪而过 / 缺失 `MSVCP140_ATOMIC_WAIT.dll`**：安装 [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/zh-cn/cpp/windows/latest-supported-vc-redist?view=msvc-170) 的 **x64** 版本（`vc_redist.x64.exe`）。
 >
 > 安装最新 VC++ 运行库后仍无法运行时，请检查程序目录下是否残留 `MSVCP140.dll`、`VCRUNTIME140.dll` 等文件，如有请删除。
 >
-> **汉化后主程序无法打开**：更新加载器后执行 `GitHubDesktop2Chinese.exe dev --translationfrombak`，或运行 x86 版本。
+> **汉化后主程序无法打开**：更新加载器后执行 `GitHubDesktop2Chinese.exe dev --translationfrombak`。
 
 有任何建议欢迎提 [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues)。
 

@@ -5,16 +5,21 @@
 #   - PR → 构建 + 安全质量（不发布）
 #   - 推送 tag v*（如 v1.2.5）→ 构建并发布 Release
 #   - 手动触发（type 选择执行子集）：
-#       auto     构建 + 质量 + 维护 + 发布（版本号自动升级）
+#       auto     构建 + 质量 + 维护 + 发布（版本号自动升级；若无变更则跳过发布）
 #       build    仅构建
 #       security 仅质量与安全扫描
 #       maintain 仅失效检测/候选提取
-#       release  构建 + 发布（版本号自动升级或手动指定）
+#       release  构建 + 发布（版本号自动升级或手动指定，始终发布）
 #
 # 版本号规则：
 #   - tag 触发：取 tag 版本（v1.2.5 → 1.2.5）
 #   - 手动输入 version：使用输入值
 #   - 未输入：自动升级补丁号（本仓库最新 v* tag 基础上 +1；无 tag 时回落上游最新版本）
+#
+# 发布规则：
+#   - 仅支持 64 位（x64）
+#   - tag 推送与 type=release：始终发布
+#   - type=auto：自上個版本 tag 以来 json/src/third_party/CMake 无变更时跳过发布
 #
 # 说明：为避免自动消耗 Actions 额度，定时任务已移除，
 # 全部改为 PR 触发或手动触发。
@@ -69,6 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.resolve.outputs.version }}
+      changed: ${{ steps.resolve.outputs.changed }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -82,6 +88,22 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=""
+          LATEST_TAG="$(git tag -l 'v*' --sort=-v:refname | head -n1 || true)"
+
+          # 自上一个版本 tag 以来是否存在影响构建产物的变更（无 tag 视为有变更）
+          if [[ -n "$LATEST_TAG" ]]; then
+            BUILD_CHANGES="$(git diff --name-only "${LATEST_TAG}..HEAD" -- \
+              json src third_party CMakeLists.txt CMakePresets.json | wc -l | tr -d ' ')"
+          else
+            BUILD_CHANGES=1
+          fi
+          if [[ "$BUILD_CHANGES" -gt 0 ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "自 ${LATEST_TAG} 以来无构建相关变更，auto 模式将跳过 Release"
+          fi
+
           if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == v* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
             echo "使用 tag 版本: $VERSION"
@@ -92,7 +114,7 @@ jobs:
               VERSION="${INPUT#v}"
               echo "使用手动输入版本: $VERSION"
             elif [[ "$TYPE" == "auto" || "$TYPE" == "release" ]]; then
-              LATEST="$(git tag -l 'v*' --sort=-v:refname | head -n1 || true)"
+              LATEST="$LATEST_TAG"
               if [[ -z "$LATEST" ]]; then
                 echo "本仓库暂无 v* tag，回落上游最新版本"
                 LATEST="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
@@ -113,62 +135,41 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   # ─────────────────────────────────────────────
-  # 1. 构建 x64 + x86
+  # 1. 构建（仅 64 位 x64）
   # 触发：tag / PR / 手动(auto/build/release)
   # ─────────────────────────────────────────────
   build:
-    name: 构建 (x64 + x86)
+    name: 构建 (x64)
     needs: version
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       github.event_name == 'pull_request' ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'build' || inputs.type == 'release'))
     runs-on: windows-latest
-    strategy:
-      matrix:
-        arch: [x64, x86]
     env:
-      ARCH: ${{ matrix.arch }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Configure CMake (${{ matrix.arch }})
+      - name: Configure CMake (x64)
         shell: pwsh
         run: |
           chcp 65001 | Out-Null
           $ver = if ($env:RELEASE_VERSION) { "v$env:RELEASE_VERSION" } else { "ci-${{ github.sha }}" }
-          if ($env:ARCH -eq 'x64') {
-            cmake -B build -A x64 -DGitHubActions=1 -DFILE_VERSION="$ver"
-          } else {
-            cmake -B build32 -A Win32 -DGitHubActions=1 -DFILE_VERSION="$ver"
-          }
+          cmake -B build -A x64 -DGitHubActions=1 -DFILE_VERSION="$ver"
 
-      - name: Build (${{ matrix.arch }})
+      - name: Build (x64)
         shell: pwsh
         run: |
           chcp 65001 | Out-Null
-          if ($env:ARCH -eq 'x64') {
-            cmake --build build --config $env:BUILD_TYPE
-          } else {
-            cmake --build build32 --config $env:BUILD_TYPE
-          }
-
-      - name: 重命名 x86 产物
-        if: matrix.arch == 'x86'
-        shell: pwsh
-        run: |
-          if (Test-Path build32/$env:BUILD_TYPE/GitHubDesktop2Chinese.exe) {
-            Move-Item build32/$env:BUILD_TYPE/GitHubDesktop2Chinese.exe build32/$env:BUILD_TYPE/GitHubDesktop2Chinese_x86.exe -Force
-          }
+          cmake --build build --config $env:BUILD_TYPE
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v7
         with:
-          name: GitHubDesktop2Chinese-${{ matrix.arch }}-${{ github.sha }}
+          name: GitHubDesktop2Chinese-x64-${{ github.sha }}
           if-no-files-found: error
-          path: |
-            ${{ matrix.arch == 'x64' && 'build/Release/GitHubDesktop2Chinese.exe' || 'build32/Release/GitHubDesktop2Chinese_x86.exe' }}
+          path: build/Release/GitHubDesktop2Chinese.exe
 
   # ─────────────────────────────────────────────
   # 2. localization.json 质量校验
@@ -461,13 +462,15 @@ jobs:
   # ─────────────────────────────────────────────
   # 6. 发布 Release（tag v* 或手动 auto/release）
   # 依赖 build（需其产物）与 version（版本号）
+  # auto 模式下若自上个版本以来无构建相关变更，则跳过发布
   # ─────────────────────────────────────────────
   release:
     name: 发布 Release
     needs: [version, build]
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
-      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'release'))
+      (github.event_name == 'workflow_dispatch' && inputs.type == 'release') ||
+      (github.event_name == 'workflow_dispatch' && inputs.type == 'auto' && needs.version.outputs.changed == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -489,12 +492,6 @@ jobs:
           name: GitHubDesktop2Chinese-x64-${{ github.sha }}
           path: release/
 
-      - name: 下载构建产物 (x86)
-        uses: actions/download-artifact@v8
-        with:
-          name: GitHubDesktop2Chinese-x86-${{ github.sha }}
-          path: release/
-
       - name: 准备 localization.json
         run: |
           mkdir -p release
@@ -508,8 +505,7 @@ jobs:
             echo "# GitHubDesktop2Chinese v$VER"
             echo ""
             echo "自动构建产物："
-            echo "- \`GitHubDesktop2Chinese.exe\` — 64 位"
-            echo "- \`GitHubDesktop2Chinese_x86.exe\` — 32 位"
+            echo "- \`GitHubDesktop2Chinese.exe\` — 64 位（仅支持 64 位 Windows）"
             echo "- \`localization.json\` — 汉化映射（最新）"
             echo ""
             echo "## 使用方法"
@@ -517,7 +513,7 @@ jobs:
             echo "2. 或下载 exe 与 \`localization.json\` 放在同一文件夹运行"
             echo "3. GitHub Desktop 每次版本更新后需重新运行一次"
             echo ""
-            echo "> ⚠️ 找不到 openssl dll 请升级到本版本；缺失 MSVCP140_ATOMIC_WAIT.dll 请安装 Microsoft Visual C++ Redistributable"
+            echo "> ⚠️ 仅支持 64 位 Windows / GitHub Desktop；找不到 openssl dll 请升级到本版本；缺失 MSVCP140_ATOMIC_WAIT.dll 请安装 Microsoft Visual C++ Redistributable"
             if [[ -f docs/ReleaseBody.md ]]; then
               echo ""
               echo "---"
@@ -527,12 +523,22 @@ jobs:
           } > release-notes.md
 
       - name: 创建 Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.version.outputs.version }}
-          name: GitHubDesktop2Chinese v${{ needs.version.outputs.version }}
-          body_path: release-notes.md
-          files: |
-            release/GitHubDesktop2Chinese.exe
-            release/GitHubDesktop2Chinese_x86.exe
-            release/localization.json
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="v${{ needs.version.outputs.version }}"
+          TITLE="GitHubDesktop2Chinese v${{ needs.version.outputs.version }}"
+          if gh release view "$VER" >/dev/null 2>&1; then
+            gh release upload "$VER" \
+              release/GitHubDesktop2Chinese.exe \
+              release/localization.json \
+              --clobber
+            gh release edit "$VER" --title "$TITLE" --notes-file release-notes.md
+          else
+            gh release create "$VER" \
+              release/GitHubDesktop2Chinese.exe \
+              release/localization.json \
+              --title "$TITLE" \
+              --notes-file release-notes.md
+          fi
