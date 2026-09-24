@@ -4,7 +4,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { fetchLatest } from './fetch.js';
 import { loadLocalization, checkInvalid } from './check-invalid.js';
-import { extractNew } from './extract-new.js';
+import { extractNew, buildDraftLine } from './extract-new.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
@@ -164,10 +164,16 @@ function renderMarkdown(report) {
     lines.push('');
     lines.push(`基于 ${patternsCount} 条映射正则，发现 ${candidates.length} 条未被覆盖的英文文案候选。`);
     lines.push('');
-    lines.push(`| 次数 | 候选文本 |`);
-    lines.push(`| --- | --- |`);
+    lines.push(`> **如何补充翻译**：将草稿中的 \`【待翻译】\` 替换为中文译文后，加入对应数组`);
+    lines.push(`> （来源含 \`main.js\` → 加入 \`main\`；来源含 \`renderer.js\` → 加入 \`renderer\`）。`);
+    lines.push(`> 草稿中的查找项已按字面量转义；无法确认用途或无需翻译（如专有名词）的候选请跳过。`);
+    lines.push('');
+    lines.push(`| 来源 | 次数 | 候选文本 | JSON 草稿 |`);
+    lines.push(`| --- | --- | --- | --- |`);
     for (const cand of candidates.slice(0, 200)) {
-      lines.push(`| ${cand.count} | ${cand.text.replace(/\|/g, '\\|')} |`);
+      const files = cand.files.join(', ');
+      const draft = `\`${buildDraftLine(cand.text).replace(/\|/g, '\\|')}\``;
+      lines.push(`| ${files} | ${cand.count} | ${cand.text.replace(/\|/g, '\\|')} | ${draft} |`);
     }
     lines.push('');
   }

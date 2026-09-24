@@ -2,12 +2,22 @@
 # 一个工作流完成：自动构建、安全与质量检查、失效检测/候选提取、Release 发布。
 #
 # 触发：
-#   - PR 涉及 GitHubDesktop2Chinese/** 变更 → 构建 + 安全质量 + 自动维护
-#   - 推送 tag ghdesktop2chinese-v* → 构建并发布 Release
-#   - 手动触发（type 选择执行子集）→ 全部功能
+#   - PR → 构建 + 安全质量（不发布）
+#   - 推送 tag v*（如 v1.2.5）→ 构建并发布 Release
+#   - 手动触发（type 选择执行子集）：
+#       auto     构建 + 质量 + 维护 + 发布（版本号自动升级）
+#       build    仅构建
+#       security 仅质量与安全扫描
+#       maintain 仅失效检测/候选提取
+#       release  构建 + 发布（版本号自动升级或手动指定）
 #
-# 说明：私有仓库 GitHub Actions 按分钟/带宽计费，因此移除定时自动运行，
-# 全部改为手动触发，避免自动消耗付费额度。
+# 版本号规则：
+#   - tag 触发：取 tag 版本（v1.2.5 → 1.2.5）
+#   - 手动输入 version：使用输入值
+#   - 未输入：自动升级补丁号（本仓库最新 v* tag 基础上 +1；无 tag 时回落上游最新版本）
+#
+# 说明：为避免自动消耗 Actions 额度，定时任务已移除，
+# 全部改为 PR 触发或手动触发。
 
 name: GitHubDesktop2Chinese
 
@@ -17,7 +27,7 @@ on:
       - "**"
   push:
     tags:
-      - "ghdesktop2chinese-v*"
+      - "v*"
   workflow_dispatch:
     inputs:
       type:
@@ -32,7 +42,7 @@ on:
           - maintain
           - release
       version:
-        description: "发布版本号（type=release 时必填，不带 v 前缀，如 1.2.4）"
+        description: "发布版本号（不带 v 前缀，如 1.2.5；留空则自动升级补丁号）"
         required: false
         type: string
 
@@ -52,13 +62,65 @@ env:
 
 jobs:
   # ─────────────────────────────────────────────
+  # 0. 解析版本号（构建与发布共用）
+  # ─────────────────────────────────────────────
+  version:
+    name: 解析版本号
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 计算版本号
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=""
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "使用 tag 版本: $VERSION"
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            INPUT='${{ github.event.inputs.version }}'
+            TYPE='${{ github.event.inputs.type }}'
+            if [[ -n "$INPUT" ]]; then
+              VERSION="${INPUT#v}"
+              echo "使用手动输入版本: $VERSION"
+            elif [[ "$TYPE" == "auto" || "$TYPE" == "release" ]]; then
+              LATEST="$(git tag -l 'v*' --sort=-v:refname | head -n1 || true)"
+              if [[ -z "$LATEST" ]]; then
+                echo "本仓库暂无 v* tag，回落上游最新版本"
+                LATEST="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+                  https://api.github.com/repos/cngege/GitHubDesktop2Chinese/releases/latest \
+                  | jq -r '.tag_name')"
+              fi
+              if [[ -z "$LATEST" || "$LATEST" == "null" ]]; then
+                echo "::error::无法确定基础版本号，请手动输入 version"
+                exit 1
+              fi
+              BASE="${LATEST#v}"
+              IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+              PATCH="${PATCH:-0}"
+              VERSION="$MAJOR.$MINOR.$((PATCH+1))"
+              echo "自动升级版本: $LATEST -> v$VERSION"
+            fi
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  # ─────────────────────────────────────────────
   # 1. 构建 x64 + x86
   # 触发：tag / PR / 手动(auto/build/release)
   # ─────────────────────────────────────────────
   build:
     name: 构建 (x64 + x86)
+    needs: version
     if: |
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/ghdesktop2chinese-v')) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       github.event_name == 'pull_request' ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'build' || inputs.type == 'release'))
     runs-on: windows-latest
@@ -67,22 +129,9 @@ jobs:
         arch: [x64, x86]
     env:
       ARCH: ${{ matrix.arch }}
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: 解析版本号
-        id: version
-        shell: pwsh
-        run: |
-          # tag 触发用 tag 版本；其他用 commit sha 短码
-          $tag = "${{ github.ref_name }}"
-          if ($tag -like "ghdesktop2chinese-v*") {
-            $version = $tag -replace '^ghdesktop2chinese-v', ''
-            Add-Content -Path $env:GITHUB_ENV -Value "RELEASE_VERSION=$version"
-            Write-Host "发布版本: $version"
-          } else {
-            Write-Host "CI 构建（非发布）"
-          }
 
       - name: Configure CMake (${{ matrix.arch }})
         shell: pwsh
@@ -138,12 +187,17 @@ jobs:
           python - <<'PY'
           import json, re, sys
 
+          sys.stdout.reconfigure(encoding="utf-8")
+
           path = "json/localization.json"
-          with open(path, encoding="utf-8") as f:
-              data = json.load(f)
+          raw = open(path, encoding="utf-8").read()
+          data = json.loads(raw)
 
           errors = []
           warnings = []
+
+          if "【待翻译】" in raw:
+              errors.append("存在未替换的草稿占位符【待翻译】，请补全译文后再提交")
 
           for key in ["version", "minversion", "main", "renderer", "main_dev", "renderer_dev"]:
               if key not in data:
@@ -218,11 +272,11 @@ jobs:
           for f in src/*.js; do node --check "$f"; done
           echo "所有源文件语法检查通过"
 
-      - name: 单元测试（提取过滤逻辑）
+      - name: 单元测试（提取过滤 + 草稿生成逻辑）
         working-directory: tools/auto-maintain
         run: |
           node --input-type=module -e "
-          import { isLikelyUiText } from './src/extract-new.js';
+          import { isLikelyUiText, buildDraftLine } from './src/extract-new.js';
           const cases = [
             ['Do not show this message again', true],
             ['into ', false],
@@ -238,7 +292,19 @@ jobs:
             if (got !== exp) { console.error('FAIL:', JSON.stringify(s), 'got', got, 'exp', exp); process.exit(1); }
             pass++;
           }
-          console.log('单元测试通过:', pass, '/', cases.length);
+          // 草稿行必须是合法 JSON，且查找项按字面量匹配
+          for (const text of ['GitHub Desktop', 'Checkout commit?', 'No usage limit']) {
+            const outer = JSON.parse('[' + buildDraftLine(text) + ']');
+            const entry = outer[0];
+            if (!Array.isArray(entry) || entry.length !== 2 || !entry.every(x => typeof x === 'string')) {
+              console.error('FAIL: draft 非法', text); process.exit(1);
+            }
+            if (!new RegExp(entry[0]).test('\"' + text + '\"')) {
+              console.error('FAIL: draft 模式匹配不到字面量', text); process.exit(1);
+            }
+            pass++;
+          }
+          console.log('单元测试通过:', pass, '项');
           "
 
   # ─────────────────────────────────────────────
@@ -302,12 +368,12 @@ jobs:
           echo "ghdesktop_version=$LATEST" >> "$GITHUB_OUTPUT"
           echo "查询到 GitHub Desktop 最新版本: $LATEST"
 
-      - name: 缓存 GitHub Desktop release zip
+      - name: 缓存 GitHub Desktop Windows 完整包
         id: cache-zip
         uses: actions/cache@v6
         with:
-          path: ${{ env.WORK_DIR }}/github-desktop.zip
-          key: ghdesktop-${{ steps.version.outputs.ghdesktop_version }}-${{ runner.os }}
+          path: ${{ env.WORK_DIR }}/github-desktop.nupkg
+          key: ghdesktop-win-${{ steps.version.outputs.ghdesktop_version }}-${{ runner.os }}
 
       - name: 运行失效检测 + 未翻译候选提取
         working-directory: tools/auto-maintain
@@ -393,45 +459,37 @@ jobs:
             }
 
   # ─────────────────────────────────────────────
-  # 6. 发布 Release（tag ghdesktop2chinese-v* 或手动 type=release）
-  # 依赖 build（需其产物），仅发布不重复构建
+  # 6. 发布 Release（tag v* 或手动 auto/release）
+  # 依赖 build（需其产物）与 version（版本号）
   # ─────────────────────────────────────────────
   release:
     name: 发布 Release
-    needs: build
+    needs: [version, build]
     if: |
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/ghdesktop2chinese-v')) ||
-      (github.event_name == 'workflow_dispatch' && inputs.type == 'release')
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'release'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
 
-      - name: 解析版本号
-        id: version
-        shell: bash
+      - name: 校验版本号
         run: |
-          if [[ "${{ github.ref_name }}" == ghdesktop2chinese-v* ]]; then
-            VER="${{ github.ref_name }}"
-            VER="${VER#ghdesktop2chinese-v}"
-          else
-            VER="${{ github.event.inputs.version }}"
-          fi
+          VER="${{ needs.version.outputs.version }}"
           if [[ -z "$VER" ]]; then
-            echo "::error::手动发布需在 workflow_dispatch 输入 version（如 1.2.4）"
+            echo "::error::版本号为空，无法发布。请检查 version 任务输出"
             exit 1
           fi
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "版本: $VER"
+          echo "发布版本: v$VER"
 
-      - name: 下载构建产物
+      - name: 下载构建产物 (x64)
         uses: actions/download-artifact@v8
         with:
           name: GitHubDesktop2Chinese-x64-${{ github.sha }}
           path: release/
 
-      - name: 下载 x86 产物
+      - name: 下载构建产物 (x86)
         uses: actions/download-artifact@v8
         with:
           name: GitHubDesktop2Chinese-x86-${{ github.sha }}
@@ -445,7 +503,7 @@ jobs:
       - name: 生成 Release 说明
         shell: bash
         run: |
-          VER="${{ steps.version.outputs.version }}"
+          VER="${{ needs.version.outputs.version }}"
           {
             echo "# GitHubDesktop2Chinese v$VER"
             echo ""
@@ -460,13 +518,19 @@ jobs:
             echo "3. GitHub Desktop 每次版本更新后需重新运行一次"
             echo ""
             echo "> ⚠️ 找不到 openssl dll 请升级到本版本；缺失 MSVCP140_ATOMIC_WAIT.dll 请安装 Microsoft Visual C++ Redistributable"
+            if [[ -f docs/ReleaseBody.md ]]; then
+              echo ""
+              echo "---"
+              echo ""
+              cat docs/ReleaseBody.md
+            fi
           } > release-notes.md
 
       - name: 创建 Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ghdesktop2chinese-v${{ steps.version.outputs.version }}
-          name: GitHubDesktop2Chinese v${{ steps.version.outputs.version }}
+          tag_name: v${{ needs.version.outputs.version }}
+          name: GitHubDesktop2Chinese v${{ needs.version.outputs.version }}
           body_path: release-notes.md
           files: |
             release/GitHubDesktop2Chinese.exe

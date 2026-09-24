@@ -65,6 +65,7 @@ export function isLikelyUiText(s) {
 
 /**
  * 提取字符串字面量（双引号、单引号）。
+ * 返回 [{ text, index }]，index 为字面量在原文中的起始位置（用于生成上下文）。
  */
 export function extractStringLiterals(jsText) {
   const out = [];
@@ -79,10 +80,29 @@ export function extractStringLiterals(jsText) {
       .replace(/\\'/g, "'")
       .replace(/\\\\/g, '\\');
     if (isLikelyUiText(t)) {
-      out.push(t);
+      out.push({ text: t, index: m.index });
     }
   }
   return out;
+}
+
+/**
+ * 转义正则元字符，使草稿中的查找项按字面量精确匹配。
+ * 仅转义候选文本中可能出现的字符（( ) { } \ _ 等已被 isLikelyUiText 过滤）。
+ */
+export function escapeRegex(s) {
+  return s.replace(/([.+*?[\]^$|])/g, '\\$1');
+}
+
+/**
+ * 将候选文本转为可直接粘贴进 localization.json 的条目草稿：
+ *   ["\"查找文本\"","\"【待翻译】\""]
+ * 其中查找文本按字面量转义，译文占位符需人工替换。
+ */
+export function buildDraftLine(text) {
+  const pattern = '"' + escapeRegex(text) + '"';
+  const translation = '"【待翻译】"';
+  return `[${JSON.stringify(pattern)},${JSON.stringify(translation)}]`;
 }
 
 /**
@@ -156,22 +176,33 @@ export function isCoveredByPatterns(candidate, patterns) {
 
 /**
  * 主流程：提取未翻译候选。
- * 返回 { candidates: [{ text, count }], patternsCount }
+ * 返回 { candidates: [{ text, count, files }], patternsCount }
+ * files 为该候选出现的源文件列表（main.js / renderer.js），
+ * 决定条目应加入 main 还是 renderer 数组。
  */
 export function extractNew(localization, mainJsText, rendererJsText) {
   const patterns = collectPatterns(localization);
 
-  const countMap = new Map();
-  for (const jsText of [mainJsText, rendererJsText]) {
-    for (const lit of extractStringLiterals(jsText)) {
-      countMap.set(lit, (countMap.get(lit) ?? 0) + 1);
+  const statsMap = new Map();
+  for (const [file, jsText] of [
+    ['main.js', mainJsText],
+    ['renderer.js', rendererJsText],
+  ]) {
+    for (const { text } of extractStringLiterals(jsText)) {
+      let stat = statsMap.get(text);
+      if (!stat) {
+        stat = { count: 0, files: new Set() };
+        statsMap.set(text, stat);
+      }
+      stat.count++;
+      stat.files.add(file);
     }
   }
 
   const candidates = [];
-  for (const [text, count] of countMap) {
+  for (const [text, stat] of statsMap) {
     if (isCoveredByPatterns(text, patterns)) continue;
-    candidates.push({ text, count });
+    candidates.push({ text, count: stat.count, files: [...stat.files] });
   }
 
   // 按出现次数降序，再按长度升序

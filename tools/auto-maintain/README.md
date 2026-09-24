@@ -2,8 +2,8 @@
 
 自动维护 GitHubDesktop2Chinese 的 `json/localization.json`：
 
-1. **失效检测** (`check`)：下载最新 GitHub Desktop，对现有映射逐条检测是否能匹配到 `main.js` / `renderer.js`，找出失效（匹配不到）的映射项。
-2. **未翻译候选提取** (`extract`)：从最新 GitHub Desktop 中提取尚未被现有映射覆盖的英文 UI 文案候选。
+1. **失效检测** (`check`)：获取最新 GitHub Desktop（Windows 版），对现有映射逐条检测是否能匹配到 `main.js` / `renderer.js`，找出失效（匹配不到）的映射项。
+2. **未翻译候选提取** (`extract`)：从最新 GitHub Desktop 中提取尚未被现有映射覆盖的英文 UI 文案候选，并生成可直接粘贴的 JSON 条目草稿。
 
 > 该工具**只产出报告，不直接修改** `localization.json`。所有改动仍需人工确认，避免正则写坏导致 GitHub Desktop 无法打开。
 
@@ -29,7 +29,7 @@ node src/index.js check extract --write-report
 # 指定映射文件路径
 node src/index.js check --json /path/to/localization.json
 
-# 本地调试：复用已有的 main.js/renderer.js（跳过 328MB 下载）
+# 本地调试：复用已有的 main.js/renderer.js（跳过约 307MB 下载）
 node src/index.js check extract --workdir /tmp/ghdesktop-auto-maintain --keep-js
 ```
 
@@ -49,8 +49,11 @@ node src/index.js check extract --workdir /tmp/ghdesktop-auto-maintain --keep-js
 
 ### 数据源
 
-从 `desktop/desktop` 的最新 release 下载 `GitHub.Desktop-x64.zip`（约 328MB）。
-zip 内含 `GitHub Desktop.app/Contents/Resources/app/{main.js,renderer.js}`，即打包前（未 asar 压缩）的 Electron 资源，可直接读取。
+从 `desktop/desktop` 的最新 release 下载 `GitHubDesktop-<版本>-x64-full.nupkg`（约 307MB，Windows 版 Squirrel 完整包，本质为 zip）。
+包内含 `lib/net45/resources/app/{main.js,renderer.js}`，即打包前（未 asar 压缩）的 Electron 资源，可直接读取。
+
+> ⚠️ **不要改用 macOS 的 `GitHub.Desktop-x64.zip`**：两个平台的应用文案不同（Windows 菜单带 `&` 访问键、路径相关文案为 Explorer/Command Prompt 等），
+> 用 macOS 包会产生大量假失效（实测 1006 条映射中约 239 条误报）。本项目的汉化目标是 Windows 版。
 
 ### 失效检测
 
@@ -66,20 +69,21 @@ zip 内含 `GitHub Desktop.app/Contents/Resources/app/{main.js,renderer.js}`，�
 1. 从 `main.js`/`renderer.js` 提取双引号/单引号字符串字面量
 2. `isLikelyUiText()` 过滤明显非 UI 文案（内部库消息、URL、路径、错误信息、颜色、正则、模板串、拼接碎片等）
 3. 用现有映射的所有正则（含 `select` 的 `replace` 项）做覆盖检测，被任一正则匹配到的视为"已翻译"并排除
-4. 剩余候选按出现次数排序输出
+4. 剩余候选按出现次数排序输出，并标注来源文件（`main.js` / `renderer.js`）
+5. 报告中为每个候选生成 JSON 草稿（查找项按字面量转义），人工将 `【待翻译】` 替换为译文后加入对应数组
 
-> 提取是启发式的，会包含少量噪音（如库内部提示语）。候选用于辅助维护，不代表一定需要翻译。
+> 提取是启发式的，会包含少量噪音（如库内部提示语）。候选用于辅助维护，不代表一定需要翻译（专有名词可跳过）。
 
 ## CI 自动维护
 
-工作流位于 `../../.github/workflows/ghdesktop2chinese-auto-maintain.yml`（仓库根目录）：
+工作流位于 `../../.github/workflows/ghdesktop2chinese.yml`（仓库根目录）：
 
-- **触发**：每天 04:00 UTC 定时；手动 `workflow_dispatch`；或推送变更 `localization.json` / 本工具代码时
-- **流程**：查询最新版本 → 缓存 zip（key 绑定版本号）→ 跑 `check extract` → 生成报告 → 创建/更新 `[自动维护]` 标签的 Issue
+- **触发**：手动 `workflow_dispatch` 选择 `type=auto` 或 `type=maintain`（为避免消耗 Actions 额度，已取消定时触发）
+- **流程**：查询最新版本 → 缓存 nupkg（key 绑定版本号）→ 跑 `check extract` → 生成报告 → 创建/更新 `auto-maintain` 标签的 Issue
 - **自动关 Issue**：当失效项降为 0 时，自动关闭历史维护 Issue
 - **不自动合并**：所有映射改动仍需人工确认，避免破坏 GitHub Desktop
 
-> ⚠️ zip 缓存 key 绑定 GitHub Desktop 版本号，发新版后自动失效并重新下载。
+> ⚠️ nupkg 缓存 key 绑定 GitHub Desktop 版本号与平台标识（`ghdesktop-win-<版本>`），发新版或切换平台后自动失效并重新下载。
 
 ## 目录结构
 

@@ -6,7 +6,11 @@ import { Readable } from 'node:stream';
 
 const GITHUB_DESKTOP_REPO = 'desktop/desktop';
 const API_BASE = 'https://api.github.com';
-const ASSET_PATTERN = /^GitHub\.Desktop-(x64|arm64)\.zip$/;
+// Windows 版 Squirrel 完整包（本质为 zip，内含 lib/net45/resources/app/{main,renderer}.js）。
+// 注意：不能使用 macOS 的 GitHub.Desktop-x64.zip —— 两个平台的应用文案不同
+// （Windows 菜单带 & 访问键、路径相关文案为 Explorer/Command Prompt 等），
+// 使用 macOS 包会产生大量假失效。
+const ASSET_PATTERN = /^GitHubDesktop-[\d.]+-x64-full\.nupkg$/;
 
 /**
  * 获取最新 GitHub Desktop 的 release 信息
@@ -22,16 +26,15 @@ export async function getLatestRelease() {
   const data = await res.json();
   const tag = data.tag_name; // 形如 release-3.6.6
   const version = tag.replace(/^release-/, '');
-  const asset = data.assets.find((a) => ASSET_PATTERN.test(a.name) && a.name.includes('x64'))
-    ?? data.assets.find((a) => ASSET_PATTERN.test(a.name));
+  const asset = data.assets.find((a) => ASSET_PATTERN.test(a.name));
   if (!asset) {
-    throw new Error(`未在 release ${tag} 中找到 ${ASSET_PATTERN} 资产`);
+    throw new Error(`未在 release ${tag} 中找到 Windows 完整包 ${ASSET_PATTERN}`);
   }
   return { tag, version, assetName: asset.name, zipUrl: asset.browser_download_url, zipSize: asset.size };
 }
 
 /**
- * 快速校验 zip 完整性：检查 EOCD 签名 (PK\x05\x06) 是否出现在文件末尾。
+ * 快速校验 zip/nupkg 完整性：检查 EOCD 签名 (PK\x05\x06) 是否出现在文件末尾。
  */
 export function isZipComplete(zipPath) {
   try {
@@ -51,11 +54,11 @@ export function isZipComplete(zipPath) {
 }
 
 /**
- * 下载 release zip（支持断点续传），返回 zip 路径
+ * 下载 release nupkg（支持断点续传），返回文件路径
  */
 export async function downloadZip(url, destDir) {
   fs.mkdirSync(destDir, { recursive: true });
-  const zipPath = path.join(destDir, 'github-desktop.zip');
+  const zipPath = path.join(destDir, 'github-desktop.nupkg');
   const tmpPath = zipPath + '.part';
 
   // 已经完整下载且校验通过则跳过
@@ -86,7 +89,7 @@ export async function downloadZip(url, destDir) {
     // 可能是不完整的分块下载（EOF 未达）。若这是续传结果，保留 .part 以便下次续传；
     // 但若已有完整 zip，则删掉损坏的 .part 避免污染。
     if (!fs.existsSync(zipPath)) {
-      throw new Error('下载的 zip 不完整（缺少 EOCD 记录）');
+      throw new Error('下载的 nupkg 不完整（缺少 EOCD 记录）');
     }
   }
   fs.renameSync(tmpPath, zipPath);
@@ -94,8 +97,8 @@ export async function downloadZip(url, destDir) {
 }
 
 /**
- * 解压 zip，提取 main.js 和 renderer.js
- * zip 内含 "GitHub Desktop.app/Contents/Resources/app/{main,renderer}.js"
+ * 解压 nupkg，提取 main.js 和 renderer.js
+ * nupkg 内含 "lib/net45/resources/app/{main,renderer}.js"
  * 返回 { mainJsPath, rendererJsPath, appDir }
  */
 export function extractJs(zipPath, workDir) {
