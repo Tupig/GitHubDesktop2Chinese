@@ -11,4 +11,6 @@ CTestTestfile.cmake
 _deps
 /.vs
 /out
-/openssl-proj/lib
+/build
+/build32
+# 注意：third_party/openssl/lib 下的预编译库随仓库提交，不忽略

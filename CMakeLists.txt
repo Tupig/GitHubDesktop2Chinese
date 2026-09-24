@@ -45,13 +45,10 @@ endif()
 
 project ("GitHubDesktop2Chinese")
 
-include(FetchContent)
-
-include_directories(include)
-include_directories(Utils)
+include_directories(src)
+include_directories(third_party/include)
 
 if(DEFINED GitHubActions)
-    set(CLI11_URL https://github.com/CLIUtils/CLI11.git)
     if(DEFINED CURRENT_PLATFORM_ISX64)
         set(LIBSSL_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libssl.lib)
         set(CRYPTO_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libcrypto.lib)
@@ -60,7 +57,6 @@ if(DEFINED GitHubActions)
         set(CRYPTO_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libcrypto_x86.lib)
     endif()
 else()
-    set(CLI11_URL https://kkgithub.com/CLIUtils/CLI11.git)
     if(DEFINED CURRENT_PLATFORM_ISX64)
         set(LIBSSL_URL https://www.ghproxy.cc/https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libssl.lib)
         set(CRYPTO_URL https://www.ghproxy.cc/https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libcrypto.lib)
@@ -78,12 +74,12 @@ endif()
 SET(DOWNLOAD_OPENSSL_TIMEOUT 300 CACHE STRING "Timeout in seconds when downloading openssl_lib.")
 FIND_FILE(LOCAL_OPENSSL_LIBRARIES_PATH
     NAMES ""
-    HINTS "openssl-proj/lib"
+    HINTS "third_party/openssl/lib"
     NO_DEFAULT_PATH)
-if(NOT EXISTS "openssl-proj/lib")
-    file(MAKE_DIRECTORY "openssl-proj/lib")
-    SET(LOCAL_OPENSSL_LIBRARIES_PATH "openssl-proj/lib")
-    MESSAGE(STATUS "Folder “openssl-proj/lib” created successfully.")
+if(NOT EXISTS "third_party/openssl/lib")
+    file(MAKE_DIRECTORY "third_party/openssl/lib")
+    SET(LOCAL_OPENSSL_LIBRARIES_PATH "third_party/openssl/lib")
+    MESSAGE(STATUS "Folder “third_party/openssl/lib” created successfully.")
 endif()
 
 # /////////////////////////////////////ssl库lib名称////////////////////////////////////////////////
@@ -99,7 +95,7 @@ MESSAGE(STATUS "Checking ${OPENSSL_SSL_NAME}...")
 # 判断库文件是否已经存在
 FIND_FILE(LOCAL_OPENSSL_SSL_LIB
     NAMES ${OPENSSL_SSL_NAME}
-    HINTS "${PROJECT_SOURCE_DIR}/openssl-proj/lib"
+    HINTS "${PROJECT_SOURCE_DIR}/third_party/openssl/lib"
     #NO_CACHE
     NO_DEFAULT_PATH)
 MESSAGE(STATUS "Checking url link ${LIBSSL_URL} ...")
@@ -144,7 +140,7 @@ MESSAGE(STATUS "Checking ${OPENSSL_CRYPTO_NAME}...")
 # 判断库文件是否已经存在
 FIND_FILE(LOCAL_OPENSSL_CRYPTO_LIB
     NAMES ${OPENSSL_CRYPTO_NAME}
-    HINTS "${PROJECT_SOURCE_DIR}/openssl-proj/lib"
+    HINTS "${PROJECT_SOURCE_DIR}/third_party/openssl/lib"
     #NO_CACHE
     NO_DEFAULT_PATH)
 MESSAGE(STATUS "Checking url link ${CRYPTO_URL} ...")
@@ -177,27 +173,18 @@ IF(LOCAL_OPENSSL_CRYPTO_LIB)
 ENDIF()
 
 # 包含 openssl 的头文件
-include_directories(openssl-proj/include)
+include_directories(third_party/openssl/include)
 
 # 将源代码添加到此项目的可执行文件。
-add_executable (GitHubDesktop2Chinese "GitHubDesktop2Chinese.cpp")
+add_executable (GitHubDesktop2Chinese "src/GitHubDesktop2Chinese.cpp")
 
 
 # 链接OpenSSL库  
 target_link_libraries(GitHubDesktop2Chinese PRIVATE
-    ${CMAKE_SOURCE_DIR}/openssl-proj/lib/${OPENSSL_SSL_NAME}
-    ${CMAKE_SOURCE_DIR}/openssl-proj/lib/${OPENSSL_CRYPTO_NAME})
-  
+    ${CMAKE_SOURCE_DIR}/third_party/openssl/lib/${OPENSSL_SSL_NAME}
+    ${CMAKE_SOURCE_DIR}/third_party/openssl/lib/${OPENSSL_CRYPTO_NAME})
 
-    # 动态引入链接 CLI参数管理器库
-FetchContent_Declare(
-    cli11_proj
-    QUIET
-    GIT_REPOSITORY ${CLI11_URL}
-    GIT_TAG v2.4.1
-)
-FetchContent_MakeAvailable(cli11_proj)
-target_link_libraries(GitHubDesktop2Chinese PRIVATE CLI11::CLI11)
+# CLI11 已内置到 third_party/include/CLI（header-only，无需额外链接）
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET GitHubDesktop2Chinese PROPERTY CXX_STANDARD 20)

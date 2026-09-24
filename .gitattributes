@@ -4,6 +4,13 @@
 * text=auto
 
 ###############################################################################
+# 预编译库按二进制处理，避免换行转换损坏
+###############################################################################
+*.lib binary
+*.dll binary
+*.exe binary
+
+###############################################################################
 # Set default behavior for command prompt diff.
 #
 # This is need for earlier builds of msysgit that does not have it on by
