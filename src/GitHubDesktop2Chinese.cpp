@@ -9,6 +9,7 @@
 
 #include "GitHubDesktop2Chinese.h"
 #include <string>
+#include <vector>
 #include <filesystem>
 
 #include <regex>
@@ -88,8 +89,8 @@ BOOL WINAPI ConsoleHandler(DWORD dwCtrlType) {
 }
 
 
-// argv[0] 是程序路径
-int main(int argc, char* argv[])
+// wmain: 使用宽字符命令行, 避免非UTF-8代码页(如中文GBK)下参数在CLI11内部转换时崩溃
+int wmain(int argc, wchar_t* wargv[])
 {
     // 设置控制台的输入 输出编码：
     SetConsoleOutputCP(CP_UTF8);
@@ -102,6 +103,19 @@ int main(int argc, char* argv[])
         SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
     }
 
+    // 自身可执行文件路径(宽字符, 非ASCII安装目录下无损)
+    fs::path self_path(wargv[0]);
+    // 宽字符命令行 -> UTF-8 供CLI11解析; 转换完成前不修改wargv, 转换后字符串不再变动以保证char*稳定
+    std::vector<std::string> utf8_args;
+    std::vector<char*> argv;
+    utf8_args.reserve(argc);
+    argv.reserve(argc);
+    for(int i = 0; i < argc; i++) {
+        utf8_args.push_back(utils::to_byte_string(wargv[i]));
+    }
+    for(auto& arg : utf8_args) {
+        argv.push_back(arg.data());
+    }
 
     FileVer = std::Version(FILEVERSION);
     // 设置控制台打印日志输出等级
@@ -173,11 +187,22 @@ int main(int argc, char* argv[])
         });
 
 
-        CLI11_PARSE(app, argc, argv);
+        try {
+            CLI11_PARSE(app, argc, argv.data());
+        }
+        catch(const std::exception& e) {
+            // CLI11 内部仅捕获其自身异常, 命令行含非法编码等仍可能抛出其他异常, 此处兜底避免进程直接崩溃
+            spdlog::error("命令行参数解析失败: {}", e.what());
+            return 2;
+        }
+        catch(...) {
+            spdlog::error("命令行参数解析失败: 发生未知异常");
+            return 3;
+        }
     }
     if(GetKeyState(VK_SHIFT) & 0x8000 || _debug_goto_devoptions) {
         // 如果Shift按下, 则进入开发者选项
-        SetConsoleTitle("开发者模式");
+        SetConsoleTitleW(L"开发者模式");
         spdlog::info("您已进入开发者模式");
         DeveloperOptions();
     }
@@ -308,7 +333,7 @@ int main(int argc, char* argv[])
                                     std::regex url_regex(R"(^((?:https?://)[^/]+)(/.*)?$)");
                                     std::smatch matches;
                                     if(std::regex_match(downlink, matches, url_regex)) {
-                                        auto result = utils::UpdateProgram(matches[1].str(), matches[2].str(), fs::path(argv[0]), max_size, proxy);
+                                        auto result = utils::UpdateProgram(matches[1].str(), matches[2].str(), self_path, max_size, proxy);
                                         if(!result) {
                                             spdlog::error("失败 更新过程出现异常");
                                         }
@@ -438,7 +463,7 @@ int main(int argc, char* argv[])
         {
             spdlog::warn("注册表中未发现GitHubDesktop相关条目, Reg ErrorMessage: {}" ,utils::to_byte_string(result.ErrorMessage()));
             spdlog::warn("你可能没有安装GithubDesktop，请先安装然后打开此程序或者手动指定main.js所在的文件夹目录");
-            Base = LoopGetBasePath();
+            Base = utils::to_path(LoopGetBasePath());
         }
         else {
             try
@@ -472,12 +497,12 @@ int main(int argc, char* argv[])
                 spdlog::info("已从注册表中读取本地GitHubDesktop信息:");
                 spdlog::info("本地GitHubDesktop版本: {}", desktop_local_ver_str);
                 spdlog::info("安装目录: {}", utils::to_byte_string(path));
-                spdlog::info("最后拼接完整目录: {}", Base.string());
+                spdlog::info("最后拼接完整目录: {}", utils::to_byte_string(Base.wstring()));
 
 
                 if (!fs::exists(Base)) {
                     spdlog::warn("注册表最终获取到的目录不存在,请手动指定main.js所在的文件夹目录");
-                    Base = LoopGetBasePath();
+                    Base = utils::to_path(LoopGetBasePath());
                 }
 
             }
@@ -961,11 +986,12 @@ int main(int argc, char* argv[])
 
 bool GetBasePath(std::string& out) {
     getline(std::cin, out);
-    if (!fs::exists(out)) {
+    // 控制台输入为UTF-8, 直接按窄字符串构造路径会被错误地按ANSI代码页解释
+    fs::path base = utils::to_path(out);
+    if (!fs::exists(base)) {
         spdlog::warn("你输入的目录不存在. ");
         return false;
     }
-    fs::path base = out;
     fs::path mainjs = "main.js";
     fs::path mainjsbak = "main.js.bak";
     if (!fs::exists(base / mainjs)) {

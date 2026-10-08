@@ -145,6 +145,29 @@ public:
         return converter.to_bytes(input);
     }
 
+    // 窄字符串 -> 路径: 优先按UTF-8解码(控制台输入已设为UTF-8), 非法UTF-8时回退为系统ANSI代码页
+    static inline fs::path to_path(const std::string& input) {
+        if(input.empty()) return {};
+        int wlen = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, input.data(), static_cast<int>(input.size()), nullptr, 0);
+        if(wlen > 0) {
+            std::wstring w(wlen, L'\0');
+            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, input.data(), static_cast<int>(input.size()), w.data(), wlen);
+            return fs::path(std::move(w));
+        }
+        wlen = MultiByteToWideChar(CP_ACP, 0, input.data(), static_cast<int>(input.size()), nullptr, 0);
+        if(wlen > 0) {
+            std::wstring w(wlen, L'\0');
+            MultiByteToWideChar(CP_ACP, 0, input.data(), static_cast<int>(input.size()), w.data(), wlen);
+            return fs::path(std::move(w));
+        }
+        return fs::path(input);
+    }
+
+    // 配置TLS: 启用服务器证书校验, httplib未指定CA文件时会自动加载Windows系统根证书存储作为信任锚
+    static void SetupTlsVerification(httplib::Client& cli) {
+        cli.enable_server_certificate_verification(true);
+    }
+
     static auto ReadFile(const std::string& filename)->std::string {
         std::ifstream fin(filename, std::ios::binary);
         //std::stringstream buffer{};
@@ -178,7 +201,7 @@ public:
         if(proxy.second) {
             cli.set_proxy(proxy.first, proxy.second);
         }
-        cli.enable_server_certificate_verification(false);
+        SetupTlsVerification(cli);
         cli.set_follow_location(true);                          //https://raw.github.com 会要求301重定向
         auto res = cli.Get(params);
         if(!res) {
@@ -192,9 +215,11 @@ public:
                 out = res->body;
                 return true;
             }
+            spdlog::warn("请求 {}{} 返回状态码 {}", url_host, params, res->status);
             return false;
         }
         else {
+            spdlog::warn("请求 {}{} 失败: {}", url_host, params, httplib::to_string(res.error()));
             return false;
         }
     }
@@ -238,7 +263,7 @@ public:
             if(proxy.second) {
                 cli.set_proxy(proxy.first, proxy.second);
             }
-            cli.enable_server_certificate_verification(false);
+            SetupTlsVerification(cli);
             cli.set_follow_location(true);                          //https://raw.github.com 会要求301重定向
             httplib::Headers headers;
             if(downloaded_bytes > 0) {
@@ -297,24 +322,21 @@ public:
         
         spdlog::info("下载完成, 请稍等, 随后自动完成并(无参)重启..");
         // 完成后创建进程
-        // 构建参数
-        std::string p = "/c \"ping 127.0.0.1 -n 6 > nul & move /Y ";
-        p += tmp_file.filename().string();
-        p += " ";
-        p += exe_name.string();
-        p += " & start ";
-        p += exe_name.string();
-        p += "\"";
-        // 使用宽字符版本，避免中文路径导致更新替换失败
-        std::wstring wcmd = to_wide_string(p);
-        std::wstring wdir = to_wide_string(parent_dir.string());
+        // 构建参数(全程宽字符, 避免中文目录/文件名下编码错误导致更新替换失败)
+        std::wstring p = L"/c \"ping 127.0.0.1 -n 6 > nul & move /Y ";
+        p += tmp_file.filename().wstring();
+        p += L" ";
+        p += exe_name.wstring();
+        p += L" & start ";
+        p += exe_name.wstring();
+        p += L"\"";
         ShellExecuteW(
-            NULL,                   // 父窗口句柄
-            L"open",                // 操作
-            L"cmd.exe",             // 应用程序
-            wcmd.c_str(),           // 参数
-            wdir.c_str(),           // 工作目录
-            SW_SHOW);               // 显示方式
+            NULL,                       // 父窗口句柄
+            L"open",                    // 操作
+            L"cmd.exe",                 // 应用程序
+            p.c_str(),                  // 参数
+            parent_dir.wstring().c_str(),// 工作目录
+            SW_SHOW);                   // 显示方式
 
         return true;
     }
