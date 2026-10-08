@@ -96,14 +96,33 @@ export async function downloadZip(url, destDir) {
   // 支持 Range 续传
   const headers = { 'User-Agent': 'githubdesktop2chinese-auto-maintain' };
   let hasPartial = false;
+  let partialSize = 0;
   if (fs.existsSync(tmpPath)) {
     const size = fs.statSync(tmpPath).size;
     if (size > 0) {
       headers.Range = `bytes=${size}-`;
       hasPartial = true;
+      partialSize = size;
     }
   }
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+
+  // 服务器返回的断点位置与请求不符(部分代理/CDN 会改写 Range): 追加写入必然损坏文件,
+  // 重置断点后抛出, 由上层重试从头下载
+  if (res.status === 206 && hasPartial) {
+    const cr = res.headers.get('content-range'); // 形如 "bytes 1234-5678/9012"
+    const m = cr && /^bytes (\d+)-/.exec(cr);
+    if (m && Number(m[1]) !== partialSize) {
+      fs.rmSync(tmpPath, { force: true });
+      throw new Error(`服务器返回的断点位置与请求不符(Content-Range: ${cr}), 已重置断点文件, 重试将从头下载`);
+    }
+  }
+  // 416: 断点尺寸已达到服务器认为的完整大小, 但本地并非完整 zip(极端残留)。
+  // 必须删除断点, 否则每次运行都会因同一断点反复 416 卡死, 永远无法自愈
+  if (res.status === 416 && hasPartial) {
+    fs.rmSync(tmpPath, { force: true });
+    throw new Error('断点文件与服务器不匹配(HTTP 416), 已删除断点文件, 重试将从头下载');
+  }
   if (res.status !== 200 && res.status !== 206) {
     throw new Error(`下载 GitHub Desktop 失败: HTTP ${res.status}`);
   }
