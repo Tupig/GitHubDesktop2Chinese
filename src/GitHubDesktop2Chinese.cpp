@@ -232,7 +232,7 @@ int main(int argc, char* argv[])
         }
     }
     if(proxy.second) {
-        spdlog::info("检测到已开启代理:，{}:{}", proxy.first, proxy.second);
+        spdlog::info("检测到已开启代理: {}:{}", proxy.first, proxy.second);
     }
 
 
@@ -351,8 +351,15 @@ int main(int argc, char* argv[])
         spdlog::info("尝试从远程仓库中获取");
         std::string httpjson;
         if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/Tupig/GitHubDesktop2Chinese/main/json/localization.json", httpjson, proxy)) {
-            localization = json::parse(httpjson);
-            spdlog::info("远程读取成功");
+            try {
+                localization = json::parse(httpjson);
+                spdlog::info("远程读取成功");
+            }
+            catch(const std::exception& e) {
+                spdlog::error("远程映射文件解析失败: {}", e.what());
+                PAUSE
+                return 1;
+            }
         }
         else {
             spdlog::warn("远程获取失败,请检查网络和代理,并稍后再试");
@@ -369,8 +376,15 @@ int main(int argc, char* argv[])
             spdlog::info("尝试从远程仓库中获取");
             std::string httpjson;
             if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/Tupig/GitHubDesktop2Chinese/main/json/localization.json", httpjson, proxy)) {
-                localization = json::parse(httpjson);
-                spdlog::info("远程读取成功");
+                try {
+                    localization = json::parse(httpjson);
+                    spdlog::info("远程读取成功");
+                }
+                catch(const std::exception& e) {
+                    spdlog::error("远程映射文件解析失败: {}", e.what());
+                    PAUSE
+                    return 1;
+                }
             }
             else {
                 spdlog::warn("远程获取失败 - 请{}重试", !proxy.second ? "尝试开启代理或":"");
@@ -384,6 +398,8 @@ int main(int argc, char* argv[])
             std::ifstream config(LocalizationJSON);
             if (!config) {
                 spdlog::error("localization.json 打开失败,无法读取");
+                PAUSE
+                return 1;
             }
             try
             {
@@ -396,6 +412,13 @@ int main(int argc, char* argv[])
                 return 1;
             }
         }
+    }
+
+    // 映射文件顶层必须为 JSON 对象, 否则后续下标访问是未定义行为
+    if(!localization.is_object()) {
+        spdlog::error("映射文件格式无效, 顶层必须为 JSON 对象");
+        PAUSE
+        return 1;
     }
 
     // 读取映射文件中的提示信息
@@ -438,13 +461,18 @@ int main(int argc, char* argv[])
 
                 spdlog::info("正在读取GitHubDesktop最新版...");
                 std::string httpjson_str;
-                json httpjson;
                 if(utils::ReadHttpDataString("https://central.github.com", "/deployments/desktop/desktop/changelog.json", httpjson_str, proxy)) {
-                    httpjson = json::parse(httpjson_str);
-                    std::string v = httpjson[0]["version"].get<std::string>();
-                    std::Version desktop_remote_ver(v.c_str());
-                    std::Version desktop_local_ver(desktop_local_ver_str.c_str());
-                    spdlog::info("已读取到远程GitHubDesktop最新版:{} {}", v, desktop_remote_ver > desktop_local_ver ? "(\033[1;33m需更新\033[0m)" : "");
+                    // 远程信息仅用于提示, 解析失败不应中断主流程
+                    try {
+                        auto httpjson = json::parse(httpjson_str);
+                        std::string v = httpjson.at(0).at("version").get<std::string>();
+                        std::Version desktop_remote_ver(v.c_str());
+                        std::Version desktop_local_ver(desktop_local_ver_str.c_str());
+                        spdlog::info("已读取到远程GitHubDesktop最新版:{} {}", v, desktop_remote_ver > desktop_local_ver ? "(\033[1;33m需更新\033[0m)" : "");
+                    }
+                    catch(const std::exception& e) {
+                        spdlog::warn("远程GitHubDesktop版本信息解析失败: {}", e.what());
+                    }
                 }else{
                     spdlog::warn("远程GitHubDesktop版本读取失败.");
                 }
@@ -470,6 +498,12 @@ int main(int argc, char* argv[])
             }
             catch(const std::runtime_error& err) {
                 spdlog::error("runtime_error {} at line: {}", err.what(), __LINE__);
+                PAUSE
+                return 1;
+            }
+            catch(const std::exception& e) {
+                // 兜底: 避免 std::filesystem 等异常未捕获导致进程终止
+                spdlog::error("读取GitHubDesktop安装信息时出现错误 {} at line: {}", e.what(), __LINE__);
                 PAUSE
                 return 1;
             }
@@ -544,10 +578,19 @@ int main(int argc, char* argv[])
     }
 
     // 判断版本
-    if(FileVer.status != std::Version::Dev && !localization["minversion"].empty()) {
-        std::Version JsonVer(localization["minversion"].get<std::string>().c_str());
+    std::string minver_str;
+    if(localization.contains("minversion")) {
+        if(localization["minversion"].is_string()) {
+            minver_str = localization["minversion"].get<std::string>();
+        }
+        else {
+            spdlog::warn("映射文件中 minversion 不是字符串, 已忽略");
+        }
+    }
+    if(FileVer.status != std::Version::Dev && !minver_str.empty()) {
+        std::Version JsonVer(minver_str.c_str());
         if(!JsonVer) {
-            spdlog::warn("映射文件中 minversion 解析失败... at {}", localization["minversion"].get<std::string>().c_str());
+            spdlog::warn("映射文件中 minversion 解析失败... at {}", minver_str);
             PAUSE
         }
         else {
@@ -605,7 +648,7 @@ int main(int argc, char* argv[])
                         std::regex pattern3(item.value()[2].get<std::string>());
                         found = std::regex_search(main_str, pattern3);
                         if(!found) {
-                            spdlog::warn("[renderer] 检测到失效项: {}", item.value()[2].get<std::string>());
+                            spdlog::warn("[main] 检测到失效项: {}", item.value()[2].get<std::string>());
                             ret_num++;
                         }
                     }
@@ -723,7 +766,8 @@ int main(int argc, char* argv[])
         catch(std::regex_error& re) {
             spdlog::error("处理main.js时匹配正则表达式时出现错误 code:{}, message:{}, LINE: {}", re.code(), re.what(), __LINE__);
         }
-        catch(std::runtime_error& e) {
+        catch(const std::exception& e) {
+            // 覆盖 runtime_error 及 json 类型异常等, 避免未捕获导致进程终止
             spdlog::error("处理main.js时出现错误 message:{}, LINE: {}", e.what(), __LINE__);
         }
 
@@ -882,7 +926,8 @@ int main(int argc, char* argv[])
         catch(std::regex_error& re) {
             spdlog::error("处理renderer.js时匹配正则表达式时出现错误 code:{}, message:{}, LINE: {}", re.code(), re.what(), __LINE__);
         }
-        catch(std::runtime_error& e) {
+        catch(const std::exception& e) {
+            // 覆盖 runtime_error 及 json 类型异常等, 避免未捕获导致进程终止
             spdlog::error("处理renderer.js时出现错误 message:{}, LINE: {}", e.what(), __LINE__);
         }
 

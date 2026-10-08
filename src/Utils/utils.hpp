@@ -218,6 +218,14 @@ public:
             downloaded_bytes = fs::file_size(tmp_file);
         }
 
+        // 临时文件超过预期大小(异常残留)时丢弃, 重新完整下载
+        if(max_size > 0 && downloaded_bytes > static_cast<uint64_t>(max_size)) {
+            spdlog::warn("临时文件大小异常, 将重新下载");
+            std::error_code ec;
+            fs::remove(tmp_file, ec);
+            downloaded_bytes = 0;
+        }
+
         if(downloaded_bytes < max_size) {
             // 以 二进制追加模式 打开文件（断点续传关键）
             std::ofstream downfile(tmp_file, std::ios::binary | std::ios::out | std::ios::app);
@@ -275,6 +283,15 @@ public:
                 spdlog::error("更新错误, 服务器返回错误的状态码: {}", res->status);
                 return false;
             }
+        }
+
+        // 校验下载结果大小, 防止不完整的文件被替换进程序目录
+        if(max_size > 0 && (!fs::exists(tmp_file) || fs::file_size(tmp_file) != static_cast<uint64_t>(max_size))) {
+            spdlog::error("下载文件大小校验失败({} 应为 {}), 已删除临时文件, 请重新运行重试",
+                          fs::exists(tmp_file) ? (int64_t)fs::file_size(tmp_file) : (int64_t)-1, max_size);
+            std::error_code ec;
+            fs::remove(tmp_file, ec);
+            return false;
         }
 
         
