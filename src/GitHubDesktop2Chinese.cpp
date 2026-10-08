@@ -329,6 +329,8 @@ int wmain(int argc, wchar_t* wargv[])
                                 std::string downlink = asset->at("url").get<std::string>();
                                 int download_count = asset->at("download_count").get<int>();
                                 size_t max_size = asset->at("size").get<int64_t>();
+                                // 发布资产声明的 SHA256 摘要(形如 sha256:<hex>), 用于下载后完整性校验
+                                std::string asset_digest = asset->value("digest", std::string());
                                 spdlog::info("下载链接({}次下载): {}", download_count, browser_download_url);
                                 spdlog::info("是否自动更新:");
                                 bool autoupdate = utils::ReadUserInput_bool({ "n", "y" }, 0);
@@ -338,7 +340,7 @@ int wmain(int argc, wchar_t* wargv[])
                                     std::regex url_regex(R"(^((?:https?://)[^/]+)(/.*)?$)");
                                     std::smatch matches;
                                     if(std::regex_match(downlink, matches, url_regex)) {
-                                        auto result = utils::UpdateProgram(matches[1].str(), matches[2].str(), self_path, max_size, proxy);
+                                        auto result = utils::UpdateProgram(matches[1].str(), matches[2].str(), self_path, max_size, proxy, asset_digest);
                                         if(!result) {
                                             spdlog::error("失败 更新过程出现异常");
                                         }
@@ -551,29 +553,34 @@ int wmain(int argc, wchar_t* wargv[])
 
     // 指定还原
     if(rollback) {
-        if(fs::exists(Base / mainjsbak)) {
-            if(fs::exists(Base / mainjs)) {
-                fs::remove(Base / mainjs);
+        int restore_fail = 0;
+        auto restore_one = [&](const fs::path& bak, const fs::path& dst) {
+            if(!fs::exists(bak)) {
+                spdlog::warn("{} 回滚失败, {} 文件不存在", dst.string().c_str(), bak.string().c_str());
+                restore_fail++;
+                return;
             }
-            fs::copy_file(Base / mainjsbak, Base / mainjs);
-            spdlog::info("{} 还原完成", mainjs.string().c_str());
-        }
-        else {
-            spdlog::warn("{} 回滚失败, {} 文件不存在", mainjs.string().c_str(), mainjsbak.string().c_str());
-        }
-
-        if(fs::exists(Base / rendererjsbak)) {
-            if(fs::exists(Base / rendererjs)) {
-                fs::remove(Base / rendererjs);
+            std::error_code ec;
+            if(fs::exists(dst)) {
+                fs::remove(dst, ec);
+                if(ec) {
+                    spdlog::error("回滚时删除 {} 失败: {}", dst.string().c_str(), ec.message());
+                    restore_fail++;
+                    return;
+                }
             }
-            fs::copy_file(Base / rendererjsbak, Base / rendererjs);
-            spdlog::info("{} 还原完成", rendererjs.string().c_str());
-        }
-        else {
-            spdlog::warn("{} 回滚失败, {} 文件不存在", rendererjs.string().c_str(), rendererjsbak.string().c_str());
-        }
+            fs::copy_file(bak, dst, ec);
+            if(ec) {
+                spdlog::error("回滚复制 {} -> {} 失败: {}", bak.string().c_str(), dst.string().c_str(), ec.message());
+                restore_fail++;
+                return;
+            }
+            spdlog::info("{} 还原完成", dst.string().c_str());
+        };
+        restore_one(Base / mainjsbak, Base / mainjs);
+        restore_one(Base / rendererjsbak, Base / rendererjs);
         PAUSE
-        return 0;
+        return restore_fail ? 1 : 0;
     }
 
 
@@ -584,7 +591,13 @@ int wmain(int argc, wchar_t* wargv[])
             PAUSE
             return 1;
         }
-        fs::copy_file(Base / "main.js.bak", Base / "main.js");
+        std::error_code ec;
+        fs::copy_file(Base / "main.js.bak", Base / "main.js", ec);
+        if(ec) {
+            spdlog::error("从备份还原 main.js 失败: {}", ec.message());
+            PAUSE
+            return 1;
+        }
         spdlog::warn("main.js 未找到, 但已从备份main.js.bak中还原");
     }
 
@@ -594,18 +607,36 @@ int wmain(int argc, wchar_t* wargv[])
             PAUSE
             return 1;
         }
-        fs::copy_file(Base / "renderer.js.bak", Base / "renderer.js");
+        std::error_code ec;
+        fs::copy_file(Base / "renderer.js.bak", Base / "renderer.js", ec);
+        if(ec) {
+            spdlog::error("从备份还原 renderer.js 失败: {}", ec.message());
+            PAUSE
+            return 1;
+        }
         spdlog::warn("renderer.js 未找到, 但已从备份renderer.js.bak中还原");
     }
 
     // 仅在备份文件不存在时备份
     if (!fs::exists(Base / "main.js.bak")) {
-        fs::copy_file(Base / "main.js", Base / "main.js.bak");
+        std::error_code ec;
+        fs::copy_file(Base / "main.js", Base / "main.js.bak", ec);
+        if(ec) {
+            spdlog::error("创建备份 main.js -> main.js.bak 失败: {}, 已中止以免后续无法还原", ec.message());
+            PAUSE
+            return 1;
+        }
         spdlog::info("已新建备份 main.js -> main.js.bak");
     }
 
     if (!fs::exists(Base / "renderer.js.bak")) {
-        fs::copy_file(Base / "renderer.js", Base / "renderer.js.bak");
+        std::error_code ec;
+        fs::copy_file(Base / "renderer.js", Base / "renderer.js.bak", ec);
+        if(ec) {
+            spdlog::error("创建备份 renderer.js -> renderer.js.bak 失败: {}, 已中止以免后续无法还原", ec.message());
+            PAUSE
+            return 1;
+        }
         spdlog::info("已新建备份 renderer.js -> renderer.js.bak");
     }
 
@@ -657,6 +688,11 @@ int wmain(int argc, wchar_t* wargv[])
         int out = 0;
         // 如果"从备份文件中汉化"选项打开 则判断备份文件是否存在,以便尝试从备份文件中读取
         std::string main_str = ((_debug_translation_from_bak || _debug_invalid_check_mode) && fs::exists(Base / "main.js.bak")) ? utils::ReadFile(fs::path(Base / "main.js.bak").string()) : utils::ReadFile(fs::path(Base / "main.js").string());
+        if(main_str.empty()) {
+            spdlog::error("读取 main.js 失败或内容为空, 已中止以免覆盖源文件; 若文件损坏可从 main.js.bak 恢复");
+            PAUSE
+            return 1;
+        }
         try {
             for (auto& item : localization[_debug_dev_replace?"main_dev":"main"].items())
             {
@@ -820,6 +856,11 @@ int wmain(int argc, wchar_t* wargv[])
         spdlog::info("正在处理{}文件,{}请勿关闭...{}", "renderer.js", "\033[33m", "\033[0m");
         int out = 0;
         std::string renderer_str = ((_debug_translation_from_bak || _debug_invalid_check_mode) && fs::exists(Base / "renderer.js.bak")) ? utils::ReadFile(fs::path(Base / "renderer.js.bak").string()) :  utils::ReadFile(fs::path(Base / "renderer.js").string());
+        if(renderer_str.empty()) {
+            spdlog::error("读取 renderer.js 失败或内容为空, 已中止以免覆盖源文件; 若文件损坏可从 renderer.js.bak 恢复");
+            PAUSE
+            return 1;
+        }
         try{
             for (auto& item : localization[_debug_dev_replace?"renderer_dev":"renderer"].items())
             {
@@ -1023,7 +1064,12 @@ bool GetBasePath(std::string& out) {
             spdlog::warn("目录有误，找不到目录下的main.js. ");
             return false;
         }
-        fs::copy_file(base / "main.js.bak", base / "main.js");
+        std::error_code ec;
+        fs::copy_file(base / "main.js.bak", base / "main.js", ec);
+        if(ec) {
+            spdlog::warn("从备份还原 main.js 失败: {}", ec.message());
+            return false;
+        }
         spdlog::warn("main.js 未找到, 但已从备份main.js.bak中还原");
     }
 
@@ -1034,7 +1080,12 @@ bool GetBasePath(std::string& out) {
             spdlog::warn("目录有误，找不到目录下的renderer.js. ");
             return false;
         }
-        fs::copy_file(base / "renderer.js.bak", base / "renderer.js");
+        std::error_code ec;
+        fs::copy_file(base / "renderer.js.bak", base / "renderer.js", ec);
+        if(ec) {
+            spdlog::warn("从备份还原 renderer.js 失败: {}", ec.message());
+            return false;
+        }
         spdlog::warn("renderer.js 未找到, 但已从备份renderer.js.bak中还原");
     }
     return true;

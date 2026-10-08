@@ -5,13 +5,16 @@
 // 由 utils.hpp 伞形汇总，调用方统一使用 utils:: 前缀
 
 #include <string>
+#include <vector>
 #include <filesystem>
 #include <fstream>
 #include <cstdio>
 #include <cstdint>
+#include <cctype>
 #include <windows.h>
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "http/httplib.h"
+#include <openssl/evp.h>
 #include <spdlog/spdlog.h>
 
 namespace fs = std::filesystem;
@@ -21,6 +24,37 @@ namespace utils {
     // 配置TLS: 启用服务器证书校验, httplib未指定CA文件时会自动加载Windows系统根证书存储作为信任锚
     inline void SetupTlsVerification(httplib::Client& cli) {
         cli.enable_server_certificate_verification(true);
+    }
+
+    // 计算文件的 SHA256 十六进制小写字符串; 读取或计算失败时返回空串
+    inline auto ComputeFileSha256(const fs::path& file) -> std::string {
+        std::ifstream in(file, std::ios::binary);
+        if(!in) return "";
+        EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+        if(!ctx) return "";
+        bool ok = EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) == 1;
+        std::vector<char> buf(64 * 1024);
+        while(ok && in) {
+            in.read(buf.data(), static_cast<std::streamsize>(buf.size()));
+            const std::streamsize n = in.gcount();
+            if(n > 0) {
+                ok = EVP_DigestUpdate(ctx, buf.data(), static_cast<size_t>(n)) == 1;
+            }
+        }
+        if(ok && !in.eof()) ok = false; // 非正常结束(读取错误)
+        unsigned char md[EVP_MAX_MD_SIZE] = {};
+        unsigned int md_len = 0;
+        if(ok) ok = EVP_DigestFinal_ex(ctx, md, &md_len) == 1;
+        EVP_MD_CTX_free(ctx);
+        if(!ok) return "";
+        static const char hexchars[] = "0123456789abcdef";
+        std::string hex;
+        hex.reserve(md_len * 2);
+        for(unsigned int i = 0; i < md_len; i++) {
+            hex.push_back(hexchars[md[i] >> 4]);
+            hex.push_back(hexchars[md[i] & 0xF]);
+        }
+        return hex;
     }
 
     /**
@@ -59,15 +93,16 @@ namespace utils {
     }
 
     /**
-     * @brief 自动更新：下载新版本到临时文件（支持断点续传），校验大小后拉起替换脚本并退出
+     * @brief 自动更新：下载新版本到临时文件（支持断点续传），校验大小与SHA256后拉起替换脚本并退出
      * @param url_host 下载主机（如 https://github.com）
      * @param params 下载路径
      * @param Self 当前可执行文件路径
      * @param max_size 预期文件大小（0 表示不校验）
      * @param proxy 代理 host:port
+     * @param expected_digest 发布资产声明的摘要（形如 "sha256:<hex>"），为空则跳过内容校验
      * @return 是否成功（成功后调用方应立即退出等待替换）
      */
-    inline auto UpdateProgram(std::string url_host, std::string params, fs::path Self, int64_t max_size, std::pair<std::string, int> proxy) -> bool {
+    inline auto UpdateProgram(std::string url_host, std::string params, fs::path Self, int64_t max_size, std::pair<std::string, int> proxy, std::string expected_digest = "") -> bool {
         fs::path parent_dir = Self.parent_path();   // 文件所在目录
         fs::path exe_name = Self.filename();                // 文件名 包含扩展名,但不包含路径
 
@@ -108,6 +143,7 @@ namespace utils {
             }
             headers.emplace("Accept", "application/octet-stream");
 
+            int bad_status = 0; // 非 200/206 的状态码(用于错误提示)
             auto res = cli.Get(params, headers,
             [&](const httplib::Response& response) {
                 // 服务器忽略 Range 返回 200 时，从头覆盖，避免追加写入导致文件损坏
@@ -116,6 +152,12 @@ namespace utils {
                     downfile.close();
                     downfile.open(tmp_file, std::ios::binary | std::ios::out | std::ios::trunc);
                     downloaded_bytes = 0;
+                }
+                // 非 200/206(如 403/404 的错误响应体)时中止请求,
+                // 避免错误内容写入 .new 污染断点续传(续传追加后大小虽会凑对但内容已损坏)
+                if(response.status != httplib::StatusCode::OK_200 && response.status != httplib::StatusCode::PartialContent_206) {
+                    bad_status = response.status;
+                    return false;
                 }
                 return true;
             },
@@ -138,7 +180,12 @@ namespace utils {
             downfile.close();
 
             if(!res) {
-                spdlog::error("网络请求失败:{}", httplib::to_string(res.error()));
+                if(bad_status) {
+                    spdlog::error("更新错误, 服务器返回错误的状态码: {} (响应体未写入临时文件)", bad_status);
+                }
+                else {
+                    spdlog::error("网络请求失败:{}", httplib::to_string(res.error()));
+                }
                 return false;
             }
             if(res->status != httplib::StatusCode::OK_200 && res->status != httplib::StatusCode::PartialContent_206) {
@@ -156,16 +203,60 @@ namespace utils {
             return false;
         }
 
+        // 校验下载结果内容摘要, 防止被篡改或不完整的资产被替换执行
+        if(!expected_digest.empty()) {
+            const std::string prefix = "sha256:";
+            if(expected_digest.rfind(prefix, 0) != 0) {
+                spdlog::warn("发布资产摘要格式无法识别({}), 跳过完整性校验", expected_digest);
+            }
+            else {
+                const std::string want = expected_digest.substr(prefix.size());
+                const std::string got = ComputeFileSha256(tmp_file);
+                if(got.empty()) {
+                    spdlog::warn("计算下载文件摘要失败, 跳过完整性校验");
+                }
+                else {
+                    bool same = want.size() == got.size();
+                    for(size_t i = 0; same && i < want.size(); i++) {
+                        same = static_cast<char>(std::tolower(static_cast<unsigned char>(want[i]))) == got[i];
+                    }
+                    if(!same) {
+                        spdlog::error("下载文件 SHA256 校验失败, 已删除临时文件, 请重新运行重试");
+                        spdlog::error("预期: {} 实际: {}", want, got);
+                        std::error_code ec;
+                        fs::remove(tmp_file, ec);
+                        return false;
+                    }
+                    spdlog::info("SHA256 完整性校验通过");
+                }
+            }
+        }
+        else {
+            spdlog::debug("发布资产未提供SHA256摘要, 跳过完整性校验");
+        }
+
         spdlog::info("下载完成, 请稍等, 随后自动完成并(无参)重启..");
         // 完成后创建进程
-        // 构建参数(全程宽字符, 避免中文目录/文件名下编码错误导致更新替换失败)
-        std::wstring p = L"/c \"ping 127.0.0.1 -n 6 > nul & move /Y ";
-        p += tmp_file.filename().wstring();
+        // 构建参数(全程宽字符 + 文件名加引号转义: 兼容含空格/%/&等特殊字符的文件名)
+        auto quote_name = [](std::wstring name) {
+            std::wstring out = L"\"";
+            for(wchar_t c : name) {
+                if(c == L'%') {
+                    out += L"%%";   // cmd 中 % 即使位于引号内仍会展开, 需转义
+                }
+                else {
+                    out += c;
+                }
+            }
+            out += L"\"";
+            return out;
+        };
+        std::wstring p = L"/c ping 127.0.0.1 -n 6 > nul & move /Y ";
+        p += quote_name(tmp_file.filename().wstring());
         p += L" ";
-        p += exe_name.wstring();
-        p += L" & start ";
-        p += exe_name.wstring();
-        p += L"\"";
+        p += quote_name(exe_name.wstring());
+        p += L" & start \"\" ";
+        p += quote_name(exe_name.wstring());
         ShellExecuteW(
             NULL,                       // 父窗口句柄
             L"open",                    // 操作
