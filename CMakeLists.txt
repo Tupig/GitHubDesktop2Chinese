@@ -48,6 +48,8 @@ project ("GitHubDesktop2Chinese")
 include_directories(src)
 include_directories(third_party/include)
 
+# OpenSSL 静态库下载: 官方与镜像 URL 内容一致, 均通过 EXPECTED_HASH(SHA256) 校验
+# 哈希来源: 自 GitHub 官方 Release URL 下载实测 (2026-10); 上游更新库文件时需同步更新哈希
 if(DEFINED GitHubActions)
     set(LIBSSL_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libssl.lib)
     set(CRYPTO_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libcrypto.lib)
@@ -91,6 +93,7 @@ IF(NOT LOCAL_OPENSSL_SSL_LIB)
         # 从设定的 URL 地址下载相应的压缩包
     FILE(DOWNLOAD ${LIBSSL_URL}
         ${LOCAL_OPENSSL_LIBRARIES_PATH}/${OPENSSL_SSL_NAME}
+        EXPECTED_HASH SHA256=80c92c42796d4cde173916debae464c9e7e428fed07ee313b64ff1845c08736f
         TIMEOUT ${DOWNLOAD_OPENSSL_TIMEOUT}
         STATUS ERR
         SHOW_PROGRESS)
@@ -132,6 +135,7 @@ IF(NOT LOCAL_OPENSSL_CRYPTO_LIB)
         # 从设定的 URL 地址下载相应的压缩包
     FILE(DOWNLOAD ${CRYPTO_URL}
         ${LOCAL_OPENSSL_LIBRARIES_PATH}/${OPENSSL_CRYPTO_NAME}
+        EXPECTED_HASH SHA256=1e32b094bf4d9c5d9eb62c46b3b258c23bf6078e25f48b3cc869b86fed33d87c
         TIMEOUT ${DOWNLOAD_OPENSSL_TIMEOUT}
         STATUS ERR
         SHOW_PROGRESS)
