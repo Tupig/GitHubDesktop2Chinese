@@ -235,9 +235,15 @@ jobs:
           if "【待翻译】" in raw:
               errors.append("存在未替换的草稿占位符【待翻译】，请补全译文后再提交")
 
-          for key in ["version", "minversion", "main", "renderer", "main_dev", "renderer_dev"]:
+          for key in ["version", "minversion"]:
               if key not in data:
                   errors.append(f"缺少节点: {key}")
+
+          for key in ["main", "renderer", "main_dev", "renderer_dev"]:
+              if key not in data:
+                  errors.append(f"缺少节点: {key}")
+              elif not isinstance(data[key], list):
+                  errors.append(f"{key} 应为数组, 实际为 {type(data[key]).__name__}")
 
           def check_array(name, arr):
               seen = {}
@@ -270,15 +276,22 @@ jobs:
               if isinstance(data.get(key), list):
                   check_array(key, data[key])
 
-          for si, sel in enumerate(data.get("select", [])):
-              if "replaceFile" not in sel:
-                  errors.append(f"select[{si}] 缺少 replaceFile")
-              if "tooltip" not in sel:
-                  errors.append(f"select[{si}] 缺少 tooltip")
-              if "enable" not in sel:
-                  errors.append(f"select[{si}] 缺少 enable")
-              if not isinstance(sel.get("replace"), list):
-                  errors.append(f"select[{si}] replace 应为数组")
+          selects = data.get("select", [])
+          if not isinstance(selects, list):
+              errors.append(f"select 应为数组, 实际为 {type(selects).__name__}")
+          else:
+              for si, sel in enumerate(selects):
+                  if not isinstance(sel, dict):
+                      errors.append(f"select[{si}] 应为对象")
+                      continue
+                  if "replaceFile" not in sel:
+                      errors.append(f"select[{si}] 缺少 replaceFile")
+                  if "tooltip" not in sel:
+                      errors.append(f"select[{si}] 缺少 tooltip")
+                  if "enable" not in sel:
+                      errors.append(f"select[{si}] 缺少 enable")
+                  if not isinstance(sel.get("replace"), list):
+                      errors.append(f"select[{si}] replace 应为数组")
 
           print(f"映射项统计: main={len(data.get('main', []))} renderer={len(data.get('renderer', []))}")
           if warnings:

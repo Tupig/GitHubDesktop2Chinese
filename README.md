@@ -20,7 +20,7 @@
 - [🔭 开启 GitHub Desktop 预览版选项](#-开启-github-desktop-预览版选项)
 - [🧭 常见问题](#-常见问题)
 - [🎋 功能特性](#-功能特性)
-- [第三方库](#第三方库)
+- [📦 第三方库](#-第三方库)
 - [⭐ 星标历史](#-星标历史)
 
 ## 🥮这是什么
@@ -183,6 +183,8 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 > 安装最新 VC++ 运行库后仍无法运行时，请检查程序目录下是否残留 `MSVCP140.dll`、`VCRUNTIME140.dll` 等文件，如有请删除。
 >
 > **汉化后主程序无法打开**：更新加载器后执行 `GitHubDesktop2Chinese.exe dev --translationfrombak`。
+>
+> **想撤销汉化、还原为汉化前状态**：执行 `GitHubDesktop2Chinese.exe --rollback`（从 `main.js.bak` / `renderer.js.bak` 还原）。
 
 有任何建议欢迎提 [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues)。
 
@@ -202,7 +204,7 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 - [x] 系统 HTTP 代理支持（环境变量 + 注册表）
 - [x] 读取 GitHub Desktop 最新版与本地版本对比提示
 
-## 第三方库
+## 📦第三方库
 
 感谢以下优质开源项目：
 

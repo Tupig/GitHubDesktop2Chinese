@@ -33,8 +33,16 @@ function parseArgs(argv) {
   const args = { json: DEFAULT_JSON, top: 60, writeReport: false, keepJs: false, noColor: false, cmds: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--json') args.json = argv[++i];
-    else if (a === '--workdir') args.workdir = argv[++i];
+    if (a === '--json') {
+      const v = argv[++i];
+      if (v === undefined) throw new Error('--json 需要一个路径值');
+      args.json = v;
+    }
+    else if (a === '--workdir') {
+      const v = argv[++i];
+      if (v === undefined) throw new Error('--workdir 需要一个目录值');
+      args.workdir = v;
+    }
     else if (a === '--top') {
       const v = parseInt(argv[++i], 10);
       if (!Number.isFinite(v) || v < 0) throw new Error(`--top 需要一个非负整数, 收到: ${argv[i]}`);

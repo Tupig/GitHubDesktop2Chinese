@@ -175,5 +175,3 @@ target_link_libraries(GitHubDesktop2Chinese PRIVATE
 if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET GitHubDesktop2Chinese PROPERTY CXX_STANDARD 20)
 endif()
-
-# TODO: 如有需要，请添加测试并安装目标。

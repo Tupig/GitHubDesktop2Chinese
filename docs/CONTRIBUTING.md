@@ -49,5 +49,3 @@
    ```
 
    报告位于系统临时目录 `ghdesktop-auto-maintain/report.md`，按「来源」列把条目放入 `main`（main.js）或 `renderer`（renderer.js）数组，将草稿中的 `【待翻译】` 替换为中文译文即可（查找项已按字面量转义）。
-
-9. 待补充……
