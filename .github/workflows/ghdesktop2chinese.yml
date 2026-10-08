@@ -273,6 +273,10 @@ jobs:
           for si, sel in enumerate(data.get("select", [])):
               if "replaceFile" not in sel:
                   errors.append(f"select[{si}] 缺少 replaceFile")
+              if "tooltip" not in sel:
+                  errors.append(f"select[{si}] 缺少 tooltip")
+              if "enable" not in sel:
+                  errors.append(f"select[{si}] 缺少 enable")
               if not isinstance(sel.get("replace"), list):
                   errors.append(f"select[{si}] replace 应为数组")
 
