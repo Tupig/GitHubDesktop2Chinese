@@ -79,6 +79,8 @@ export function checkInvalid(localization, mainJsText, rendererJsText) {
   if (Array.isArray(selects)) {
     for (let s = 0; s < selects.length; s++) {
       const sel = selects[s];
+      // 与 C++ --invalidcheck 对齐: 仅检测 enable=true 的条目(被禁用的本就不参与替换, 允许保留过时内容)
+      if (sel?.enable !== true) continue;
       const replaces = sel?.replace;
       if (!Array.isArray(replaces)) continue;
       const targetJs = sel.replaceFile === 'main.js' ? mainJsText : rendererJsText;
