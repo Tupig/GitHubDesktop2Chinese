@@ -487,13 +487,18 @@ int wmain(int argc, wchar_t* wargv[])
                 std::string desktop_local_ver_str = utils::to_byte_string(ver);
 
 
-                spdlog::info("正在读取GitHubDesktop最新版...");
+                spdlog::info("正在读取GitHubDesktop最新正式版...");
                 std::string httpjson_str;
-                if(utils::ReadHttpDataString("https://central.github.com", "/deployments/desktop/desktop/changelog.json", httpjson_str, proxy)) {
+                // 使用 GitHub Releases API: releases/latest 仅返回最新非预发布(正式版),
+                // 避免把 beta 预览版(如 3.6.7-beta)误报为最新正式版
+                if(utils::ReadHttpDataString("https://api.github.com", "/repos/desktop/desktop/releases/latest", httpjson_str, proxy)) {
                     // 远程信息仅用于提示, 解析失败不应中断主流程
                     try {
                         auto httpjson = json::parse(httpjson_str);
-                        std::string v = httpjson.at(0).at("version").get<std::string>();
+                        std::string v = httpjson.at("tag_name").get<std::string>();
+                        if(v.rfind("release-", 0) == 0) {
+                            v = v.substr(strlen("release-"));
+                        }
                         versionparse::Version desktop_remote_ver(v.c_str());
                         versionparse::Version desktop_local_ver(desktop_local_ver_str.c_str());
                         spdlog::info("已读取到远程GitHubDesktop最新版:{} {}", v, desktop_remote_ver > desktop_local_ver ? "(\033[1;33m需更新\033[0m)" : "");
