@@ -34,7 +34,11 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === '--json') args.json = argv[++i];
     else if (a === '--workdir') args.workdir = argv[++i];
-    else if (a === '--top') args.top = parseInt(argv[++i], 10);
+    else if (a === '--top') {
+      const v = parseInt(argv[++i], 10);
+      if (!Number.isFinite(v) || v < 0) throw new Error(`--top 需要一个非负整数, 收到: ${argv[i]}`);
+      args.top = v;
+    }
     else if (a === '--write-report') args.writeReport = true;
     else if (a === '--keep-js') args.keepJs = true;
     else if (a === '--no-color') args.noColor = true;

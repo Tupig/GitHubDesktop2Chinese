@@ -113,11 +113,8 @@ export async function downloadZip(url, destDir) {
   const file = fs.createWriteStream(tmpPath, { flags: isPartial ? 'a' : 'w' });
   await pipeline(Readable.fromWeb(res.body), file);
   if (!isZipComplete(tmpPath)) {
-    // 可能是不完整的分块下载（EOF 未达）。若这是续传结果，保留 .part 以便下次续传；
-    // 但若已有完整 zip，则删掉损坏的 .part 避免污染。
-    if (!fs.existsSync(zipPath)) {
-      throw new Error('下载的 nupkg 不完整（缺少 EOCD 记录）');
-    }
+    // 不完整（缺少 EOCD 记录）: 保留 .part 断点文件以便下次续传, 直接失败, 绝不改名覆盖
+    throw new Error('下载的 nupkg 不完整（缺少 EOCD 记录）, 已保留断点文件供续传');
   }
   fs.renameSync(tmpPath, zipPath);
   return zipPath;

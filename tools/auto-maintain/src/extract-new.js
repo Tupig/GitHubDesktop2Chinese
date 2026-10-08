@@ -107,24 +107,25 @@ export function buildDraftLine(text) {
 
 /**
  * 从映射数组中收集所有正则 pattern（item[0] 和可选的 item[2]），
- * 用于判断某候选是否已被现有映射覆盖。
+ * 返回预编译的 RegExp 数组（非法正则在收集阶段即被剔除），
+ * 供 isCoveredByPatterns 复用，避免对每个候选重复编译全量模式。
  */
 export function collectPatterns(localization) {
   const patterns = [];
+  const addPattern = (p) => {
+    if (typeof p === 'string' && p && p !== '""') {
+      try {
+        patterns.push(new RegExp(p));
+      } catch {
+        // 忽略非法正则
+      }
+    }
+  };
   for (const arrayName of ['main', 'renderer', 'main_dev', 'renderer_dev']) {
     const arr = localization[arrayName];
     if (!Array.isArray(arr)) continue;
     for (const item of arr) {
-      for (const p of [item?.[0], item?.[2]]) {
-        if (typeof p === 'string' && p && p !== '""') {
-          try {
-            new RegExp(p);
-            patterns.push(p);
-          } catch {
-            // 忽略非法正则
-          }
-        }
-      }
+      for (const p of [item?.[0], item?.[2]]) addPattern(p);
     }
   }
   // select 中的 replace 项也纳入（仅 enable=true 的，因 enable=false 不生效，相关字符串仍为英文）
@@ -135,16 +136,7 @@ export function collectPatterns(localization) {
       const replaces = sel?.replace;
       if (!Array.isArray(replaces)) continue;
       for (const item of replaces) {
-        for (const p of [item?.[0], item?.[2]]) {
-          if (typeof p === 'string' && p && p !== '""') {
-            try {
-              new RegExp(p);
-              patterns.push(p);
-            } catch {
-              /* ignore */
-            }
-          }
-        }
+        for (const p of [item?.[0], item?.[2]]) addPattern(p);
       }
     }
   }
@@ -157,16 +149,11 @@ export function collectPatterns(localization) {
  * 注意：现有映射的 pattern 大多带引号（如 "\"Let's get started!\""），
  * 而提取出的候选是无引号文本。因此需对候选的多种形态都做测试：
  * 裸文本、双引号包裹、单引号包裹，任一被匹配即视为已覆盖。
+ * patterns 为 collectPatterns 返回的预编译 RegExp 数组（无 g/y 标志，test 无状态）。
  */
 export function isCoveredByPatterns(candidate, patterns) {
   const forms = [candidate, '"' + candidate + '"', "'" + candidate + "'"];
-  for (const p of patterns) {
-    let re;
-    try {
-      re = new RegExp(p);
-    } catch {
-      continue;
-    }
+  for (const re of patterns) {
     for (const f of forms) {
       if (re.test(f)) return true;
     }
