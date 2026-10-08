@@ -235,7 +235,7 @@ int wmain(int argc, wchar_t* wargv[])
     }
 
     // 开发者声明
-    spdlog::info("开发者：CNGEGE > 2024/04/13");
+    spdlog::info("开发者：Tupig（原作 CNGEGE，项目始于 2024/04/13）");
     spdlog::info("按程序提示流程走，完成后自动会退出，{}请勿手动关闭{}程序，手动关闭可能导致汉化失败", "\033[1;33m", "\033[0m");
 
     std::pair<std::string, int> proxy = { "", 0 };
