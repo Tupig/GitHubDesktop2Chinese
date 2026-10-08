@@ -351,6 +351,9 @@ jobs:
     if: |
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'maintain'))
     runs-on: ubuntu-latest
+    env:
+      # fetch.js 查询 GitHub API 时使用, 匿名限额60次/小时会被共享 runner IP 触发403
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
 

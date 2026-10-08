@@ -17,8 +17,13 @@ const ASSET_PATTERN = /^GitHubDesktop-[\d.]+-x64-full\.nupkg$/;
  * 返回 { tag, version, zipAssetUrl }
  */
 export async function getLatestRelease() {
+  const headers = { 'User-Agent': 'githubdesktop2chinese-auto-maintain' };
+  // CI 中带上 token 规避 GitHub API 匿名限流(60次/小时, runner 共享IP极易触发403); 本地无 token 则匿名访问
+  if (process.env.GITHUB_TOKEN) {
+    headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  }
   const res = await fetch(`${API_BASE}/repos/${GITHUB_DESKTOP_REPO}/releases/latest`, {
-    headers: { 'User-Agent': 'githubdesktop2chinese-auto-maintain' },
+    headers,
   });
   if (!res.ok) {
     throw new Error(`获取 GitHub Desktop 最新 release 失败: HTTP ${res.status}`);
