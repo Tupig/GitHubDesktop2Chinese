@@ -749,7 +749,11 @@ int wmain(int argc, wchar_t* wargv[])
                     spdlog::info("[main][out:{}]已经替换:{}->{}", out, rege, utils::utf8ToAnsi(item.value()[1].get<std::string>()));
                     out--;
                     if (out <= 0) {
-                        utils::WriteFile(fs::path(Base / "main.js").string(), main_str);
+                        if(!utils::WriteFile(fs::path(Base / "main.js").string(), main_str)) {
+                            spdlog::error("写入 main.js 失败(原文件未改动), 已中止");
+                            PAUSE
+                            return 1;
+                        }
                         spdlog::info("已写入. 你希望下次替换多少条后写入:");
                         if(!(std::cin >> out)) {
                             // 输入流已结束(非交互运行): 置为极大值, 等价于剩余项全部替换后一次性写入
@@ -845,7 +849,11 @@ int wmain(int argc, wchar_t* wargv[])
 
         if (!_debug_invalid_check_mode && !_debug_no_replace_res) {
             // 写入
-            utils::WriteFile(fs::path(Base / "main.js").string(), main_str);
+            if(!utils::WriteFile(fs::path(Base / "main.js").string(), main_str)) {
+                spdlog::error("写入 main.js 失败(原文件未改动), 已中止");
+                PAUSE
+                return 1;
+            }
         }
         spdlog::info("{} 文件汉化结束.", "main.js");
     }
@@ -917,7 +925,11 @@ int wmain(int argc, wchar_t* wargv[])
                     spdlog::info("[renderer][out:{}]已经替换:{}->{}",out , rege.c_str(), utils::utf8ToAnsi(item.value()[1].get<std::string>()).c_str());
                     out--;
                     if (out <= 0) {
-                        utils::WriteFile(fs::path(Base / "renderer.js").string(), renderer_str);
+                        if(!utils::WriteFile(fs::path(Base / "renderer.js").string(), renderer_str)) {
+                            spdlog::error("写入 renderer.js 失败(原文件未改动), 已中止");
+                            PAUSE
+                            return 1;
+                        }
                         spdlog::info("已写入. 你希望下次替换多少条后写入:");
                         if(!(std::cin >> out)) {
                             // 输入流已结束(非交互运行): 置为极大值, 等价于剩余项全部替换后一次性写入
@@ -1013,7 +1025,11 @@ int wmain(int argc, wchar_t* wargv[])
 
         if (!_debug_invalid_check_mode && !_debug_no_replace_res) {
             // 写入
-            utils::WriteFile(fs::path(Base / "renderer.js").string(), renderer_str);
+            if(!utils::WriteFile(fs::path(Base / "renderer.js").string(), renderer_str)) {
+                spdlog::error("写入 renderer.js 失败(原文件未改动), 已中止");
+                PAUSE
+                return 1;
+            }
         }
         spdlog::info("{} 文件汉化结束.", "renderer.js");
     }
@@ -1051,6 +1067,15 @@ bool GetBasePath(std::string& out) {
     if(!getline(std::cin, out)) {
         spdlog::error("读取输入失败(输入流已结束)");
         return false;
+    }
+    // 去除首尾空白与成对引号: 支持从资源管理器拖拽文件夹到控制台(终端会为路径加引号)
+    {
+        const size_t first = out.find_first_not_of(" \t\r\n");
+        const size_t last = out.find_last_not_of(" \t\r\n");
+        out = (first == std::string::npos) ? std::string() : out.substr(first, last - first + 1);
+        if(out.size() >= 2 && out.front() == '"' && out.back() == '"') {
+            out = out.substr(1, out.size() - 2);
+        }
     }
     // 控制台输入为UTF-8, 直接按窄字符串构造路径会被错误地按ANSI代码页解释
     fs::path base = utils::to_path(out);
