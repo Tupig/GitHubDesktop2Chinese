@@ -25,7 +25,7 @@
 
 ## 🥮这是什么
 
-一个自动替换 GitHub Desktop 界面文本为目标语言（中文）的程序：
+一个自动替换 [GitHub Desktop](https://desktop.github.com/)（[官方仓库 desktop/desktop](https://github.com/desktop/desktop)）界面文本为目标语言（中文）的程序：
 
 - **高兼容性**：采用正则映射替换，对 GitHub Desktop 频繁更新的版本变化兼容性高
 - **低维护成本**：版本更新后仅需手动补充个别失效翻译条目
