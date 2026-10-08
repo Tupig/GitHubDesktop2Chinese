@@ -75,8 +75,19 @@ public:
                 //config.enabled = true;
                 std::wstring proxyW(ieProxyConfig.lpszProxy);
                 address = { proxyW.begin(), proxyW.end() };
-                
-                // 尝试解析端口 (格式: address:port 或 http=address:port)
+
+                // IE 代理配置可能为 "http=host:port;https=host:port" 形式：
+                // 取第一段并去除 scheme= 前缀
+                size_t semiPos = address.find(';');
+                if(semiPos != std::string::npos) {
+                    address = address.substr(0, semiPos);
+                }
+                size_t eqPos = address.find('=');
+                if(eqPos != std::string::npos) {
+                    address = address.substr(eqPos + 1);
+                }
+
+                // 尝试解析端口 (格式: address:port)
                 size_t pos = address.find(':');
                 if(pos != std::string::npos) {
                     try {
@@ -228,6 +239,16 @@ public:
             headers.emplace("Accept", "application/octet-stream");
 
             auto res = cli.Get(params, headers, 
+            [&](const httplib::Response& response) {
+                // 服务器忽略 Range 返回 200 时，从头覆盖，避免追加写入导致文件损坏
+                if(downloaded_bytes > 0 && response.status == httplib::StatusCode::OK_200) {
+                    spdlog::warn("服务器不支持断点续传, 将从头下载");
+                    downfile.close();
+                    downfile.open(tmp_file, std::ios::binary | std::ios::out | std::ios::trunc);
+                    downloaded_bytes = 0;
+                }
+                return true;
+            },
             [&](const char* data, size_t data_length) {
                 if(data_length > 0 && downfile.is_open()) {
                     downfile.write(data, data_length);
@@ -238,7 +259,7 @@ public:
             [&](uint64_t len, uint64_t total) {
                 uint64_t total_ = downloaded_bytes + total;  // 文件总大小
                 uint64_t now_ = downloaded_bytes + len;
-                int percent_ = static_cast<int>(now_ * 100 / total_);
+                int percent_ = total_ ? static_cast<int>(now_ * 100 / total_) : 0;
 
                 printf_s("\r %s %d%% ==>  %lld / %lld", (downloaded_bytes > 0) ? "[续传]" : "[下载]", percent_, now_, total_);
                 return true;
@@ -267,12 +288,15 @@ public:
         p += " & start ";
         p += exe_name.string();
         p += "\"";
-        ShellExecute(
+        // 使用宽字符版本，避免中文路径导致更新替换失败
+        std::wstring wcmd = to_wide_string(p);
+        std::wstring wdir = to_wide_string(parent_dir.string());
+        ShellExecuteW(
             NULL,                   // 父窗口句柄
-            _T("open"),             // 操作
-            _T("cmd.exe"),          // 应用程序
-            p.c_str(),              // 参数
-            parent_dir.string().c_str(),                   // 工作目录
+            L"open",                // 操作
+            L"cmd.exe",             // 应用程序
+            wcmd.c_str(),           // 参数
+            wdir.c_str(),           // 工作目录
             SW_SHOW);               // 显示方式
 
         return true;

@@ -286,30 +286,48 @@ int main(int argc, char* argv[])
                     else {
                         if(FileVer < remoteVer) {
                             spdlog::info("发现新版本: {}", remoteVer.toString());
-                            std::string browser_download_url = infojson["assets"][0]["browser_download_url"].get<std::string>();
-                            std::string downlink = infojson["assets"][0]["url"].get<std::string>();
-                            int download_count = infojson["assets"][0]["download_count"].get<int>();
-                            size_t max_size = infojson["assets"][0]["size"].get<int64_t>();
-                            spdlog::info("下载链接({}次下载): {}", download_count, browser_download_url);
-                            spdlog::info("是否自动更新:");
-                            bool autoupdate = utils::ReadUserInput_bool({ "n", "y" }, 0);
-                            if(autoupdate) {
-                                //https://github.com/Tupig/GitHubDesktop2Chinese/releases/download/v1.0.14/GitHubDesktop2Chinese.exe
-                                //https://api.github.com/repos/Tupig/GitHubDesktop2Chinese/releases/assets/376558079
-                                std::regex url_regex(R"(^((?:https?://)[^/]+)(/.*)?$)");
-                                std::smatch matches;
-                                if(std::regex_match(downlink, matches, url_regex)) {
-                                    auto result = utils::UpdateProgram(matches[1].str(), matches[2].str(), fs::path(argv[0]), max_size, proxy);
-                                    if(!result) {
-                                        spdlog::error("失败 更新过程出现异常");
-                                    }
-                                    else {
-                                        // 立马退出 等待替换
-                                        return 0;
+                            // 在资产中定位可执行文件，避免依赖 assets[0] 的顺序
+                            const json* asset = nullptr;
+                            if(infojson.contains("assets") && infojson["assets"].is_array()) {
+                                for(const auto& a : infojson["assets"]) {
+                                    if(a.value("name", std::string()) == "GitHubDesktop2Chinese.exe") { asset = &a; break; }
+                                }
+                                if(!asset) {
+                                    for(const auto& a : infojson["assets"]) {
+                                        const std::string name = a.value("name", std::string());
+                                        if(name.size() > 4 && name.ends_with(".exe")) { asset = &a; break; }
                                     }
                                 }
-                                else {
-                                    spdlog::error("下载地址可能变更, 正则表达式无法捕获");
+                            }
+                            if(!asset) {
+                                spdlog::warn("未在最新 Release 中找到可执行文件资产, 跳过自动更新");
+                            }
+                            else {
+                                std::string browser_download_url = asset->at("browser_download_url").get<std::string>();
+                                std::string downlink = asset->at("url").get<std::string>();
+                                int download_count = asset->at("download_count").get<int>();
+                                size_t max_size = asset->at("size").get<int64_t>();
+                                spdlog::info("下载链接({}次下载): {}", download_count, browser_download_url);
+                                spdlog::info("是否自动更新:");
+                                bool autoupdate = utils::ReadUserInput_bool({ "n", "y" }, 0);
+                                if(autoupdate) {
+                                    //https://github.com/Tupig/GitHubDesktop2Chinese/releases/download/v1.0.14/GitHubDesktop2Chinese.exe
+                                    //https://api.github.com/repos/Tupig/GitHubDesktop2Chinese/releases/assets/376558079
+                                    std::regex url_regex(R"(^((?:https?://)[^/]+)(/.*)?$)");
+                                    std::smatch matches;
+                                    if(std::regex_match(downlink, matches, url_regex)) {
+                                        auto result = utils::UpdateProgram(matches[1].str(), matches[2].str(), fs::path(argv[0]), max_size, proxy);
+                                        if(!result) {
+                                            spdlog::error("失败 更新过程出现异常");
+                                        }
+                                        else {
+                                            // 立马退出 等待替换
+                                            return 0;
+                                        }
+                                    }
+                                    else {
+                                        spdlog::error("下载地址可能变更, 正则表达式无法捕获");
+                                    }
                                 }
                             }
                         }
@@ -674,7 +692,7 @@ int main(int argc, char* argv[])
                                     }
                                     std::regex pattern(rege);
                                     // 如果有第三个字符串
-                                    if(replaces.size() >= 3) {
+                                    if(v_item.size() >= 3) {
                                         // 预备用第三个字符串查找关键字 用来替换第二个字符串
                                         std::regex pattern3(v_item[2]);
                                         std::sregex_iterator it = std::sregex_iterator(main_str.begin(), main_str.end(), pattern3);
@@ -689,7 +707,7 @@ int main(int argc, char* argv[])
                                         }
                                         else {
                                             // 如果没有找到，则应该进行提示并跳过此项，以免进行错误的字符插入，造成程序无法打开
-                                            spdlog::warn("[select renderer 3] 出现一处失效项,此项将跳过: {}", v_item[2].c_str());
+                                            spdlog::warn("[select main 3] 出现一处失效项,此项将跳过: {}", v_item[2].c_str());
                                             continue;
                                         }
                                     }
@@ -833,7 +851,7 @@ int main(int argc, char* argv[])
                                     }
                                     std::regex pattern(rege);
                                     // 如果有第三个字符串
-                                    if(replaces.size() >= 3) {
+                                    if(v_item.size() >= 3) {
                                         // 预备用第三个字符串查找关键字 用来替换第二个字符串
                                         std::regex pattern3(v_item[2]);
                                         std::sregex_iterator it = std::sregex_iterator(renderer_str.begin(), renderer_str.end(), pattern3);
