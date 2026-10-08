@@ -43,7 +43,6 @@ fs::path LocalizationJSON;
 bool no_pause;                                  // 程序在结束前是否暂停
 bool only_read_from_remote;                     // 仅从远程url中读取本地化文件
 bool rollback;                                  // 从备份中还原汉化前的文件
-bool enable_proxy;                              // 使用代理访问
 
 json localization = R"(
                         {
@@ -147,7 +146,6 @@ int wmain(int argc, wchar_t* wargv[])
         app.add_flag("--nopause", no_pause,                         "程序在结束前不再暂停等待");
         app.add_option("-g,--githubdesktoppath", Base,              "指定GitHubDesktop要汉化的资源所在目录(js所在目录)");
         app.add_option("-j,--json", LocalizationJSON,               "指定本地化JSON文件的本地路径");
-        //app.add_flag("-p,--enableproxy", enable_proxy,              "开启代理访问GitHub");
         app.add_flag("-r,--onlyfromremote", only_read_from_remote,  "仅从远程url中读取本地化文件");
         app.add_flag("--rollback", rollback,                        "从备份文件中还原汉化前的文件");
         
