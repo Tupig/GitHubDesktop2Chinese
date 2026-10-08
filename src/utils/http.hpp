@@ -92,23 +92,20 @@ namespace utils {
         }
     }
 
+    // ── 自动更新 ──────────────────────────────────────────────
+    // DownloadToFile / VerifyDownloadedFile / LaunchReplaceAndRestart 为 UpdateProgram 的内部辅助
+
     /**
-     * @brief 自动更新：下载新版本到临时文件（支持断点续传），校验大小与SHA256后拉起替换脚本并退出
+     * @brief 下载新版本到临时文件（支持断点续传）
+     *        非 200/206 的响应(如 403/404)会中止请求, 不把错误响应体写入临时文件
      * @param url_host 下载主机（如 https://github.com）
      * @param params 下载路径
-     * @param Self 当前可执行文件路径
-     * @param max_size 预期文件大小（0 表示不校验）
      * @param proxy 代理 host:port
-     * @param expected_digest 发布资产声明的摘要（形如 "sha256:<hex>"），为空则跳过内容校验
-     * @return 是否成功（成功后调用方应立即退出等待替换）
+     * @param tmp_file 临时文件路径（形如 xxx.exe.new）
+     * @param max_size 预期文件大小（>0 时用于判断续传进度）
+     * @return 是否成功（临时文件状态可用于后续校验）
      */
-    inline auto UpdateProgram(std::string url_host, std::string params, fs::path Self, int64_t max_size, std::pair<std::string, int> proxy, std::string expected_digest = "") -> bool {
-        fs::path parent_dir = Self.parent_path();   // 文件所在目录
-        fs::path exe_name = Self.filename();                // 文件名 包含扩展名,但不包含路径
-
-        fs::path tmp_file = Self;
-        tmp_file += ".new"; // 下载临时文件
-
+    inline auto DownloadToFile(const std::string& url_host, const std::string& params, const std::pair<std::string, int>& proxy, const fs::path& tmp_file, int64_t max_size) -> bool {
         // 1. 如果临时文件已存在，获取已下载大小（用于断点续传）
         uint64_t downloaded_bytes = 0;
         if(fs::exists(tmp_file)) {
@@ -123,7 +120,7 @@ namespace utils {
             downloaded_bytes = 0;
         }
 
-        if(downloaded_bytes < max_size) {
+        if(downloaded_bytes < static_cast<uint64_t>(max_size)) {
             // 以 二进制追加模式 打开文件（断点续传关键）
             std::ofstream downfile(tmp_file, std::ios::binary | std::ios::out | std::ios::app);
             if(!downfile.is_open()) {
@@ -193,8 +190,17 @@ namespace utils {
                 return false;
             }
         }
+        return true;
+    }
 
-        // 校验下载结果大小, 防止不完整的文件被替换进程序目录
+    /**
+     * @brief 校验临时文件: 文件大小与发布资产声明的 SHA256; 失败时删除临时文件
+     * @param tmp_file 临时文件路径
+     * @param max_size 预期文件大小（0 表示不校验大小）
+     * @param expected_digest 发布资产声明的摘要（形如 "sha256:<hex>"），为空则跳过内容校验
+     */
+    inline auto VerifyDownloadedFile(const fs::path& tmp_file, int64_t max_size, const std::string& expected_digest) -> bool {
+        // 大小校验, 防止不完整的文件被替换进程序目录
         if(max_size > 0 && (!fs::exists(tmp_file) || fs::file_size(tmp_file) != static_cast<uint64_t>(max_size))) {
             spdlog::error("下载文件大小校验失败({} 应为 {}), 已删除临时文件, 请重新运行重试",
                           fs::exists(tmp_file) ? (int64_t)fs::file_size(tmp_file) : (int64_t)-1, max_size);
@@ -203,41 +209,40 @@ namespace utils {
             return false;
         }
 
-        // 校验下载结果内容摘要, 防止被篡改或不完整的资产被替换执行
-        if(!expected_digest.empty()) {
-            const std::string prefix = "sha256:";
-            if(expected_digest.rfind(prefix, 0) != 0) {
-                spdlog::warn("发布资产摘要格式无法识别({}), 跳过完整性校验", expected_digest);
-            }
-            else {
-                const std::string want = expected_digest.substr(prefix.size());
-                const std::string got = ComputeFileSha256(tmp_file);
-                if(got.empty()) {
-                    spdlog::warn("计算下载文件摘要失败, 跳过完整性校验");
-                }
-                else {
-                    bool same = want.size() == got.size();
-                    for(size_t i = 0; same && i < want.size(); i++) {
-                        same = static_cast<char>(std::tolower(static_cast<unsigned char>(want[i]))) == got[i];
-                    }
-                    if(!same) {
-                        spdlog::error("下载文件 SHA256 校验失败, 已删除临时文件, 请重新运行重试");
-                        spdlog::error("预期: {} 实际: {}", want, got);
-                        std::error_code ec;
-                        fs::remove(tmp_file, ec);
-                        return false;
-                    }
-                    spdlog::info("SHA256 完整性校验通过");
-                }
-            }
-        }
-        else {
+        // 内容摘要校验, 防止被篡改或不完整的资产被替换执行
+        if(expected_digest.empty()) {
             spdlog::debug("发布资产未提供SHA256摘要, 跳过完整性校验");
+            return true;
         }
+        const std::string prefix = "sha256:";
+        if(expected_digest.rfind(prefix, 0) != 0) {
+            spdlog::warn("发布资产摘要格式无法识别({}), 跳过完整性校验", expected_digest);
+            return true;
+        }
+        const std::string want = expected_digest.substr(prefix.size());
+        const std::string got = ComputeFileSha256(tmp_file);
+        if(got.empty()) {
+            spdlog::warn("计算下载文件摘要失败, 跳过完整性校验");
+            return true;
+        }
+        bool same = want.size() == got.size();
+        for(size_t i = 0; same && i < want.size(); i++) {
+            same = static_cast<char>(std::tolower(static_cast<unsigned char>(want[i]))) == got[i];
+        }
+        if(!same) {
+            spdlog::error("下载文件 SHA256 校验失败, 已删除临时文件, 请重新运行重试");
+            spdlog::error("预期: {} 实际: {}", want, got);
+            std::error_code ec;
+            fs::remove(tmp_file, ec);
+            return false;
+        }
+        spdlog::info("SHA256 完整性校验通过");
+        return true;
+    }
 
-        spdlog::info("下载完成, 请稍等, 随后自动完成并(无参)重启..");
-        // 完成后创建进程
-        // 构建参数(全程宽字符 + 文件名加引号转义: 兼容含空格/%/&等特殊字符的文件名)
+    // 拉起 cmd 脚本: 等待当前进程退出后, 用临时文件替换自身并重启
+    // 全程宽字符 + 文件名引号转义: 兼容含空格/%/&等特殊字符的文件名
+    inline void LaunchReplaceAndRestart(const fs::path& self, const fs::path& tmp_file) {
         auto quote_name = [](std::wstring name) {
             std::wstring out = L"\"";
             for(wchar_t c : name) {
@@ -251,6 +256,7 @@ namespace utils {
             out += L"\"";
             return out;
         };
+        const fs::path exe_name = self.filename();
         std::wstring p = L"/c ping 127.0.0.1 -n 6 > nul & move /Y ";
         p += quote_name(tmp_file.filename().wstring());
         p += L" ";
@@ -262,9 +268,33 @@ namespace utils {
             L"open",                    // 操作
             L"cmd.exe",                 // 应用程序
             p.c_str(),                  // 参数
-            parent_dir.wstring().c_str(),// 工作目录
+            self.parent_path().wstring().c_str(), // 工作目录
             SW_SHOW);                   // 显示方式
+    }
 
+    /**
+     * @brief 自动更新：下载新版本到临时文件（支持断点续传），校验大小与SHA256后拉起替换脚本并退出
+     * @param url_host 下载主机（如 https://github.com）
+     * @param params 下载路径
+     * @param Self 当前可执行文件路径
+     * @param max_size 预期文件大小（0 表示不校验）
+     * @param proxy 代理 host:port
+     * @param expected_digest 发布资产声明的摘要（形如 "sha256:<hex>"），为空则跳过内容校验
+     * @return 是否成功（成功后调用方应立即退出等待替换）
+     */
+    inline auto UpdateProgram(std::string url_host, std::string params, fs::path Self, int64_t max_size, std::pair<std::string, int> proxy, std::string expected_digest = "") -> bool {
+        fs::path tmp_file = Self;
+        tmp_file += ".new"; // 下载临时文件
+
+        if(!DownloadToFile(url_host, params, proxy, tmp_file, max_size)) {
+            return false;
+        }
+        if(!VerifyDownloadedFile(tmp_file, max_size, expected_digest)) {
+            return false;
+        }
+
+        spdlog::info("下载完成, 请稍等, 随后自动完成并(无参)重启..");
+        LaunchReplaceAndRestart(Self, tmp_file);
         return true;
     }
 

@@ -5,7 +5,7 @@
 #pragma once
 #include <string>
 
-namespace std {
+namespace versionparse {
 
 class Version {
 public:
@@ -188,6 +188,16 @@ private:
     }
 
     /**
+     * @brief 判断字符是否为数字 0~9
+     */
+    static bool IsDigit(char c) {
+        return c >= '0' && c <= '9';
+    }
+
+    // 版本号单个组件允许的最大值, 超出视为非法输入(防止数字串过长导致整型溢出 UB)
+    static constexpr int MAX_VERSION_COMPONENT = 99999;
+
+    /**
      * @brief 检查版本是否是alpha beta
      * 
      * @param sourcevalue
@@ -221,6 +231,7 @@ private:
     */
     bool Parse(const char* v) {
         bool ret = false;
+        bool overflow = false;  // 数字串超长(超过 MAX_VERSION_COMPONENT)时置位
         for (;;) {
             if (*v == '\0') {
                 break;
@@ -236,7 +247,8 @@ private:
                     v++;
                     continue;
                 }
-                if (isdigit(*v) != 0) {
+                if (IsDigit(*v)) {
+                    if (major > MAX_VERSION_COMPONENT) { overflow = true; break; }
                     major = major * 10 + (*v - '0');
                     v++;
                     continue;
@@ -257,7 +269,8 @@ private:
                     v++;
                     continue;
                 }
-                if (isdigit(*v) != 0) {
+                if (IsDigit(*v)) {
+                    if (minor > MAX_VERSION_COMPONENT) { overflow = true; break; }
                     minor = minor * 10 + (*v - '0');
                     v++;
                     ret = true;
@@ -302,7 +315,8 @@ private:
                     v++;
                     continue;
                 }
-                if (isdigit(*v) != 0) {
+                if (IsDigit(*v)) {
+                    if (revision > MAX_VERSION_COMPONENT) { overflow = true; break; }
                     revision = revision * 10 + (*v - '0');
                     v++;
                     continue;
@@ -345,7 +359,8 @@ private:
                 if (*v == '.') {
                     break;
                 }
-                if (isdigit(*v) != 0) {
+                if (IsDigit(*v)) {
+                    if (betaversion > MAX_VERSION_COMPONENT) { overflow = true; break; }
                     if (status == Status::Release && ((*v - '0') != 0)) status = Status::Beta;
                     betaversion = betaversion * 10 + (*v - '0');
                     v++;
@@ -356,7 +371,7 @@ private:
                 continue;
             }
         }
-        return ret;
+        return ret && !overflow;
     }
 };
 

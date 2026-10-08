@@ -28,7 +28,7 @@
 // 不进行替换 以便调试
 #define NO_REPLACE 0
 
-std::Version FileVer{0,0,0};
+versionparse::Version FileVer{0,0,0};
 
 
 using json = nlohmann::json;
@@ -118,7 +118,7 @@ int wmain(int argc, wchar_t* wargv[])
         argv.push_back(arg.data());
     }
 
-    FileVer = std::Version(FILEVERSION);
+    FileVer = versionparse::Version(FILEVERSION);
     // 设置控制台打印日志输出等级
     if(FileVer.status == FileVer.Dev) {
         spdlog::set_level(spdlog::level::debug);
@@ -220,7 +220,7 @@ int wmain(int argc, wchar_t* wargv[])
             if(instr == "exit") {
                 break;
             }
-            auto ver = std::Version(instr.c_str());
+            auto ver = versionparse::Version(instr.c_str());
             if(!ver) {
                 spdlog::error("你输入的版本无效");
             }
@@ -294,14 +294,14 @@ int wmain(int argc, wchar_t* wargv[])
     // 检查更新
     // https://api.github.com/repos/Tupig/GitHubDesktop2Chinese/releases/latest
     {
-        if(FileVer.status != std::Version::Dev) {
+        if(FileVer.status != versionparse::Version::Dev) {
             spdlog::info("检查更新中..");
             try {
                 std::string repoinfo;
                 if(utils::ReadHttpDataString("https://api.github.com" , "/repos/Tupig/GitHubDesktop2Chinese/releases/latest", repoinfo, proxy)) {
                     auto infojson = json::parse(repoinfo);
                     auto tag_name = infojson["tag_name"].get<std::string>();
-                    std::Version remoteVer(tag_name.c_str());
+                    versionparse::Version remoteVer(tag_name.c_str());
                     if(!remoteVer) {
                         spdlog::warn("远程仓库中的版本号解析失败, ({})", tag_name);
                     }
@@ -326,7 +326,9 @@ int wmain(int argc, wchar_t* wargv[])
                             }
                             else {
                                 std::string browser_download_url = asset->at("browser_download_url").get<std::string>();
-                                std::string downlink = asset->at("url").get<std::string>();
+                                // 下载使用浏览器下载地址(github.com 直链): 不消耗 API 配额,
+                                // 避免共享 IP 触发 60次/小时匿名限流导致下载 403
+                                std::string downlink = browser_download_url;
                                 int download_count = asset->at("download_count").get<int>();
                                 size_t max_size = asset->at("size").get<int64_t>();
                                 // 发布资产声明的 SHA256 摘要(形如 sha256:<hex>), 用于下载后完整性校验
@@ -335,8 +337,8 @@ int wmain(int argc, wchar_t* wargv[])
                                 spdlog::info("是否自动更新:");
                                 bool autoupdate = utils::ReadUserInput_bool({ "n", "y" }, 0);
                                 if(autoupdate) {
+                                    // 下载地址形如:
                                     //https://github.com/Tupig/GitHubDesktop2Chinese/releases/download/v1.0.14/GitHubDesktop2Chinese.exe
-                                    //https://api.github.com/repos/Tupig/GitHubDesktop2Chinese/releases/assets/376558079
                                     std::regex url_regex(R"(^((?:https?://)[^/]+)(/.*)?$)");
                                     std::smatch matches;
                                     if(std::regex_match(downlink, matches, url_regex)) {
@@ -464,7 +466,6 @@ int wmain(int argc, wchar_t* wargv[])
 
         //	检查注册表中是否存在GithubDesktop
         winreg::RegKey key;
-        //winreg::RegResult result = key.TryOpen(HKEY_USERS, utils::to_wide_string(sid) + L"\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\GitHubDesktop");
         winreg::RegResult result = key.TryOpen(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\GitHubDesktop");
         if (!result)
         {
@@ -495,8 +496,8 @@ int wmain(int argc, wchar_t* wargv[])
                     try {
                         auto httpjson = json::parse(httpjson_str);
                         std::string v = httpjson.at(0).at("version").get<std::string>();
-                        std::Version desktop_remote_ver(v.c_str());
-                        std::Version desktop_local_ver(desktop_local_ver_str.c_str());
+                        versionparse::Version desktop_remote_ver(v.c_str());
+                        versionparse::Version desktop_local_ver(desktop_local_ver_str.c_str());
                         spdlog::info("已读取到远程GitHubDesktop最新版:{} {}", v, desktop_remote_ver > desktop_local_ver ? "(\033[1;33m需更新\033[0m)" : "");
                     }
                     catch(const std::exception& e) {
@@ -650,8 +651,8 @@ int wmain(int argc, wchar_t* wargv[])
             spdlog::warn("映射文件中 minversion 不是字符串, 已忽略");
         }
     }
-    if(FileVer.status != std::Version::Dev && !minver_str.empty()) {
-        std::Version JsonVer(minver_str.c_str());
+    if(FileVer.status != versionparse::Version::Dev && !minver_str.empty()) {
+        versionparse::Version JsonVer(minver_str.c_str());
         if(!JsonVer) {
             spdlog::warn("映射文件中 minversion 解析失败... at {}", minver_str);
             PAUSE
