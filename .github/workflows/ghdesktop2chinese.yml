@@ -290,6 +290,12 @@ jobs:
                       errors.append(f"select[{si}] 缺少 tooltip")
                   if "enable" not in sel:
                       errors.append(f"select[{si}] 缺少 enable")
+                  if "replaceFile" in sel and not isinstance(sel["replaceFile"], str):
+                      errors.append(f"select[{si}] replaceFile 应为字符串")
+                  if "tooltip" in sel and not isinstance(sel["tooltip"], str):
+                      errors.append(f"select[{si}] tooltip 应为字符串")
+                  if "enable" in sel and not isinstance(sel["enable"], bool):
+                      errors.append(f"select[{si}] enable 应为布尔")
                   if not isinstance(sel.get("replace"), list):
                       errors.append(f"select[{si}] replace 应为数组")
 

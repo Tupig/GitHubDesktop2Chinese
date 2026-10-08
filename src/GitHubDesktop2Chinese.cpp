@@ -37,9 +37,6 @@ using json = nlohmann::json;
 fs::path Base;
 fs::path LocalizationJSON;
 
-//fs::path Main_Json_Path;
-//fs::path Renderer_Json_Path;
-
 bool no_pause;                                  // 程序在结束前是否暂停
 bool only_read_from_remote;                     // 仅从远程url中读取本地化文件
 bool rollback;                                  // 从备份中还原汉化前的文件
@@ -139,10 +136,6 @@ int wmain(int argc, wchar_t* wargv[])
             dev_cmd->add_flag("--devsetver", _debug_dev_setversion,                "[指定当前程序版本]输入一个版本信息可以指定当前程序版本");
         }
 
-        //auto git_cmd = app.add_subcommand("action", "Github自动流程");
-        //git_cmd->add_option("--main_json", Main_Json_Path,                          "手动指定main.json的文件位置,直接处理此文件");
-        //git_cmd->add_option("--renderer_json", Renderer_Json_Path,                  "手动指定renderer.json的文件位置,直接处理此文件");
-
         app.add_flag("--nopause", no_pause,                         "程序在结束前不再暂停等待");
         app.add_option("-g,--githubdesktoppath", Base,              "指定GitHubDesktop要汉化的资源所在目录(js所在目录)");
         app.add_option("-j,--json", LocalizationJSON,               "指定本地化JSON文件的本地路径");
@@ -171,18 +164,6 @@ int wmain(int argc, wchar_t* wargv[])
                     throw CLI::ValidationError("(-g,--githubdesktoppath) 指定的资源文件目录无效,该目录下应该是存放main.js和renderer.js文件的");
                 }
             }
-            //// 验证 Main_Json_Path 是否有效
-            //if(!Main_Json_Path.string().empty()) {
-            //    if(!fs::exists(Main_Json_Path)) {
-            //        throw CLI::ValidationError("(action main_json) 指定的资源文件不存在");
-            //    }
-            //}
-            //// 验证 Renderer_Json_Path 是否有效
-            //if(!Renderer_Json_Path.string().empty()) {
-            //    if(!fs::exists(Renderer_Json_Path)) {
-            //        throw CLI::ValidationError("(action renderer_json) 指定的资源文件不存在");
-            //    }
-            //}
         });
 
 
@@ -457,11 +438,6 @@ int wmain(int argc, wchar_t* wargv[])
 
     // Github Desktop 存在目录没有提前设置
     if (!fs::exists(Base) || !fs::exists(Base / "index.html")) {
-        // 首先要能够成功读取注册表
-        //	拿到当前用户sid
-        //std::string sid = GetCurrentUserSid();
-        //spdlog::debug("sid:{}", sid);
-
         //	检查注册表中是否存在GithubDesktop
         winreg::RegKey key;
         winreg::RegResult result = key.TryOpen(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\GitHubDesktop");
@@ -497,11 +473,16 @@ int wmain(int argc, wchar_t* wargv[])
                         auto httpjson = json::parse(httpjson_str);
                         std::string v = httpjson.at("tag_name").get<std::string>();
                         if(v.rfind("release-", 0) == 0) {
-                            v = v.substr(strlen("release-"));
+                            v = v.substr(8); // 剥离 "release-" 前缀
                         }
                         versionparse::Version desktop_remote_ver(v.c_str());
-                        versionparse::Version desktop_local_ver(desktop_local_ver_str.c_str());
-                        spdlog::info("已读取到远程GitHubDesktop最新版:{} {}", v, desktop_remote_ver > desktop_local_ver ? "(\033[1;33m需更新\033[0m)" : "");
+                        if(desktop_remote_ver) {
+                            versionparse::Version desktop_local_ver(desktop_local_ver_str.c_str());
+                            spdlog::info("已读取到远程GitHubDesktop最新版:{} {}", v, desktop_remote_ver > desktop_local_ver ? "(\033[1;33m需更新\033[0m)" : "");
+                        }
+                        else {
+                            spdlog::warn("远程GitHubDesktop版本号解析失败: {}", v);
+                        }
                     }
                     catch(const std::exception& e) {
                         spdlog::warn("远程GitHubDesktop版本信息解析失败: {}", e.what());
@@ -1063,7 +1044,8 @@ int wmain(int argc, wchar_t* wargv[])
 
 
     PAUSE
-    return ret_num;
+    // invalidcheck 的失败计数作为退出码, 钳制到 255 避免截断歧义
+    return ret_num > 255 ? 255 : ret_num;
 }
 
 bool GetBasePath(std::string& out) {
@@ -1155,7 +1137,6 @@ void DeveloperOptions() {
         std::cout << std::endl;
 
         int sys = 0;
-        //int sw = 0;	//功能开关
         spdlog::info("请输入你要修改的功能:");
         if(!(std::cin >> sys)) {
             // 注意: 必须先判断eof再clear, clear会同时清除eofbit导致EOF无法识别
@@ -1174,39 +1155,24 @@ void DeveloperOptions() {
         case 0:
             return;
         case 1:
-            //spdlog::info("输入你要切换的状态(0关 1开):");
-            //std::cin >> sw;
-            //_debug_error_check_mode_main = (bool)sw;
             _debug_error_check_mode_main = utils::ReadUserInput_bool({ "false", "true" });
             break;
         case 2:
-            //spdlog::info("输入你要切换的状态(0关 1开):");
-            //std::cin >> sw;
             _debug_error_check_mode_renderer = utils::ReadUserInput_bool({ "false", "true" });
             break;
         case 3:
-            //spdlog::info("输入你要切换的状态(0关 1开):");
-            //std::cin >> sw;
             _debug_invalid_check_mode = utils::ReadUserInput_bool({ "false", "true" });
             break;
         case 4:
-            //spdlog::info("输入你要切换的状态(0关 1开):");
-            //std::cin >> sw;
             _debug_no_replace_res = utils::ReadUserInput_bool({ "false", "true" });
             break;
         case 5:
-            //spdlog::info("输入你要切换的状态(0关 1开):");
-            //std::cin >> sw;
             _debug_translation_from_bak = utils::ReadUserInput_bool({ "false", "true" });
             break;
         case 6:
-            //spdlog::info("输入你要切换的状态(0关 1开):");
-            //std::cin >> sw;
             _debug_dev_replace = utils::ReadUserInput_bool({ "false", "true" });
             break;
         case 20:
-            //spdlog::info("输入你要切换的状态(0关 1开):");
-            //std::cin >> sw;
             _debug_dev_setversion = utils::ReadUserInput_bool({ "false", "true" });
             break;
         }
