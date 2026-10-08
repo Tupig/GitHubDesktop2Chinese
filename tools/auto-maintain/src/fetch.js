@@ -108,6 +108,21 @@ export async function downloadZip(url, destDir) {
  */
 export function extractJs(zipPath, workDir) {
   const extractDir = path.join(workDir, 'extracted');
+  // 提取结果与来源包一致时直接复用（配合 CI 缓存，避免每次重复解压 150MB+ 安装包）；
+  // 来源包文件名固定为 github-desktop.nupkg，以文件大小识别版本变化
+  const sourceId = `${path.basename(zipPath)}:${fs.statSync(zipPath).size}`;
+  const markerPath = path.join(extractDir, '.source.txt');
+  if (fs.existsSync(markerPath) && fs.readFileSync(markerPath, 'utf8').trim() === sourceId) {
+    const cached = findAppDir(extractDir);
+    if (cached) {
+      const cachedMain = path.join(cached, 'main.js');
+      const cachedRenderer = path.join(cached, 'renderer.js');
+      if (fs.existsSync(cachedMain) && fs.existsSync(cachedRenderer)) {
+        return { mainJsPath: cachedMain, rendererJsPath: cachedRenderer, appDir: cached };
+      }
+    }
+  }
+
   fs.rmSync(extractDir, { recursive: true, force: true });
   fs.mkdirSync(extractDir, { recursive: true });
 
@@ -129,6 +144,7 @@ export function extractJs(zipPath, workDir) {
   if (!fs.existsSync(mainJsPath) || !fs.existsSync(rendererJsPath)) {
     throw new Error(`app 目录中缺少 main.js / renderer.js: ${appDir}`);
   }
+  fs.writeFileSync(markerPath, sourceId);
   return { mainJsPath, rendererJsPath, appDir };
 }
 
