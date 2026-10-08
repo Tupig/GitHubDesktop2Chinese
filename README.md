@@ -107,7 +107,6 @@ cmake --build build --config Release
 
 > [!TIP]
 > 手动触发 `type=auto` 会跑完整链路（构建 → 检查 → 维护 → 发布），版本号自动升级补丁号（如 `1.2.4 → 1.2.5`）；也可在 `version` 输入框手动指定。
-> 若自上个版本以来 `json/`、`src/`、`third_party/`、CMake 均无变更，`auto` 模式会**自动跳过发布**，避免产生空版本；`type=release` 与 tag 推送则始终发布。
 
 自动维护工具位于 [`tools/auto-maintain`](tools/auto-maintain)，基于 **Windows 版** GitHub Desktop 的 `main.js` / `renderer.js` 检测；本地运行：
 
@@ -117,7 +116,10 @@ npm run all        # 失效检测 + 未翻译候选提取
 ```
 
 > [!NOTE]
-> 工作流每日北京时间 10:00（UTC 02:00）定时执行构建与自动维护。
+> **定时与发布规则**
+> - **定时调度**：每日北京时间 10:00（UTC 02:00）自动执行构建与自动维护。
+> - **变更检测**：以最新 `v*` tag 为基准，检测 `json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 的实际变更。
+> - **条件发布**：定时与手动 `auto` 仅在检测到上述变更时发布新版本（补丁号 +1）；无变更自动跳过，避免空版本。`type=release` 与推送 tag 始终发布。
 
 ## 📁 项目结构
 
