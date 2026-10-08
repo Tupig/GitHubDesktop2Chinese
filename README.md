@@ -185,6 +185,8 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 > **汉化后主程序无法打开**：更新加载器后执行 `GitHubDesktop2Chinese.exe dev --translationfrombak`。
 >
 > **想撤销汉化、还原为汉化前状态**：执行 `GitHubDesktop2Chinese.exe --rollback`（从 `main.js.bak` / `renderer.js.bak` 还原）。
+>
+> **是否支持 macOS / Linux？**：不支持。本工具基于 Windows 专用 API（MSVC 构建），且汉化映射针对 **Windows 版** GitHub Desktop 的界面文案（含 `&` 访问键等 Windows 专属内容），仅提供 64 位 Windows 版本。
 
 有任何建议欢迎提 [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues)。
 
