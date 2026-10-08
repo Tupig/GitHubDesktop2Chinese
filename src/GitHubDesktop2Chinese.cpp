@@ -75,21 +75,13 @@ std::optional<std::string> formatTime(std::string time_str);
 BOOL WINAPI ConsoleHandler(DWORD dwCtrlType) {
     // 仅拦截窗口关闭事件
     if(dwCtrlType == CTRL_CLOSE_EVENT) {
-        // 弹出确认对话框（使用 Unicode 字符串）
-        int result = MessageBoxW(NULL,
-                                 L"程序中止， 汉化可能失败， 请重新运行后按照程序的流程走，汉化完成后会自动关闭，不建议手动关闭窗口\n开发者:“按任意键继续”是继续的意思，不是已完成的意思",
-                                 L"汉化程序已关闭，本提示五秒后自动关闭",
-                                 MB_OK | MB_ICONQUESTION | MB_DEFBUTTON2);
-
-        if(result == IDYES) {
-            // 用户确认：执行清理并退出
-            // 注意：ExitProcess 会立即终止进程，不会返回
-            ExitProcess(0);
-        }
-        else {
-            // 用户取消：阻止默认关闭行为
-            return TRUE;
-        }
+        // 弹出提示对话框（使用 Unicode 字符串）
+        // MB_OK 只会返回 IDOK, 展示后返回 TRUE 交给系统完成关闭(约五秒后进程结束)
+        MessageBoxW(NULL,
+                    L"程序中止， 汉化可能失败， 请重新运行后按照程序的流程走，汉化完成后会自动关闭，不建议手动关闭窗口\n开发者:“按任意键继续”是继续的意思，不是已完成的意思",
+                    L"汉化程序已关闭，本提示五秒后自动关闭",
+                    MB_OK | MB_ICONQUESTION);
+        return TRUE;
     }
     // 其他事件（Ctrl+C、Ctrl+Break、关机等）不处理，让系统默认执行
     return FALSE;
@@ -422,7 +414,7 @@ int main(int argc, char* argv[])
     }
 
     // 读取映射文件中的提示信息
-    if (localization.contains("tip") && localization.at("tip").is_array() && !localization.empty()) {
+    if (localization.contains("tip") && localization.at("tip").is_array() && !localization.at("tip").empty()) {
         for(auto& it : localization.at("tip")) {
             if (it.is_string()) {
                 spdlog::info(" **通知** {}", it.get<std::string>());
