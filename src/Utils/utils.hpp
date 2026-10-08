@@ -352,7 +352,10 @@ public:
             //	spdlog::info("请输入一个表示字符串的值({} 默认 {})", input, input[defaultval]);
 
             std::string instr;
-            std::cin >> instr;
+            if(!(std::cin >> instr)) {
+                // 输入流已结束(管道/重定向运行): 有默认值返回默认, 否则返回空串, 避免死循环
+                return defaultval != -1 ? input[defaultval] : std::string();
+            }
 
             for (std::string& item : input)
             {
@@ -386,7 +389,10 @@ public:
             //std::cin >> instr;
             std::cin.clear();
             if(std::cin.rdbuf()->in_avail() > 0) std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-            std::getline(std::cin, instr);
+            if(!std::getline(std::cin, instr)) {
+                // 输入流已结束(管道/重定向运行): 有默认值返回默认, 否则返回false, 避免死循环
+                return defaultval != -1 ? (defaultval == 1) : false;
+            }
 
             if (instr == input[0]) {
                 return false;

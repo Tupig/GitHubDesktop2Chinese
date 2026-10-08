@@ -12,9 +12,16 @@ const API_BASE = 'https://api.github.com';
 // 使用 macOS 包会产生大量假失效。
 const ASSET_PATTERN = /^GitHubDesktop-[\d.]+-x64-full\.nupkg$/;
 
+// 单次 HTTP 请求超时: 查询 45s, 大文件下载 15min(慢网络兜底, 配合断点续传)
+const QUERY_TIMEOUT_MS = 45_000;
+const DOWNLOAD_TIMEOUT_MS = 900_000;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 /**
  * 获取最新 GitHub Desktop 的 release 信息
  * 返回 { tag, version, zipAssetUrl }
+ * 网络抖动/限流时内置重试(共2次), 单次请求带超时避免挂起
  */
 export async function getLatestRelease() {
   const headers = { 'User-Agent': 'githubdesktop2chinese-auto-maintain' };
@@ -22,20 +29,35 @@ export async function getLatestRelease() {
   if (process.env.GITHUB_TOKEN) {
     headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
   }
-  const res = await fetch(`${API_BASE}/repos/${GITHUB_DESKTOP_REPO}/releases/latest`, {
-    headers,
-  });
-  if (!res.ok) {
-    throw new Error(`获取 GitHub Desktop 最新 release 失败: HTTP ${res.status}`);
+
+  const attempts = 2;
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await fetch(`${API_BASE}/repos/${GITHUB_DESKTOP_REPO}/releases/latest`, {
+        headers,
+        signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
+      });
+      if (!res.ok) {
+        throw new Error(`获取 GitHub Desktop 最新 release 失败: HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      const tag = data.tag_name; // 形如 release-3.6.6
+      const version = tag.replace(/^release-/, '');
+      const asset = data.assets.find((a) => ASSET_PATTERN.test(a.name));
+      if (!asset) {
+        throw new Error(`未在 release ${tag} 中找到 Windows 完整包 ${ASSET_PATTERN}`);
+      }
+      return { tag, version, assetName: asset.name, zipUrl: asset.browser_download_url, zipSize: asset.size };
+    } catch (e) {
+      lastError = e;
+      if (attempt < attempts) {
+        console.warn(`获取 release 信息失败(第 ${attempt}/${attempts} 次): ${e.message}，5 秒后重试`);
+        await sleep(5_000);
+      }
+    }
   }
-  const data = await res.json();
-  const tag = data.tag_name; // 形如 release-3.6.6
-  const version = tag.replace(/^release-/, '');
-  const asset = data.assets.find((a) => ASSET_PATTERN.test(a.name));
-  if (!asset) {
-    throw new Error(`未在 release ${tag} 中找到 Windows 完整包 ${ASSET_PATTERN}`);
-  }
-  return { tag, version, assetName: asset.name, zipUrl: asset.browser_download_url, zipSize: asset.size };
+  throw new Error(`获取 GitHub Desktop 最新 release 连续失败 ${attempts} 次: ${lastError?.message ?? '未知错误'}`);
 }
 
 /**
@@ -81,7 +103,7 @@ export async function downloadZip(url, destDir) {
       hasPartial = true;
     }
   }
-  const res = await fetch(url, { headers });
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
   if (res.status !== 200 && res.status !== 206) {
     throw new Error(`下载 GitHub Desktop 失败: HTTP ${res.status}`);
   }

@@ -10,6 +10,7 @@
 #include "GitHubDesktop2Chinese.h"
 #include <string>
 #include <vector>
+#include <limits>
 #include <filesystem>
 
 #include <regex>
@@ -211,7 +212,11 @@ int wmain(int argc, wchar_t* wargv[])
         for(;;) {
             spdlog::info("请输入版本 如 1.2.3 (exit强制跳出):");
             std::string instr;
-            std::cin >> instr;
+            if(!(std::cin >> instr)) {
+                // 输入流已结束(管道/重定向运行)或读取失败, 无法继续交互, 跳出避免死循环
+                spdlog::error("无法读取输入(输入流已结束), 退出版本设置");
+                break;
+            }
             if(instr == "exit") {
                 break;
             }
@@ -464,6 +469,11 @@ int wmain(int argc, wchar_t* wargv[])
             spdlog::warn("注册表中未发现GitHubDesktop相关条目, Reg ErrorMessage: {}" ,utils::to_byte_string(result.ErrorMessage()));
             spdlog::warn("你可能没有安装GithubDesktop，请先安装然后打开此程序或者手动指定main.js所在的文件夹目录");
             Base = utils::to_path(LoopGetBasePath());
+            if(Base.empty()) {
+                spdlog::error("未能获取资源目录, 请使用 -g 参数手动指定");
+                PAUSE
+                return 1;
+            }
         }
         else {
             try
@@ -503,6 +513,11 @@ int wmain(int argc, wchar_t* wargv[])
                 if (!fs::exists(Base)) {
                     spdlog::warn("注册表最终获取到的目录不存在,请手动指定main.js所在的文件夹目录");
                     Base = utils::to_path(LoopGetBasePath());
+                    if(Base.empty()) {
+                        spdlog::error("未能获取资源目录, 请使用 -g 参数手动指定");
+                        PAUSE
+                        return 1;
+                    }
                 }
 
             }
@@ -699,7 +714,10 @@ int wmain(int argc, wchar_t* wargv[])
                     if (out <= 0) {
                         utils::WriteFile(fs::path(Base / "main.js").string(), main_str);
                         spdlog::info("已写入. 你希望下次替换多少条后写入:");
-                        std::cin >> out;
+                        if(!(std::cin >> out)) {
+                            // 输入流已结束(非交互运行): 置为极大值, 等价于剩余项全部替换后一次性写入
+                            out = std::numeric_limits<int>::max();
+                        }
                     }
                 }
             }
@@ -859,7 +877,10 @@ int wmain(int argc, wchar_t* wargv[])
                     if (out <= 0) {
                         utils::WriteFile(fs::path(Base / "renderer.js").string(), renderer_str);
                         spdlog::info("已写入. 你希望下次替换多少条后写入:");
-                        std::cin >> out;
+                        if(!(std::cin >> out)) {
+                            // 输入流已结束(非交互运行): 置为极大值, 等价于剩余项全部替换后一次性写入
+                            out = std::numeric_limits<int>::max();
+                        }
                     }
                 }
             }
@@ -985,7 +1006,10 @@ int wmain(int argc, wchar_t* wargv[])
 }
 
 bool GetBasePath(std::string& out) {
-    getline(std::cin, out);
+    if(!getline(std::cin, out)) {
+        spdlog::error("读取输入失败(输入流已结束)");
+        return false;
+    }
     // 控制台输入为UTF-8, 直接按窄字符串构造路径会被错误地按ANSI代码页解释
     fs::path base = utils::to_path(out);
     if (!fs::exists(base)) {
@@ -1024,9 +1048,12 @@ std::string LoopGetBasePath() {
         if (GetBasePath(tempDir)) {
             return tempDir;
         }
-        else {
-            spdlog::info("重新输入.");
+        if (std::cin.eof() || std::cin.fail()) {
+            // 输入流已结束/出错(管道/重定向运行), 继续循环只会死循环, 返回空由调用方处理
+            spdlog::error("无可用输入, 请使用 -g 参数手动指定资源目录");
+            return "";
         }
+        spdlog::info("重新输入.");
     }
 }
 
@@ -1050,7 +1077,18 @@ void DeveloperOptions() {
         int sys = 0;
         //int sw = 0;	//功能开关
         spdlog::info("请输入你要修改的功能:");
-        std::cin >> sys;
+        if(!(std::cin >> sys)) {
+            // 注意: 必须先判断eof再clear, clear会同时清除eofbit导致EOF无法识别
+            if(std::cin.eof()) {
+                spdlog::error("输入流已结束, 退出开发者菜单");
+                return;
+            }
+            // 非数字输入: 清理流状态与剩余字符后重新询问
+            std::cin.clear();
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            spdlog::warn("输入无效, 请输入数字");
+            continue;
+        }
         switch (sys)
         {
         case 0:
