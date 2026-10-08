@@ -1,35 +1,49 @@
 # GitHubDesktop2Chinese 统一 CI/CD 工作流
-# 一个工作流完成：自动构建、安全与质量检查、失效检测/候选提取、Release 发布。
+# 一个工作流完成：自动构建、质量与安全检查、失效检测/候选提取、Release 发布。
 #
-# 触发：
-#   - PR → 构建 + 安全质量（不发布）
-#   - 推送 tag v*（如 v1.2.5）→ 构建并发布 Release
-#   - 手动触发（type 选择执行子集）：
-#       auto     构建 + 质量 + 维护 + 发布（版本号自动升级；若无变更则跳过发布）
-#       build    仅构建
-#       security 仅质量与安全扫描
-#       maintain 仅失效检测/候选提取
-#       release  构建 + 发布（版本号自动升级或手动指定，始终发布）
+# ── 触发 ─────────────────────────────────────────────────────
+#   定时（每日北京时间上午 10:00 = UTC 02:00）
+#                     扫描 GitHub Desktop 最新版 + 提取翻译候选 + 构建产物
+#                     （仅当 json/src/third_party/CMake 有变更时才发布 Release）
+#   PR                构建 + 质量与安全检查（不发布）
+#   推送 tag v*       构建并发布（版本号取 tag）
+#   手动触发 type=    auto     构建 + 质量 + 维护 + 发布（无变更则跳过发布）
+#                     build    仅构建
+#                     security 仅质量与安全扫描
+#                     maintain 仅失效检测/候选提取
+#                     release  构建 + 发布（始终发布）
 #
-# 版本号规则：
-#   - tag 触发：取 tag 版本（v1.2.5 → 1.2.5）
-#   - 手动输入 version：使用输入值
-#   - 未输入：自动升级补丁号（本仓库最新 v* tag 基础上 +1；无 tag 时回落上游最新版本）
+# ── job 依赖关系 ─────────────────────────────────────────────
+#   version（版本解析，无依赖）
+#       ├── build（需 version）
+#       └── release（需 version + build 产物）
+#   json-quality / tools-test / codeql / auto-maintain 相互独立、与上述并行
 #
-# 发布规则：
-#   - 仅支持 64 位（x64）
-#   - tag 推送与 type=release：始终发布
-#   - type=auto：自上個版本 tag 以来 json/src/third_party/CMake 无变更时跳过发布
+# ── 构建产物约定 ─────────────────────────────────────────────
+#   编译输出  build/Release/GitHubDesktop2Chinese.exe
+#             （cmake -B build；MSVC 多配置生成器 → Release 子目录）
+#   Artifact  GitHubDesktop2Chinese-x64-<版本号|SHA>
+#   发布资产  release/GitHubDesktop2Chinese.exe 与 release/localization.json
+#             （上传至对应 v* tag 的 Release）
 #
-# 说明：为避免自动消耗 Actions 额度，定时任务已移除，
-# 全部改为 PR 触发或手动触发。
+# ── 版本号规则 ───────────────────────────────────────────────
+#   tag 触发     取 tag 版本（v1.2.5 → 1.2.5）
+#   手动 version 使用输入值
+#   auto/release/定时 未输入时自动升级补丁号（最新 v* tag +1）
+#
+# ── 稳定性设计 ───────────────────────────────────────────────
+#   - runner 固定版本（ubuntu-24.04 / windows-2025），CodeQL v4
+#   - 所有 job 均设 timeout-minutes 上限
+#   - 网络/配置类关键步骤内置超时与自动重试
+#   - OpenSSL 静态库、GitHub Desktop 安装包与提取结果均走 actions/cache
 
 name: GitHubDesktop2Chinese
 
 on:
+  # 每日北京时间上午 10:00（UTC 02:00）
+  schedule:
+    - cron: "0 2 * * *"
   pull_request:
-    paths:
-      - "**"
   push:
     tags:
       - "v*"
@@ -62,16 +76,18 @@ permissions:
 
 env:
   BUILD_TYPE: Release
-  PROJECT_DIR: .
   WORK_DIR: /tmp/ghdesktop-auto-maintain
+  EXE_NAME: GitHubDesktop2Chinese.exe
+  ARTIFACT_PREFIX: GitHubDesktop2Chinese-x64
 
 jobs:
-  # ─────────────────────────────────────────────
-  # 0. 解析版本号（构建与发布共用）
-  # ─────────────────────────────────────────────
+  # ═════════════════════════════════════════════════
+  # 0. 解析版本号（构建与发布共用，无依赖）
+  # ═════════════════════════════════════════════════
   version:
     name: 解析版本号
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       changed: ${{ steps.resolve.outputs.changed }}
@@ -82,7 +98,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 计算版本号
+      - name: 计算版本号与变更检测
         id: resolve
         shell: bash
         run: |
@@ -101,23 +117,25 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "自 ${LATEST_TAG} 以来无构建相关变更，auto 模式将跳过 Release"
+            echo "自 ${LATEST_TAG} 以来无构建相关变更，auto/定时模式将跳过发布"
           fi
 
           if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == v* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
             echo "使用 tag 版本: $VERSION"
-          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" || "${GITHUB_EVENT_NAME}" == "schedule" ]]; then
             INPUT='${{ github.event.inputs.version }}'
             TYPE='${{ github.event.inputs.type }}'
             if [[ -n "$INPUT" ]]; then
               VERSION="${INPUT#v}"
               echo "使用手动输入版本: $VERSION"
-            elif [[ "$TYPE" == "auto" || "$TYPE" == "release" ]]; then
+            elif [[ "$TYPE" == "auto" || "$TYPE" == "release" || "${GITHUB_EVENT_NAME}" == "schedule" ]]; then
               LATEST="$LATEST_TAG"
               if [[ -z "$LATEST" ]]; then
                 echo "本仓库暂无 v* tag，回落上游最新版本"
-                LATEST="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+                LATEST="$(curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
+                  --connect-timeout 15 --max-time 60 \
+                  -H "Authorization: Bearer ${GH_TOKEN}" \
                   https://api.github.com/repos/cngege/GitHubDesktop2Chinese/releases/latest \
                   | jq -r '.tag_name')"
               fi
@@ -134,29 +152,44 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-  # ─────────────────────────────────────────────
+  # ═════════════════════════════════════════════════
   # 1. 构建（仅 64 位 x64）
-  # 触发：tag / PR / 手动(auto/build/release)
-  # ─────────────────────────────────────────────
+  #    触发：tag / PR / 定时 / 手动(auto/build/release)
+  # ═════════════════════════════════════════════════
   build:
     name: 构建 (x64)
     needs: version
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'build' || inputs.type == 'release'))
-    runs-on: windows-latest
+    runs-on: windows-2025
+    timeout-minutes: 30
     env:
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: 缓存 OpenSSL 静态库
+        uses: actions/cache@v6
+        with:
+          path: third_party/openssl/lib
+          key: openssl-libs-${{ runner.os }}-x64-${{ hashFiles('third_party/openssl/include/**', 'CMakeLists.txt') }}
 
       - name: Configure CMake (x64)
         shell: pwsh
         run: |
           chcp 65001 | Out-Null
           $ver = if ($env:RELEASE_VERSION) { "v$env:RELEASE_VERSION" } else { "ci-${{ github.sha }}" }
-          cmake -B build -A x64 -DGitHubActions=1 -DFILE_VERSION="$ver"
+          # CMake 配置含第三方库下载，网络抖动时自动重试
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            cmake -B build -A x64 -DGitHubActions=1 "-DFILE_VERSION=$ver"
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -ge 3) { Write-Error "CMake 配置连续失败 3 次"; exit 1 }
+            Write-Warning "CMake 配置失败(第 $attempt 次)，15 秒后重试"
+            Start-Sleep -Seconds 15
+          }
 
       - name: Build (x64)
         shell: pwsh
@@ -167,19 +200,22 @@ jobs:
       - name: 上传构建产物
         uses: actions/upload-artifact@v7
         with:
-          name: GitHubDesktop2Chinese-x64-${{ github.sha }}
+          name: ${{ env.ARTIFACT_PREFIX }}-${{ needs.version.outputs.version || github.sha }}
           if-no-files-found: error
-          path: build/Release/GitHubDesktop2Chinese.exe
+          # 编译输出固定于 build/Release/（MSVC 多配置生成器）
+          path: build/Release/${{ env.EXE_NAME }}
 
-  # ─────────────────────────────────────────────
+  # ═════════════════════════════════════════════════
   # 2. localization.json 质量校验
-  # ─────────────────────────────────────────────
+  # ═════════════════════════════════════════════════
   json-quality:
     name: localization.json 质量校验
     if: |
       github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'security' || inputs.type == 'release'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
 
@@ -251,15 +287,17 @@ jobs:
           print("\n✅ localization.json 质量校验通过")
           PY
 
-  # ─────────────────────────────────────────────
+  # ═════════════════════════════════════════════════
   # 3. 自动维护工具自检（语法 + 单元测试）
-  # ─────────────────────────────────────────────
+  # ═════════════════════════════════════════════════
   tools-test:
     name: 自动维护工具自检
     if: |
       github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'security' || inputs.type == 'maintain'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
 
@@ -308,20 +346,30 @@ jobs:
           console.log('单元测试通过:', pass, '项');
           "
 
-  # ─────────────────────────────────────────────
-  # 4. CodeQL 安全扫描
-  # ─────────────────────────────────────────────
+  # ═════════════════════════════════════════════════
+  # 4. CodeQL 安全扫描（PR / 手动 auto|security，不含定时以节省资源）
+  # ═════════════════════════════════════════════════
   codeql:
     name: CodeQL 安全扫描
     if: |
       github.event_name == 'pull_request' ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'security'))
-    runs-on: windows-latest
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      # cpp 语言查询包不支持 overlay-base 增量分析，显式关闭以避免构建回退告警
+      CODEQL_OVERLAY_DATABASE_MODE: none
     steps:
       - uses: actions/checkout@v7
 
+      - name: 缓存 OpenSSL 静态库
+        uses: actions/cache@v6
+        with:
+          path: third_party/openssl/lib
+          key: openssl-libs-${{ runner.os }}-x64-${{ hashFiles('third_party/openssl/include/**', 'CMakeLists.txt') }}
+
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: c-cpp
           build-mode: manual
@@ -339,20 +387,23 @@ jobs:
           cmake --build build --config Release
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:c-cpp"
 
-  # ─────────────────────────────────────────────
-  # 5. 自动维护（失效检测 + 候选提取，创建 Issue）
-  # ─────────────────────────────────────────────
+  # ═════════════════════════════════════════════════
+  # 5. 自动维护（失效检测 + 候选提取 → 创建/更新 Issue）
+  #    触发：定时 / 手动(auto|maintain)
+  # ═════════════════════════════════════════════════
   auto-maintain:
     name: 失效检测 + 未翻译候选提取
     if: |
+      github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'maintain'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     env:
-      # fetch.js 查询 GitHub API 时使用, 匿名限额60次/小时会被共享 runner IP 触发403
+      # fetch.js 查询 GitHub API 时使用；匿名限额 60 次/小时会被共享 runner IP 触发 403
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
@@ -361,120 +412,145 @@ jobs:
         with:
           node-version: 24
 
-      - name: 安装解压工具
-        run: sudo apt-get update && sudo apt-get install -y unzip
+      - name: 安装解压工具（缺失时）
+        run: |
+          command -v unzip >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y unzip; }
 
       - name: 查询 GitHub Desktop 最新版本
         id: version
         working-directory: tools/auto-maintain
         run: |
-          LATEST=$(node -e "import('./src/fetch.js').then(async m=>{const r=await m.getLatestRelease();console.log(r.version)})")
+          set -euo pipefail
+          LATEST=""
+          for attempt in 1 2 3; do
+            if LATEST="$(timeout 120 node -e "import('./src/fetch.js').then(async m=>{const r=await m.getLatestRelease();console.log(r.version)}).catch(e=>{console.error(e.message);process.exit(1)})")"; then
+              break
+            fi
+            echo "::warning::查询 GitHub Desktop 最新版本失败(第 ${attempt} 次)，10 秒后重试"
+            sleep 10
+          done
+          [[ -n "$LATEST" ]] || { echo "::error::查询 GitHub Desktop 最新版本连续失败 3 次"; exit 1; }
           echo "ghdesktop_version=$LATEST" >> "$GITHUB_OUTPUT"
           echo "查询到 GitHub Desktop 最新版本: $LATEST"
 
-      - name: 缓存 GitHub Desktop Windows 完整包
-        id: cache-zip
+      - name: 缓存安装包与提取结果
+        id: cache-maintain
         uses: actions/cache@v6
         with:
-          path: ${{ env.WORK_DIR }}/github-desktop.nupkg
-          key: ghdesktop-win-${{ steps.version.outputs.ghdesktop_version }}-${{ runner.os }}
+          path: ${{ env.WORK_DIR }}
+          key: ghd-maintain-v2-${{ steps.version.outputs.ghdesktop_version }}-${{ runner.os }}-${{ hashFiles('tools/auto-maintain/src/**') }}-${{ hashFiles('json/localization.json') }}
 
       - name: 运行失效检测 + 未翻译候选提取
         working-directory: tools/auto-maintain
         run: |
-          node src/index.js check extract \
+          set -euo pipefail
+          attempt=0
+          until timeout 1200 node src/index.js check extract \
             --workdir "$WORK_DIR" \
             --top 100 \
-            --write-report
+            --write-report; do
+            attempt=$((attempt + 1))
+            if [[ $attempt -ge 2 ]]; then
+              echo "::error::失效检测连续失败 2 次"
+              exit 1
+            fi
+            echo "::warning::失效检测失败(第 ${attempt} 次)，20 秒后重试"
+            sleep 20
+          done
 
       - name: 创建或更新自动维护 Issue
         uses: actions/github-script@v9
         with:
           script: |
-            const fs = require('fs');
-            const path = require('path');
-            const reportPath = path.join(process.env.WORK_DIR, 'report.md');
-            const report = fs.readFileSync(reportPath, 'utf8');
+            try {
+              const fs = require('fs');
+              const path = require('path');
+              const reportPath = path.join(process.env.WORK_DIR, 'report.md');
+              const report = fs.readFileSync(reportPath, 'utf8');
 
-            const failedMatch = report.match(/总映射项\s+(\d+)，有效\s+(\d+)，失效\s+(\d+)。/);
-            const failed = failedMatch ? failedMatch[3] : '?';
-            const noFailures = Number(failed) === 0;
+              const failedMatch = report.match(/总映射项\s+(\d+)，有效\s+(\d+)，失效\s+(\d+)。/);
+              const failed = failedMatch ? failedMatch[3] : '?';
+              const noFailures = Number(failed) === 0;
 
-            const title = `[自动维护] 汉化映射失效 ${failed} 项 / 未翻译候选 (GitHub Desktop 报告)`;
-            const today = new Date().toISOString().slice(0, 10);
-            const body = [
-              `## 自动维护报告（${today}）`,
-              '',
-              '本 Issue 由自动维护工作流生成，用于提醒维护者关注汉化映射的健康度。',
-              '',
-              '> ⚠️ 此报告不直接修改 `localization.json`，请人工确认后处理。',
-              '',
-              '---',
-              '',
-              report,
-              '',
-              '---',
-              `_由 [GitHubDesktop2Chinese](https://github.com/${{ github.repository }}/actions/workflows/ghdesktop2chinese.yml) 自动生成_`,
-            ].join('\n');
+              const title = `[自动维护] 汉化映射失效 ${failed} 项 / 未翻译候选 (GitHub Desktop 报告)`;
+              const today = new Date().toISOString().slice(0, 10);
+              const body = [
+                `## 自动维护报告（${today}）`,
+                '',
+                '本 Issue 由自动维护工作流生成，用于提醒维护者关注汉化映射的健康度。',
+                '',
+                '> ⚠️ 此报告不直接修改 `localization.json`，请人工确认后处理。',
+                '',
+                '---',
+                '',
+                report,
+                '',
+                '---',
+                `_由 [GitHubDesktop2Chinese](https://github.com/${{ github.repository }}/actions/workflows/ghdesktop2chinese.yml) 自动生成_`,
+              ].join('\n');
 
-            const { data: issues } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              labels: ['auto-maintain'],
-            });
+              const { data: issues } = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                labels: ['auto-maintain'],
+              });
 
-            const existing = issues.find(i => i.title.startsWith('[自动维护]'));
+              const existing = issues.find(i => i.title.startsWith('[自动维护]'));
 
-            if (noFailures) {
+              if (noFailures) {
+                if (existing) {
+                  await github.rest.issues.update({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: existing.number,
+                    state: 'closed',
+                    body: body,
+                  });
+                  console.log(`已关闭 Issue #${existing.number}（无失效项）`);
+                } else {
+                  console.log('无失效项且无历史 Issue，无需操作');
+                }
+                return;
+              }
+
               if (existing) {
                 await github.rest.issues.update({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: existing.number,
-                  state: 'closed',
+                  title: title,
                   body: body,
                 });
-                console.log(`已关闭 Issue #${existing.number}（无失效项）`);
+                console.log(`已更新 Issue #${existing.number}`);
               } else {
-                console.log('无失效项且无历史 Issue，无需操作');
+                const created = await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: title,
+                  body: body,
+                  labels: ['auto-maintain'],
+                });
+                console.log(`已创建 Issue #${created.data.number}`);
               }
-              return;
+            } catch (err) {
+              core.setFailed(`创建或更新自动维护 Issue 失败: ${err.message}`);
             }
 
-            if (existing) {
-              await github.rest.issues.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: existing.number,
-                title: title,
-                body: body,
-              });
-              console.log(`已更新 Issue #${existing.number}`);
-            } else {
-              const created = await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: title,
-                body: body,
-                labels: ['auto-maintain'],
-              });
-              console.log(`已创建 Issue #${created.data.number}`);
-            }
-
-  # ─────────────────────────────────────────────
-  # 6. 发布 Release（tag v* 或手动 auto/release）
-  # 依赖 build（需其产物）与 version（版本号）
-  # auto 模式下若自上个版本以来无构建相关变更，则跳过发布
-  # ─────────────────────────────────────────────
+  # ═════════════════════════════════════════════════
+  # 6. 发布 Release（tag v* / 手动 auto|release / 定时且有变更）
+  #    依赖 build 产物与 version 版本号
+  # ═════════════════════════════════════════════════
   release:
     name: 发布 Release
     needs: [version, build]
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       (github.event_name == 'workflow_dispatch' && inputs.type == 'release') ||
-      (github.event_name == 'workflow_dispatch' && inputs.type == 'auto' && needs.version.outputs.changed == 'true')
-    runs-on: ubuntu-latest
+      (github.event_name == 'workflow_dispatch' && inputs.type == 'auto' && needs.version.outputs.changed == 'true') ||
+      (github.event_name == 'schedule' && needs.version.outputs.changed == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
@@ -482,6 +558,7 @@ jobs:
 
       - name: 校验版本号
         run: |
+          set -euo pipefail
           VER="${{ needs.version.outputs.version }}"
           if [[ -z "$VER" ]]; then
             echo "::error::版本号为空，无法发布。请检查 version 任务输出"
@@ -492,17 +569,19 @@ jobs:
       - name: 下载构建产物 (x64)
         uses: actions/download-artifact@v8
         with:
-          name: GitHubDesktop2Chinese-x64-${{ github.sha }}
+          name: ${{ env.ARTIFACT_PREFIX }}-${{ needs.version.outputs.version || github.sha }}
           path: release/
 
       - name: 准备 localization.json
         run: |
+          set -euo pipefail
           mkdir -p release
           cp "json/localization.json" release/
 
       - name: 生成 Release 说明
         shell: bash
         run: |
+          set -euo pipefail
           VER="${{ needs.version.outputs.version }}"
           {
             echo "# GitHubDesktop2Chinese v$VER"
@@ -525,23 +604,29 @@ jobs:
             fi
           } > release-notes.md
 
-      - name: 创建 Release
+      - name: 创建或更新 Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           VER="v${{ needs.version.outputs.version }}"
           TITLE="GitHubDesktop2Chinese v${{ needs.version.outputs.version }}"
+          # 网络抖动时自动重试（上传支持 --clobber，重试安全）
+          retry() {
+            local max=$1
+            shift
+            local attempt=0
+            until "$@"; do
+              attempt=$((attempt + 1))
+              [[ $attempt -ge $max ]] && return 1
+              echo "::warning::命令失败(第 ${attempt} 次)，15 秒后重试: $*"
+              sleep 15
+            done
+          }
           if gh release view "$VER" >/dev/null 2>&1; then
-            gh release upload "$VER" \
-              release/GitHubDesktop2Chinese.exe \
-              release/localization.json \
-              --clobber
+            retry 3 gh release upload "$VER" release/GitHubDesktop2Chinese.exe release/localization.json --clobber
             gh release edit "$VER" --title "$TITLE" --notes-file release-notes.md
           else
-            gh release create "$VER" \
-              release/GitHubDesktop2Chinese.exe \
-              release/localization.json \
-              --title "$TITLE" \
-              --notes-file release-notes.md
+            retry 3 gh release create "$VER" release/GitHubDesktop2Chinese.exe release/localization.json --title "$TITLE" --notes-file release-notes.md
           fi
