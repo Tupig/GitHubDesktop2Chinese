@@ -599,10 +599,27 @@ jobs:
             echo ""
             echo "> ⚠️ 仅支持 64 位 Windows / GitHub Desktop；找不到 openssl dll 请升级到本版本；缺失 MSVCP140_ATOMIC_WAIT.dll 请安装 Microsoft Visual C++ Redistributable"
             if [[ -f docs/ReleaseBody.md ]]; then
+              # 仅提取当前版本的变更行(行内含版本标记: 全角括号+vX.Y.Z),
+              # 不再整篇附带从 v1.2.0 起的历史日志
+              CHANGES="$(grep -F "（v$VER）" docs/ReleaseBody.md || true)"
               echo ""
               echo "---"
               echo ""
-              cat docs/ReleaseBody.md
+              if [[ -n "$CHANGES" ]]; then
+                echo "## 本次更新"
+                echo ""
+                echo "$CHANGES"
+              else
+                echo "> ℹ️ 未在 docs/ReleaseBody.md 中找到 v$VER 的变更记录，完整更新历史见仓库文档"
+              fi
+              # 静态「程序说明」属于使用说明而非版本日志, 保持附带
+              NOTES="$(awk '/^### 程序说明/{f=1} f' docs/ReleaseBody.md || true)"
+              if [[ -n "$NOTES" ]]; then
+                echo ""
+                echo "---"
+                echo ""
+                echo "$NOTES"
+              fi
             fi
           } > release-notes.md
 
