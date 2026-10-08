@@ -11,6 +11,8 @@
 #include <cstdio>
 #include <cstdint>
 #include <cctype>
+#include <thread>
+#include <chrono>
 #include <windows.h>
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "http/httplib.h"
@@ -71,13 +73,19 @@ namespace utils {
         }
         SetupTlsVerification(cli);
         cli.set_follow_location(true);                          //https://raw.github.com 会要求301重定向
-        auto res = cli.Get(params);
-        if(!res) {
-            for(int i = 0; i < 3; i++) {
-                res = cli.Get(params);
-                if(res) break;
+
+        // 瞬时性错误(连接失败/403 限流/429/5xx)自动重试: GitHub API 与资产 CDN 在共享 IP 下偶发此类错误
+        httplib::Result res;
+        for(int attempt = 0; attempt < 4; attempt++) {
+            if(attempt > 0) {
+                spdlog::warn("请求 {}{} 失败(第 {} 次), 2 秒后重试", url_host, params, attempt);
+                std::this_thread::sleep_for(std::chrono::seconds(2));
             }
+            res = cli.Get(params);
+            if(res && res->status == httplib::StatusCode::OK_200) break;
+            if(res && res->status != 403 && res->status != 429 && res->status < 500) break; // 非瞬时性错误, 不重试
         }
+
         if (res) {
             if (res->status == httplib::StatusCode::OK_200) {
                 out = res->body;
@@ -286,7 +294,17 @@ namespace utils {
         fs::path tmp_file = Self;
         tmp_file += ".new"; // 下载临时文件
 
-        if(!DownloadToFile(url_host, params, proxy, tmp_file, max_size)) {
+        // 下载重试: 资产 CDN 偶发瞬时 403(压力实测 6 轮中 2 轮首试命中), 重试即可恢复;
+        // 失败残留的临时文件会自然进入续传/从头重下, 不影响正确性
+        bool downloaded = false;
+        for(int attempt = 1; attempt <= 3 && !downloaded; attempt++) {
+            if(attempt > 1) {
+                spdlog::warn("下载失败, 5 秒后自动重试(第 {}/3 次)", attempt);
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+            }
+            downloaded = DownloadToFile(url_host, params, proxy, tmp_file, max_size);
+        }
+        if(!downloaded) {
             return false;
         }
         if(!VerifyDownloadedFile(tmp_file, max_size, expected_digest)) {
