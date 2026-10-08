@@ -407,8 +407,6 @@ jobs:
     env:
       # fetch.js 查询 GitHub API 时使用；匿名限额 60 次/小时会被共享 runner IP 触发 403
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # 维护工作目录: 基于 runner 系统临时目录, 不硬编码绝对路径
-      WORK_DIR: ${{ runner.temp }}/ghdesktop-auto-maintain
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -441,7 +439,7 @@ jobs:
         id: cache-maintain
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: ${{ env.WORK_DIR }}
+          path: ${{ runner.temp }}/ghdesktop-auto-maintain
           key: ghd-maintain-v2-${{ steps.version.outputs.ghdesktop_version }}-${{ runner.os }}-${{ hashFiles('tools/auto-maintain/src/**') }}-${{ hashFiles('json/localization.json') }}
 
       - name: 运行失效检测 + 未翻译候选提取
@@ -450,7 +448,7 @@ jobs:
           set -euo pipefail
           attempt=0
           until timeout 1200 node src/index.js check extract \
-            --workdir "$WORK_DIR" \
+            --workdir "$RUNNER_TEMP/ghdesktop-auto-maintain" \
             --top 100 \
             --write-report; do
             attempt=$((attempt + 1))
@@ -469,7 +467,7 @@ jobs:
             try {
               const fs = require('fs');
               const path = require('path');
-              const reportPath = path.join(process.env.WORK_DIR, 'report.md');
+              const reportPath = path.join(process.env.RUNNER_TEMP, 'ghdesktop-auto-maintain', 'report.md');
               const report = fs.readFileSync(reportPath, 'utf8');
 
               const failedMatch = report.match(/总映射项\s+(\d+)，有效\s+(\d+)，失效\s+(\d+)。/);
