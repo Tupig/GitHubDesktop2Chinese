@@ -117,7 +117,7 @@ npm run all        # 失效检测 + 未翻译候选提取
 ```
 
 > [!NOTE]
-> 工作流每日北京时间 10:00（UTC 02:00）定时执行构建与自动维护；仅当 `json/`、`src/`、`third_party/` 或 CMake 配置有变更时才会发布新版本，避免产生空版本。
+> 工作流每日北京时间 10:00（UTC 02:00）定时执行构建与自动维护。
 
 ## 📁 项目结构
 
@@ -128,7 +128,13 @@ npm run all        # 失效检测 + 未翻译候选提取
 ├── src/                          # C++ 主程序源码
 │   ├── GitHubDesktop2Chinese.cpp # 程序入口与汉化主流程
 │   ├── GitHubDesktop2Chinese.h
-│   ├── utils/utils.hpp           # 通用工具（HTTP / 代理 / 编码 / 文件 / 更新 / 输入）
+│   ├── utils/                    # 通用工具（伞形入口 + 按职责拆分的子头）
+│   │   ├── utils.hpp             # 伞形汇总头（对外唯一入口）
+│   │   ├── encoding.hpp          # 编码转换（宽窄字符串 / 路径构造）
+│   │   ├── system.hpp            # 环境变量与系统代理探测
+│   │   ├── fs_io.hpp             # 文件读写
+│   │   ├── http.hpp              # HTTP / TLS 校验 / 自动更新
+│   │   └── input.hpp             # 交互输入
 │   └── version/Version.hpp       # 版本号解析（自研代码）
 ├── third_party/                  # 第三方依赖（随仓库提交，含预编译 OpenSSL x64 静态库）
 │   ├── include/                  # CLI11、cpp-httplib、nlohmann/json、spdlog、WinReg
