@@ -95,5 +95,6 @@ tools/auto-maintain/
 │   ├── index.js           # CLI 入口
 │   ├── fetch.js           # 获取/下载/解压最新 GitHub Desktop，提取 main.js/renderer.js
 │   ├── check-invalid.js   # 失效检测
-│   └── extract-new.js     # 未翻译候选提取
+│   ├── extract-new.js     # 未翻译候选提取
+│   └── report.js          # Markdown 报告渲染（含表格行数上限防护）
 ```
