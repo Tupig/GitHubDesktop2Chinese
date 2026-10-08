@@ -76,7 +76,6 @@ permissions:
 
 env:
   BUILD_TYPE: Release
-  WORK_DIR: /tmp/ghdesktop-auto-maintain
   EXE_NAME: GitHubDesktop2Chinese.exe
   ARTIFACT_PREFIX: GitHubDesktop2Chinese-x64
 
@@ -94,7 +93,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -169,10 +168,10 @@ jobs:
     env:
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 缓存 OpenSSL 静态库
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: third_party/openssl/lib
           key: openssl-libs-${{ runner.os }}-x64-${{ hashFiles('third_party/openssl/include/**', 'CMakeLists.txt') }}
@@ -198,7 +197,7 @@ jobs:
           cmake --build build --config $env:BUILD_TYPE
 
       - name: 上传构建产物
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ env.ARTIFACT_PREFIX }}-${{ needs.version.outputs.version || github.sha }}
           if-no-files-found: error
@@ -217,7 +216,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 深度校验 localization.json
         run: |
@@ -253,8 +252,8 @@ jobs:
                       errors.append(f"{name}[{i}] 含非字符串元素")
                       continue
                   pat = item[0]
-                  if not pat:
-                      continue
+                  if not pat or pat == '""':
+                      continue  # 空串与 "" 占位(应用侧视为跳过)不参与校验
                   try:
                       re.compile(pat)
                   except re.error as e:
@@ -263,6 +262,9 @@ jobs:
                       warnings.append(f"{name} 重复查找项: {pat!r} (index {seen[pat]} 与 {i})")
                   else:
                       seen[pat] = i
+                  # ReDoS 启发式(仅告警不阻断): 嵌套量词(如 (a+)+ 、 (.*x)* )在长文本上可能灾难性回溯卡死加载器
+                  if re.search(r"\([^()]*[+*][^()]*\)\s*[+*{]", pat):
+                      warnings.append(f"{name}[{i}] 疑似灾难性回溯(嵌套量词), 请改写该正则: {pat!r}")
 
           for key in ["main", "renderer", "main_dev", "renderer_dev"]:
               if isinstance(data.get(key), list):
@@ -299,9 +301,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
 
@@ -360,16 +362,16 @@ jobs:
       # cpp 语言查询包不支持 overlay-base 增量分析，显式关闭以避免构建回退告警
       CODEQL_OVERLAY_DATABASE_MODE: none
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 缓存 OpenSSL 静态库
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: third_party/openssl/lib
           key: openssl-libs-${{ runner.os }}-x64-${{ hashFiles('third_party/openssl/include/**', 'CMakeLists.txt') }}
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           languages: c-cpp
           build-mode: manual
@@ -387,7 +389,7 @@ jobs:
           cmake --build build --config Release
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           category: "/language:c-cpp"
 
@@ -405,10 +407,12 @@ jobs:
     env:
       # fetch.js 查询 GitHub API 时使用；匿名限额 60 次/小时会被共享 runner IP 触发 403
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 维护工作目录: 基于 runner 系统临时目录, 不硬编码绝对路径
+      WORK_DIR: ${{ runner.temp }}/ghdesktop-auto-maintain
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
 
@@ -435,7 +439,7 @@ jobs:
 
       - name: 缓存安装包与提取结果
         id: cache-maintain
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ env.WORK_DIR }}
           key: ghd-maintain-v2-${{ steps.version.outputs.ghdesktop_version }}-${{ runner.os }}-${{ hashFiles('tools/auto-maintain/src/**') }}-${{ hashFiles('json/localization.json') }}
@@ -459,7 +463,7 @@ jobs:
           done
 
       - name: 创建或更新自动维护 Issue
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             try {
@@ -554,7 +558,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 校验版本号
         run: |
@@ -567,7 +571,7 @@ jobs:
           echo "发布版本: v$VER"
 
       - name: 下载构建产物 (x64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: ${{ env.ARTIFACT_PREFIX }}-${{ needs.version.outputs.version || github.sha }}
           path: release/

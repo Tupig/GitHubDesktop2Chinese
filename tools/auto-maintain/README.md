@@ -30,7 +30,7 @@ node src/index.js check extract --write-report
 node src/index.js check --json /path/to/localization.json
 
 # 本地调试：复用已有的 main.js/renderer.js（跳过约 307MB 下载）
-node src/index.js check extract --workdir /tmp/ghdesktop-auto-maintain --keep-js
+node src/index.js check extract --keep-js
 ```
 
 ## 参数
