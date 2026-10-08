@@ -491,6 +491,12 @@ jobs:
                 `_由 [GitHubDesktop2Chinese](https://github.com/${{ github.repository }}/actions/workflows/ghdesktop2chinese.yml) 自动生成_`,
               ].join('\n');
 
+              // 正文超长防护: GitHub Issue body 上限 65536 字符, 超限会导致创建/更新失败(恰在最需要报告时丢失)
+              const MAX_BODY = 60000;
+              const finalBody = body.length > MAX_BODY
+                ? body.slice(0, MAX_BODY) + '\n\n> ⚠️ 报告过长，已截断；完整内容见工作流日志。\n'
+                : body;
+
               const { data: issues } = await github.rest.issues.listForRepo({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -507,7 +513,7 @@ jobs:
                     repo: context.repo.repo,
                     issue_number: existing.number,
                     state: 'closed',
-                    body: body,
+                    body: finalBody,
                   });
                   console.log(`已关闭 Issue #${existing.number}（无失效项）`);
                 } else {
@@ -522,7 +528,7 @@ jobs:
                   repo: context.repo.repo,
                   issue_number: existing.number,
                   title: title,
-                  body: body,
+                  body: finalBody,
                 });
                 console.log(`已更新 Issue #${existing.number}`);
               } else {
@@ -530,7 +536,7 @@ jobs:
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   title: title,
-                  body: body,
+                  body: finalBody,
                   labels: ['auto-maintain'],
                 });
                 console.log(`已创建 Issue #${created.data.number}`);

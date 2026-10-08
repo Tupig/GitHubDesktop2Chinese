@@ -4,7 +4,8 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { fetchLatest } from './fetch.js';
 import { loadLocalization, checkInvalid } from './check-invalid.js';
-import { extractNew, buildDraftLine } from './extract-new.js';
+import { extractNew } from './extract-new.js';
+import { renderMarkdown } from './report.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
@@ -139,49 +140,6 @@ async function main() {
     console.error(c('31', '✗ ' + (e.stack || e.message)));
     process.exit(1);
   }
-}
-
-function renderMarkdown(report) {
-  const lines = [];
-  lines.push(`# 自动维护报告`);
-  lines.push('');
-  lines.push(`- GitHub Desktop 版本: ${report.version}`);
-  lines.push(`- 生成时间: ${report.generatedAt}`);
-  lines.push('');
-  if (report.checks) {
-    const { total, ok, failedCount, failed } = report.checks;
-    lines.push(`## 失效检测`);
-    lines.push('');
-    lines.push(`总映射项 ${total}，有效 ${ok}，失效 ${failedCount}。`);
-    lines.push('');
-    lines.push(`| 数组 | 序号 | 原因 | 正则 |`);
-    lines.push(`| --- | --- | --- | --- |`);
-    for (const f of failed) {
-      const reason = f.errors.map(e => (e.reason === 'regex-error' ? 'regex-error' : 'not-found')).join('; ');
-      lines.push(`| ${f.array} | ${f.index} | ${reason} | \`${f.errors[0].pattern.replace(/\|/g, '\\|')}\` |`);
-    }
-    lines.push('');
-  }
-  if (report.candidates) {
-    const { candidates, patternsCount } = report.candidates;
-    lines.push(`## 未翻译候选`);
-    lines.push('');
-    lines.push(`基于 ${patternsCount} 条映射正则，发现 ${candidates.length} 条未被覆盖的英文文案候选。`);
-    lines.push('');
-    lines.push(`> **如何补充翻译**：将草稿中的 \`【待翻译】\` 替换为中文译文后，加入对应数组`);
-    lines.push(`> （来源含 \`main.js\` → 加入 \`main\`；来源含 \`renderer.js\` → 加入 \`renderer\`）。`);
-    lines.push(`> 草稿中的查找项已按字面量转义；无法确认用途或无需翻译（如专有名词）的候选请跳过。`);
-    lines.push('');
-    lines.push(`| 来源 | 次数 | 候选文本 | JSON 草稿 |`);
-    lines.push(`| --- | --- | --- | --- |`);
-    for (const cand of candidates.slice(0, 200)) {
-      const files = cand.files.join(', ');
-      const draft = `\`${buildDraftLine(cand.text).replace(/\|/g, '\\|')}\``;
-      lines.push(`| ${files} | ${cand.count} | ${cand.text.replace(/\|/g, '\\|')} | ${draft} |`);
-    }
-    lines.push('');
-  }
-  return lines.join('\n');
 }
 
 main();
