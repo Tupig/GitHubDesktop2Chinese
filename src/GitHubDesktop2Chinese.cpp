@@ -20,8 +20,8 @@
 #include "WinReg/WinReg.hpp"        // 注册表操作库
 
 #include <CLI/CLI.hpp>              // 参数管理器:   https://github.com/CLIUtils/CLI11
-#include "Utils/utils.hpp"
-#include "VersionParse/Version.hpp"
+#include "utils/utils.hpp"
+#include "version/Version.hpp"
 
 #pragma comment(lib, "winhttp.lib")
 

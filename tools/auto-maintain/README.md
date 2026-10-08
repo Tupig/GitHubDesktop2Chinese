@@ -78,12 +78,13 @@ node src/index.js check extract --workdir /tmp/ghdesktop-auto-maintain --keep-js
 
 工作流位于 `../../.github/workflows/ghdesktop2chinese.yml`（仓库根目录）：
 
-- **触发**：手动 `workflow_dispatch` 选择 `type=auto` 或 `type=maintain`（为避免消耗 Actions 额度，已取消定时触发）
-- **流程**：查询最新版本 → 缓存 nupkg（key 绑定版本号）→ 跑 `check extract` → 生成报告 → 创建/更新 `auto-maintain` 标签的 Issue
+- **触发**：每日定时（北京时间 10:00）+ 手动 `workflow_dispatch` 选择 `type=auto` 或 `type=maintain`
+- **流程**：查询最新版本 → 恢复缓存（安装包 + 提取结果）→ 跑 `check extract` → 生成报告 → 创建/更新 `auto-maintain` 标签的 Issue
 - **自动关 Issue**：当失效项降为 0 时，自动关闭历史维护 Issue
 - **不自动合并**：所有映射改动仍需人工确认，避免破坏 GitHub Desktop
 
-> ⚠️ nupkg 缓存 key 绑定 GitHub Desktop 版本号与平台标识（`ghdesktop-win-<版本>`），发新版或切换平台后自动失效并重新下载。
+> ⚠️ 缓存 key 绑定 GitHub Desktop 版本、平台、工具源码与 `localization.json` 哈希（`ghd-maintain-v2-<版本>-<平台>-<工具哈希>-<映射哈希>`），安装包或提取结果变化后自动失效重建。
+> 提取结果与安装包一致时会自动复用（`.source.txt` 来源标记），跳过重复解压。
 
 ## 目录结构
 

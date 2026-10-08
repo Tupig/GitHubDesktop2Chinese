@@ -60,7 +60,7 @@ cmake --build build --config Release
 
 ## 👕怎么贡献汉化
 
-1. 克隆仓库，阅读 [`docs/关于一些注意事项.txt`](docs/关于一些注意事项.txt)
+1. 克隆仓库，阅读 [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)
 2. 在 [`json/localization.json`](json/localization.json) 中参照已有格式补充翻译条目
 3. 提交 PR
 
@@ -98,12 +98,12 @@ cmake --build build --config Release
 
 | 功能 | 触发方式 | 说明 |
 | --- | --- | --- |
-| 构建 | PR / tag `v*` / 手动 | 仅 64 位（x64）构建 |
-| JSON 质量校验 | PR / 手动 | 正则合法性、结构完整性、占位符检查 |
-| 工具自检 | PR / 手动 | 自动维护工具语法检查 + 单元测试 |
+| 构建 | PR / tag `v*` / 定时 / 手动 | 仅 64 位（x64）构建 |
+| JSON 质量校验 | PR / 定时 / 手动 | 正则合法性、结构完整性、占位符检查 |
+| 工具自检 | PR / 定时 / 手动 | 自动维护工具语法检查 + 单元测试 |
 | CodeQL 扫描 | PR / 手动 | C/C++ 安全扫描 |
-| 失效检测 + 候选提取 | 手动 | 检测失效映射、提取未翻译候选，自动创建/关闭 Issue |
-| Release 发布 | tag `v*` / 手动 auto、release | 自动升级版本号，发布 exe + localization.json |
+| 失效检测 + 候选提取 | 定时（每日）/ 手动 | 检测失效映射、提取未翻译候选，自动创建/关闭 Issue |
+| Release 发布 | tag `v*` / 定时（有变更时）/ 手动 auto、release | 自动升级版本号，发布 exe + localization.json |
 
 > [!TIP]
 > 手动触发 `type=auto` 会跑完整链路（构建 → 检查 → 维护 → 发布），版本号自动升级补丁号（如 `1.2.4 → 1.2.5`）；也可在 `version` 输入框手动指定。
@@ -117,23 +117,28 @@ npm run all        # 失效检测 + 未翻译候选提取
 ```
 
 > [!NOTE]
-> 为避免自动消耗 Actions 额度，定时任务已移除，全部改为 PR 或手动触发。
+> 工作流每日北京时间 10:00（UTC 02:00）定时执行构建与自动维护；仅当 `json/`、`src/`、`third_party/` 或 CMake 配置有变更时才会发布新版本，避免产生空版本。
 
 ## 📁 项目结构
 
+架构概览：一个 C++ 主程序（`src/`，加载器 + 汉化器，产物为单文件 exe）、一份汉化映射数据（`json/localization.json`，运行时从本地或远程加载）、一个 Node.js 自动维护工具（`tools/auto-maintain`）以及统一 CI 工作流（`.github/workflows`）。
+
 ```text
 .
-├── src/                          # 项目源码
+├── src/                          # C++ 主程序源码
 │   ├── GitHubDesktop2Chinese.cpp # 程序入口与汉化主流程
 │   ├── GitHubDesktop2Chinese.h
-│   └── Utils/utils.hpp           # HTTP / 代理 / 文件等通用工具
-├── third_party/                  # 第三方依赖（随仓库提交，构建无需联网下载）
-│   ├── include/                  # CLI11、cpp-httplib、nlohmann/json、spdlog、WinReg、VersionParse
-│   └── openssl/                  # OpenSSL 头文件与预编译库（x64）
+│   ├── utils/utils.hpp           # 通用工具（HTTP / 代理 / 编码 / 文件 / 更新 / 输入）
+│   └── version/Version.hpp       # 版本号解析（自研代码）
+├── third_party/                  # 第三方依赖（随仓库提交，含预编译 OpenSSL x64 静态库）
+│   ├── include/                  # CLI11、cpp-httplib、nlohmann/json、spdlog、WinReg
+│   └── openssl/                  # OpenSSL 头文件与预编译库
 ├── json/
-│   └── localization.json         # 汉化映射（核心数据）
+│   └── localization.json         # 汉化映射（核心数据；路径为已发布程序的公共契约，不可移动）
 ├── tools/auto-maintain/          # localization.json 自动维护工具（失效检测 / 候选提取）
-├── docs/                         # 文档（贡献注意事项、Release 说明）
+├── docs/                         # 文档
+│   ├── CONTRIBUTING.md           # 汉化贡献指南（GitHub 自动识别）
+│   └── ReleaseBody.md            # Release 说明模板（CI 拼接进发布说明）
 ├── .github/workflows/            # CI/CD 工作流
 ├── CMakeLists.txt
 └── CMakePresets.json
