@@ -21,6 +21,8 @@
 #include <iomanip>
 #include <chrono>
 #include <optional>
+#include <cstdio>
+#include <ctime>
 #include <iostream>
 
 #include <regex>
@@ -219,7 +221,11 @@ int main(int argc, char* argv[])
 
 
         try {
-            CLI11_PARSE(app, argc, argv.data());
+#ifdef _WIN32
+            CLI11_PARSE(app, argc, argv.data());   // Windows: argv 为 std::vector<char*>
+#else
+            CLI11_PARSE(app, argc, argv);          // POSIX: argv 本身即 char**
+#endif
         }
         catch(const std::exception& e) {
             // CLI11 内部仅捕获其自身异常, 命令行含非法编码等仍可能抛出其他异常, 此处兜底避免进程直接崩溃
@@ -1451,19 +1457,31 @@ void DeveloperOptions() {
 
 
 std::optional<std::string> formatTime(std::string time_str) {
-    using namespace std::chrono;
     std::optional<std::string> ret;
-    std::istringstream ss{ time_str };
-
-    sys_seconds tp;
-    ss >> parse("%FT%TZ", tp);
-    if(!ss.fail()) {
-        auto sctp = time_point_cast<seconds>(tp);
-        std::time_t cftime = decltype(sctp)::clock::to_time_t(sctp);
-        std::tm* tm = std::localtime(&cftime);
-        std::ostringstream oss;
-        oss << std::put_time(tm, "%Y年%m月%d日 %H时%M分%S秒");
-        ret = oss.str();
+    // GitHub API 时间形如 2024-05-01T12:34:56Z; 手动解析各字段,
+    // 避免依赖 C++20 std::chrono::parse (libc++ 与部分 libstdc++ 尚未实现, 跨平台编译失败)
+    std::tm tm{};
+    int year = 0, mon = 0, day = 0, hour = 0, min = 0, sec = 0;
+    if(std::sscanf(time_str.c_str(), "%d-%d-%dT%d:%d:%d", &year, &mon, &day, &hour, &min, &sec) == 6) {
+        tm.tm_year = year - 1900;
+        tm.tm_mon = mon - 1;
+        tm.tm_mday = day;
+        tm.tm_hour = hour;
+        tm.tm_min = min;
+        tm.tm_sec = sec;
+        // 解析结果为 UTC, 转 epoch 后用 localtime 显示本地时间
+#ifdef _WIN32
+        const std::time_t cftime = _mkgmtime(&tm);
+#else
+        const std::time_t cftime = timegm(&tm);
+#endif
+        if(cftime != static_cast<std::time_t>(-1)) {
+            if(const std::tm* local = std::localtime(&cftime)) {
+                std::ostringstream oss;
+                oss << std::put_time(local, "%Y年%m月%d日 %H时%M分%S秒");
+                ret = oss.str();
+            }
+        }
     }
     return ret;
 }

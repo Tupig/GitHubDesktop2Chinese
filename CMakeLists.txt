@@ -165,6 +165,13 @@ if(WIN32)
     target_link_libraries(GitHubDesktop2Chinese PRIVATE
         ${CMAKE_SOURCE_DIR}/third_party/openssl/lib/${OPENSSL_SSL_NAME}
         ${CMAKE_SOURCE_DIR}/third_party/openssl/lib/${OPENSSL_CRYPTO_NAME})
+    if(MSVC)
+        # 进程级 UTF-8 主动代码页清单(见 src/app.manifest):
+        # 缺少时窄字符路径按系统 ANSI 代码页解释, 非中文系统上中文路径参数会解析失败
+        # SHELL: 前缀保证含空格的源码路径作为单个链接选项传递
+        target_link_options(GitHubDesktop2Chinese PRIVATE
+            "SHELL:/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/src/app.manifest")
+    endif()
 else()
     target_link_libraries(GitHubDesktop2Chinese PRIVATE
         OpenSSL::SSL

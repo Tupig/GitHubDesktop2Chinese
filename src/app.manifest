@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <!-- 进程级 UTF-8 主动代码页: 使窄字符 API 与 std::filesystem::path 的窄字串构造按 UTF-8 解释。
+       缺省按系统 ANSI 代码页解释, 在非中文系统(如英文 CI)上运行含中文路径参数时
+       会因代码页无法映射而抛 "No mapping for the Unicode character..." 异常 -->
+  <application>
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>
