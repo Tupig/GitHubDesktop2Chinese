@@ -38,8 +38,8 @@
 
 7. **善用正则模糊匹配**：如 `Ee.createElement\\(yD,null,this.props.repositoryName` 中的函数参数 `yD` 常因版本更新而变动，可利用正则模糊匹配这两位字符，使其适应性更强：
 
-   - 查找：`Ee.createElement\\((..),null,this.props.repositoryName`
-   - 替换：`Ee.createElement\\($1,null,this.props.repositoryName`（`$1` 表示第一个正则捕获到的内容）
+   - 查找：`Ee.createElement\\((..),null,this.props.repositoryName`（查找项是正则，JSON 中需 `\\(` 转义出正则的 `\(`）
+   - 替换：`Ee.createElement($1,null,this.props.repositoryName`（替换文本按**字面量**插入，不可带反斜杠——写成 `\\(` 会让生成的 main.js 出现 `createElement\(` 而语法报错；`$1` 表示第一个正则捕获到的内容）
 
 8. **使用自动维护工具辅助补充翻译**（会生成可直接粘贴的条目草稿）：
 
@@ -49,3 +49,11 @@
    ```
 
    报告位于系统临时目录 `ghdesktop-auto-maintain/report.md`，按「来源」列把条目放入 `main`（main.js）或 `renderer`（renderer.js）数组，将草稿中的 `【待翻译】` 替换为中文译文即可（查找项已按字面量转义）。
+
+## 发布说明（docs/ReleaseBody.md）
+
+`json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 任一变更都会在每日定时或手动 `auto` 时触发新版本发布（补丁号 +1）。CI 发布时从 `docs/ReleaseBody.md` 中提取**行尾含全角版本标记**（如 `（v1.2.23）`）的变更行拼进 Release 说明：
+
+- 在「本次更新」区域追加一行变更描述，行尾标注**下一个发布版本**的全角括号标记（用 `git tag --sort=-v:refname | head -1` 查当前最新 tag，版本号 +1）。
+- 未标注或版本号未命中的行不会出现在任何 Release 中，也**不阻断**发布（说明里会显示「未找到变更记录」提示）。
+- 静态的「### 程序说明」段落每次发布都会附带，无需逐版维护。

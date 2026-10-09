@@ -7,7 +7,13 @@ export function loadLocalization(jsonPath) {
   if (!fs.existsSync(jsonPath)) {
     throw new Error(`localization.json 不存在: ${jsonPath}`);
   }
-  return JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+  const raw = fs.readFileSync(jsonPath, 'utf8');
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    // 报错带路径: 否则 CI/本地无法区分是哪份 json 损坏
+    throw new Error(`localization.json 解析失败 (${jsonPath}): ${e.message}`);
+  }
 }
 
 /**
@@ -83,7 +89,11 @@ export function checkInvalid(localization, mainJsText, rendererJsText) {
       if (sel?.enable !== true) continue;
       const replaces = sel?.replace;
       if (!Array.isArray(replaces)) continue;
-      const targetJs = sel.replaceFile === 'main.js' ? mainJsText : rendererJsText;
+      // 与 C++ 应用侧一致: 仅识别 "main.js"/"renderer.js" 字面量(源码按精确相等判断),
+      // 其它取值整条 select 不参与替换也不参与失效计数, 跳过
+      const rf = sel?.replaceFile;
+      if (rf !== 'main.js' && rf !== 'renderer.js') continue;
+      const targetJs = rf === 'main.js' ? mainJsText : rendererJsText;
       for (let j = 0; j < replaces.length; j++) {
         total++;
         const { ok, errors } = checkEntry(targetJs, replaces[j]);

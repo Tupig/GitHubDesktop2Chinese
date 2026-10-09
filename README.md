@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/Tupig/GitHubDesktop2Chinese)](https://github.com/Tupig/GitHubDesktop2Chinese/releases)
 [![License](https://img.shields.io/github/license/Tupig/GitHubDesktop2Chinese)](LICENSE.txt)
 [![C++](https://img.shields.io/badge/C%2B%2B-20-blue?logo=cplusplus&logoColor=white)](#-怎么编译源代码)
-[![localization.json](https://img.shields.io/badge/localization.json-v3-green)](#-映射文件localizationjson)
+[![localization.json](https://img.shields.io/badge/localization.json-v3-green)](#-映射文件-localizationjson)
 
 > 本仓库派生（fork）自 [cngege/GitHubDesktop2Chinese](https://github.com/cngege/GitHubDesktop2Chinese)，在此基础上继续维护与更新。原作者 [CNGEGE](https://github.com/cngege)，感谢其开创性工作。
 
@@ -12,9 +12,9 @@
 
 - [🥮 这是什么](#-这是什么)
 - [🎯 怎么使用它](#-怎么使用它)
-- [🏗️ 怎么编译源代码](#️-怎么编译源代码)
+- [🏗 怎么编译源代码](#-怎么编译源代码)
 - [👕 怎么贡献汉化](#-怎么贡献汉化)
-- [🍬 映射文件 localization.json](#-映射文件localizationjson)
+- [🍬 映射文件 localization.json](#-映射文件-localizationjson)
 - [🧪 CI / 自动维护](#-ci--自动维护)
 - [📁 项目结构](#-项目结构)
 - [🔭 开启 GitHub Desktop 预览版选项](#-开启-github-desktop-预览版选项)
@@ -22,8 +22,9 @@
 - [🎋 功能特性](#-功能特性)
 - [📦 第三方库](#-第三方库)
 - [⭐ 星标历史](#-星标历史)
+- [🏘 感谢大家的群策群力](#-感谢大家的群策群力)
 
-## 🥮这是什么
+## 🥮 这是什么
 
 一个自动替换 [GitHub Desktop](https://desktop.github.com/)（[官方仓库 desktop/desktop](https://github.com/desktop/desktop)）界面文本为目标语言（中文）的程序：
 
@@ -31,7 +32,7 @@
 - **低维护成本**：版本更新后仅需手动补充个别失效翻译条目
 - **可自动更新**：加载器自动检测新版本，支持一键更新与断点续传
 
-## 🎯怎么使用它
+## 🎯 怎么使用它
 
 [🎀 视频教程（BiliBili）](https://www.bilibili.com/video/BV17HpSeHEaC/)
 
@@ -43,7 +44,7 @@
 > - 本程序**仅支持 64 位 Windows**（x64），不提供 32 位版本。
 > - GitHub Desktop 每次版本更新后，都需要重新运行一次本程序才能完成汉化。
 
-## 🏗️怎么编译源代码
+## 🏗 怎么编译源代码
 
 > 项目**仅支持 64 位（x64）构建**，使用其他架构配置会在 CMake 阶段直接报错。
 
@@ -58,7 +59,7 @@ cmake -B build -A x64
 cmake --build build --config Release
 ```
 
-## 👕怎么贡献汉化
+## 👕 怎么贡献汉化
 
 1. 克隆仓库，阅读 [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)
 2. 在 [`json/localization.json`](json/localization.json) 中参照已有格式补充翻译条目
@@ -66,7 +67,7 @@ cmake --build build --config Release
 
 **开发调试技巧**：新写的条目可先放入 `main_dev` 或 `renderer_dev`，然后按住 `Shift` 启动程序，开启「仅替换指定映射项」进行快速测试；完成后将条目移动到 `main` 或 `renderer` 数组末尾再提交 PR。
 
-## 🍬映射文件 localization.json
+## 🍬 映射文件 localization.json
 
 存储 GitHub Desktop 英文文本到中文文本的映射，通过正则匹配完成替换。项目日常更新主要维护此文件。
 
@@ -92,27 +93,29 @@ cmake --build build --config Release
 | `enable` | bool | 此条是否启用 |
 | `replace` | string[][] | 二维替换数组，`[查找正则, 替换文本, 可选查找正则]` |
 
-## 🧪CI / 自动维护
+## 🧪 CI / 自动维护
 
 本仓库使用统一工作流 [`ghdesktop2chinese.yml`](.github/workflows/ghdesktop2chinese.yml)：
 
 | 功能 | 触发方式 | 说明 |
 | --- | --- | --- |
-| 构建 | PR / tag `v*` / 定时 / 手动 | 仅 64 位（x64）构建 |
-| JSON 质量校验 | PR / 定时 / 手动 | 正则合法性、结构完整性、占位符检查 |
-| 工具自检 | PR / 定时 / 手动 | 自动维护工具语法检查 + 单元测试 |
-| CodeQL 扫描 | PR / 手动 | C/C++ 安全扫描 |
-| 失效检测 + 候选提取 | 定时（每日）/ 手动 | 检测失效映射、提取未翻译候选，自动创建/关闭 Issue |
-| Release 发布 | tag `v*` / 定时（有变更时）/ 手动 auto、release | 自动升级版本号，发布 exe + localization.json |
+| 构建 | PR / tag `v*` / 定时 / 手动 auto、build、release | 仅 64 位（x64）构建 |
+| JSON 质量校验 | PR / tag `v*` / 定时 / 手动 auto、security、release | 正则合法性、结构完整性、占位符检查 |
+| 工具自检 | PR / tag `v*` / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 |
+| CodeQL 扫描 | PR / 手动 auto、security | C/C++ 安全扫描 |
+| 失效检测 + 候选提取 | 定时（每日）/ 手动 auto、maintain | 检测失效映射、提取未翻译候选，自动创建/关闭 Issue |
+| Release 发布 | tag `v*` / 定时（有变更时）/ 手动 auto（有变更）、release | 自动升级版本号，发布 exe + localization.json |
+
+> 手动触发的 `type` 除表中所列外（`build` 等）仅执行对应子集，`version` 输入须为 `x.y.z` 纯数字格式，否则 CI 在版本号校验处直接失败。
 
 > [!TIP]
-> 手动触发 `type=auto` 会跑完整链路（构建 → 检查 → 维护 → 发布），版本号自动升级补丁号（如 `1.2.4 → 1.2.5`）；也可在 `version` 输入框手动指定。
+> 手动触发 `type=auto` 会跑完整链路（构建 → 检查 → 维护 → 发布），版本号自动升级补丁号（如 `1.2.4 → 1.2.5`）；也可在 `version` 输入框手动指定（`x.y.z` 格式）。
 
 自动维护工具位于 [`tools/auto-maintain`](tools/auto-maintain)，基于 **Windows 版** GitHub Desktop 的 `main.js` / `renderer.js` 检测；本地运行：
 
 ```powershell
 cd tools/auto-maintain
-npm run all        # 失效检测 + 未翻译候选提取
+npm run all        # 失效检测 + 未翻译候选提取, 报告写入系统临时目录 ghdesktop-auto-maintain/report.md
 ```
 
 > [!NOTE]
@@ -152,7 +155,7 @@ npm run all        # 失效检测 + 未翻译候选提取
 └── CMakePresets.json
 ```
 
-## 🔭开启 GitHub Desktop 预览版选项
+## 🔭 开启 GitHub Desktop 预览版选项
 
 GitHub Desktop 内部预览版判断机制：
 
@@ -173,7 +176,7 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 
 **方式二**：通过加载器运行时按提示选择，自动开启预览版功能（对应 `select` 中的可选替换项）。
 
-## 🧭常见问题
+## 🧭 常见问题
 
 > [!TIP]
 > **找不到 openssl 的 DLL**：请更新到 [最新版本](https://github.com/Tupig/GitHubDesktop2Chinese/releases)。
@@ -190,13 +193,13 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 
 有任何建议欢迎提 [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues)。
 
-## 🎋功能特性
+## 🎋 功能特性
 
 - [x] JSON 格式标识文件版本与最低加载器版本
 - [x] 加载器程序版本宏定义
 - [x] 替换映射第三项（查找参数）全局正则查找，`#{number}` 占位符回填
 - [x] 最低版本校验，不满足时提示或询问是否强制替换
-- [x] 替换前暂停确认（`--nopause` 可跳过）
+- [x] 暂停确认（结束前等待按键、`minversion` 不满足时输入 `f` 才强制替换）——`--nopause` 一并跳过（注意：版本不满足时将不再询问、直接强制替换）
 - [x] 自动检测更新，一键更新 + 断点续传
 - [x] JSON 附加描述文本（`tip`）在加载器中显示
 - [x] 汉化完成后显示项目参与者
@@ -206,7 +209,7 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 - [x] 系统 HTTP 代理支持（环境变量 + 注册表）
 - [x] 读取 GitHub Desktop 最新版与本地版本对比提示
 
-## 📦第三方库
+## 📦 第三方库
 
 感谢以下优质开源项目：
 
@@ -219,11 +222,11 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 | WinReg | Windows 注册表操作 | [GiovanniDicanio/WinReg](https://github.com/GiovanniDicanio/WinReg) |
 | OpenSSL | SSL/TLS 支持 | [openssl/openssl](https://github.com/openssl/openssl) |
 
-## ⭐星标历史
+## ⭐ 星标历史
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Tupig/GitHubDesktop2Chinese&type=Date)](https://star-history.com/#Tupig/GitHubDesktop2Chinese&Date)
 
-## 🏘️感谢大家的群策群力
+## 🏘 感谢大家的群策群力
 
 ![Contributors](https://contrib.rocks/image?repo=Tupig/GitHubDesktop2Chinese)
 

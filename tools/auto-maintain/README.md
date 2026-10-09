@@ -17,7 +17,7 @@
 ```bash
 cd tools/auto-maintain
 
-# 失效检测（默认使用 ./json/localization.json）
+# 失效检测（默认读取仓库根目录 json/localization.json，与当前所在目录无关）
 node src/index.js check
 
 # 未翻译候选提取
@@ -38,7 +38,7 @@ node src/index.js check extract --keep-js
 | 参数 | 说明 |
 | --- | --- |
 | `check` / `extract` / `all` | 子命令，可组合（如 `check extract`） |
-| `--json <path>` | localization.json 路径（默认 `json/localization.json`） |
+| `--json <path>` | localization.json 路径（默认为仓库根目录 `json/localization.json`，按脚本位置推导，不受 cwd 影响） |
 | `--workdir <dir>` | 下载/解压工作目录（默认系统临时目录） |
 | `--keep-js` | 复用 workdir 中已有的 `main.js`/`renderer.js`，跳过下载 |
 | `--top <n>` | extract 输出候选条数（默认 60） |
@@ -52,6 +52,8 @@ node src/index.js check extract --keep-js
 从 `desktop/desktop` 的最新 release 下载 `GitHubDesktop-<版本>-x64-full.nupkg`（约 307MB，Windows 版 Squirrel 完整包，本质为 zip）。
 包内含 `lib/net45/resources/app/{main.js,renderer.js}`，即打包前（未 asar 压缩）的 Electron 资源，可直接读取。
 
+> 下载完整性三重校验：EOCD 签名、release 资产声明的字节数（尺寸不符删断点重下）、`.part.url` 旁证（断点与本次 URL 不一致时删除，防止跨版本续传拼出混合文件）。
+
 > ⚠️ **不要改用 macOS 的 `GitHub.Desktop-x64.zip`**：两个平台的应用文案不同（Windows 菜单带 `&` 访问键、路径相关文案为 Explorer/Command Prompt 等），
 > 用 macOS 包会产生大量假失效（实测 1006 条映射中约 239 条误报）。本项目的汉化目标是 Windows 版。
 
@@ -63,6 +65,7 @@ node src/index.js check extract --keep-js
   - `item[0]` 作为正则对对应 JS 文本执行 `test`
   - 若 `item[2]`（第三个查找参数）存在，也一并测试
   - 匹配不到记为 `not-found`；正则编译失败记为 `regex-error`
+- 对 `select` 中 `enable=true` 的条目：按 `replaceFile` **精确等于** `main.js` / `renderer.js` 分别用对应 JS 检测（与 C++ 应用侧按字面量相等的判断一致；其它取值整条 select 不生效，直接跳过不计数）
 
 ### 未翻译候选提取
 
@@ -83,7 +86,8 @@ node src/index.js check extract --keep-js
 - **自动关 Issue**：当失效项降为 0 时，自动关闭历史维护 Issue
 - **不自动合并**：所有映射改动仍需人工确认，避免破坏 GitHub Desktop
 
-> ⚠️ 缓存 key 绑定 GitHub Desktop 版本、平台、工具源码与 `localization.json` 哈希（`ghd-maintain-v2-<版本>-<平台>-<工具哈希>-<映射哈希>`），安装包或提取结果变化后自动失效重建。
+> ⚠️ 缓存 key 绑定 GitHub Desktop 版本、平台与工具源码（`ghd-maintain-v3-<版本>-<平台>-<工具哈希>`），安装包或工具变化后自动失效重建。
+> 不含 `localization.json` 哈希：映射每次改动都不同，纳入会让 307MB 安装包缓存失效，而报告本就由步骤内重新生成。
 > 提取结果与安装包一致时会自动复用（`.source.txt` 来源标记），跳过重复解压。
 
 ## 目录结构

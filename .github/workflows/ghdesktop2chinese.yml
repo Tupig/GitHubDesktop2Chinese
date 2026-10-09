@@ -304,6 +304,9 @@ jobs:
                       errors.append(f"select[{si}] tooltip 应为字符串")
                   if "enable" in sel and not isinstance(sel["enable"], bool):
                       errors.append(f"select[{si}] enable 应为布尔")
+                  # 应用侧按字面量精确匹配这两个取值, 其它值整条 select 不生效(静默跳过)
+                  if isinstance(sel.get("replaceFile"), str) and sel["replaceFile"] not in ("main.js", "renderer.js"):
+                      errors.append(f"select[{si}] replaceFile 取值非法: {sel['replaceFile']!r}（仅允许 'main.js' / 'renderer.js'）")
                   if not isinstance(sel.get("replace"), list):
                       errors.append(f"select[{si}] replace 应为数组")
 

@@ -10,7 +10,7 @@
   "scripts": {
     "check": "node src/index.js check",
     "extract": "node src/index.js extract",
-    "all": "node src/index.js check && node src/index.js extract"
+    "all": "node src/index.js all --write-report"
   },
   "dependencies": {}
 }

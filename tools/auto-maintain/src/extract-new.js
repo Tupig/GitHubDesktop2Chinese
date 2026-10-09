@@ -71,14 +71,14 @@ export function extractStringLiterals(jsText) {
   const out = [];
   const re = /(["'])((?:\\.|(?!\1)[^\\]){3,})\1/g;
   let m;
+  // 常见转义的单遍还原(左到右一次替换): 分步 replace 会让
+  // `\\\\n`(字面反斜杠+n)先被当成换行, 与 JS 实际语义不符
+  const UNESCAPES = { n: '\n', t: '\t', r: '\r', '"': '"', "'": "'", '\\': '\\' };
   while ((m = re.exec(jsText)) !== null) {
-    // 还原常见转义（\n \t \" \' \\），不处理 unicode 转义以保留英文判断
-    let t = m[2]
-      .replace(/\\n/g, '\n')
-      .replace(/\\t/g, '\t')
-      .replace(/\\"/g, '"')
-      .replace(/\\'/g, "'")
-      .replace(/\\\\/g, '\\');
+    // 不处理 \u/\x 转义以保留英文判断
+    const t = m[2].replace(/\\(.)/gs, (_, ch) => (
+      Object.prototype.hasOwnProperty.call(UNESCAPES, ch) ? UNESCAPES[ch] : `\\${ch}`
+    ));
     if (isLikelyUiText(t)) {
       out.push({ text: t, index: m.index });
     }

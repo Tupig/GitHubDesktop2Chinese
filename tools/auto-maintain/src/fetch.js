@@ -82,15 +82,34 @@ export function isZipComplete(zipPath) {
 
 /**
  * 下载 release nupkg（支持断点续传），返回文件路径
+ * expectedSize 为 release 资产声明的字节数(可选): 用于复用校验与下载后尺寸核对
  */
-export async function downloadZip(url, destDir) {
+export async function downloadZip(url, destDir, expectedSize) {
   fs.mkdirSync(destDir, { recursive: true });
   const zipPath = path.join(destDir, 'github-desktop.nupkg');
   const tmpPath = zipPath + '.part';
+  const tmpUrlPath = tmpPath + '.url'; // 旁证: .part 来自哪个 URL, 防止跨版本续传拼出混合文件
 
-  // 已经完整下载且校验通过则跳过
-  if (fs.existsSync(zipPath) && isZipComplete(zipPath)) {
-    return zipPath;
+  // 已下载文件: 尺寸与本次 release 资产一致且 EOCD 完整才复用(版本变化后的旧缓存一律重下)
+  if (fs.existsSync(zipPath)) {
+    const sizeMatches = !expectedSize || fs.statSync(zipPath).size === expectedSize;
+    if (sizeMatches && isZipComplete(zipPath)) {
+      return zipPath;
+    }
+    fs.rmSync(zipPath, { force: true });
+  }
+
+  // 断点来源旁证: .part 属于其它 URL(GitHub Desktop 已更新版本)或无旁证(旧版残留,
+  // 无法证明来源一致)时, 续传会把两个版本拼在一起, 必须删掉从头下载
+  if (fs.existsSync(tmpPath)) {
+    let prevUrl = '';
+    try {
+      prevUrl = fs.readFileSync(tmpUrlPath, 'utf8').trim();
+    } catch { /* 无旁证按不一致处理 */ }
+    if (prevUrl !== url) {
+      fs.rmSync(tmpPath, { force: true });
+      fs.rmSync(tmpUrlPath, { force: true });
+    }
   }
 
   // 支持 Range 续传
@@ -129,13 +148,22 @@ export async function downloadZip(url, destDir) {
 
   // 服务器不支持 Range 时（200），若已有部分文件则必须从头覆盖，避免追加损坏
   const isPartial = hasPartial && res.status === 206;
+  fs.writeFileSync(tmpUrlPath, url); // 写入旁证: 此后 .part 均由该 URL 产生
   const file = fs.createWriteStream(tmpPath, { flags: isPartial ? 'a' : 'w' });
   await pipeline(Readable.fromWeb(res.body), file);
   if (!isZipComplete(tmpPath)) {
     // 不完整（缺少 EOCD 记录）: 保留 .part 断点文件以便下次续传, 直接失败, 绝不改名覆盖
     throw new Error('下载的 nupkg 不完整（缺少 EOCD 记录）, 已保留断点文件供续传');
   }
+  const gotSize = fs.statSync(tmpPath).size;
+  if (expectedSize && gotSize !== expectedSize) {
+    // EOCD 存在但尺寸与资产声明不符(代理注入/半截拼接/陈旧缓存): 不入库, 删断点从头重下
+    fs.rmSync(tmpPath, { force: true });
+    fs.rmSync(tmpUrlPath, { force: true });
+    throw new Error(`下载尺寸(${gotSize})与 release 资产(${expectedSize})不符, 已删除断点文件, 重试将从头下载`);
+  }
   fs.renameSync(tmpPath, zipPath);
+  fs.rmSync(tmpUrlPath, { force: true });
   return zipPath;
 }
 
@@ -218,7 +246,7 @@ function findAppDir(root) {
  */
 export async function fetchLatest(workDir) {
   const release = await getLatestRelease();
-  const zipPath = await downloadZip(release.zipUrl, workDir);
+  const zipPath = await downloadZip(release.zipUrl, workDir, release.zipSize);
   const js = extractJs(zipPath, workDir);
   return { ...release, ...js };
 }

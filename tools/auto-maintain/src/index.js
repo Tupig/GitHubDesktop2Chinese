@@ -59,7 +59,8 @@ function parseArgs(argv) {
   return args;
 }
 
-const c = (code, s) => `\x1b[${code}m${s}\x1b[0m`;
+let colorEnabled = true;
+const c = (code, s) => (colorEnabled ? `\x1b[${code}m${s}\x1b[0m` : String(s));
 
 async function getJsFiles(args) {
   if (!args.workdir) {
@@ -93,14 +94,9 @@ async function main() {
   let args;
   try {
     args = parseArgs(process.argv.slice(2));
+    colorEnabled = !args.noColor;
   } catch (e) {
     console.error(c('31', '✗ ' + e.message));
-    console.log(help);
-    process.exit(2);
-  }
-
-  if (args.cmds.length === 0) {
-    console.error(c('31', '✗ 请指定子命令: check / extract / all'));
     console.log(help);
     process.exit(2);
   }
