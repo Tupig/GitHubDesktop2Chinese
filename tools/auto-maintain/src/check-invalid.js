@@ -18,21 +18,13 @@ export function loadLocalization(jsonPath) {
 
 /**
  * std::regex(ECMAScript 语法子集) 不兼容语法黑名单。
- * JS new RegExp 接受但 C++ std::regex 会抛 regex_error(或行为不同)的写法:
- *  - (?<= / (?<!  后行断言(ECMAScript 2018+, std::regex 不支持)
- *  - (?<name>    命名分组
- *  - \p{...}     Unicode 属性转义
- *  - (?i) 等内联 flag
- * 若不显式拦截, 这些 pattern 会被 JS 判为 ok, 实际运行时 C++ 侧 regex_error 中断汉化。
+ * 规则从 regex-blacklist.json 读取（与 CI 的 .github/scripts/check-localization.py 共用单一事实来源）:
+ * JS new RegExp 接受但 C++ std::regex 会抛 regex_error 的写法必须显式拦截，
+ * 否则实际运行时 C++ 侧 regex_error 中断汉化。
  */
-const STD_REGEX_BLACKLIST = [
-  { re: /\(\?<=/, why: '后行断言 (?<=)' },
-  { re: /\(\?<!/, why: '负后行断言 (?<!)' },
-  { re: /\(\?<[A-Za-z_]/, why: '命名分组 (?<name>)' },
-  { re: /\(\?P[<a-zA-Z]/, why: 'Python 命名分组 (?P<name>)' },
-  { re: /\\p\{/, why: 'Unicode 属性转义 \\p{...}' },
-  { re: /\(\?[a-zA-Z]+[):]/, why: '内联 flag (?i:...)' },
-];
+const STD_REGEX_BLACKLIST = JSON.parse(
+  fs.readFileSync(new URL('../regex-blacklist.json', import.meta.url), 'utf8'),
+).rules.map((r) => ({ re: new RegExp(r.regex), why: r.why }));
 
 /**
  * 对单个映射项执行失效检测（与 C++ std::regex 语义对齐）。

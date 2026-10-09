@@ -118,7 +118,12 @@ async function main() {
       console.log(c('32', `  有效项:   ${result.ok}`));
       console.log(c(result.failedCount > 0 ? '31' : '32', `  失效项:   ${result.failedCount}`));
       for (const f of result.failed) {
-        const reason = f.errors.map(e => (e.reason === 'regex-error' ? '正则错误' : '匹配不到')).join('; ');
+        // unsupported-syntax 显示原始原因(含具体语法说明), 不再笼统归为"匹配不到"
+        const reason = f.errors.map(e => (
+          e.reason === 'regex-error' ? '正则错误'
+            : e.reason.startsWith('unsupported-syntax') ? e.reason
+              : '匹配不到'
+        )).join('; ');
         console.log(`  ${c('31', `[${f.array}#${f.index}]`)} ${reason}: ${f.errors[0].pattern}`);
       }
     }

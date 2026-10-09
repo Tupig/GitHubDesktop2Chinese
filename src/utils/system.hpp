@@ -9,6 +9,7 @@
 #include <utility>
 #include <iostream>
 #include <cstdlib>
+#include "utils/encoding.hpp"
 #ifdef _WIN32
 #include <windows.h>
 #include <winhttp.h>
@@ -37,55 +38,75 @@ namespace utils {
 #endif
     }
 
-    inline std::optional<std::pair<std::string, int>> get_proxy_env() {
-        auto p1 = GetEnvVar("HTTPS_PROXY");
-        if(p1.empty()) p1= GetEnvVar("https_proxy");
+    // 解析代理地址: 支持 [http(s)://][user:pass@]host:port 与 [IPv6]:port 形式;
+    // userinfo(代理认证)调用侧暂不支持, 解析时忽略但保证 host 正确;
+    // 解析失败/端口非法返回空 optional
+    inline std::optional<std::pair<std::string, int>> ParseProxyAddress(std::string raw) {
+        const size_t schemePos = raw.find("://");
+        if(schemePos != std::string::npos) {
+            raw = raw.substr(schemePos + 3);
+        }
+        const size_t atPos = raw.rfind('@'); // 取最后一个 '@': 密码可能含 '@'
+        if(atPos != std::string::npos) {
+            raw = raw.substr(atPos + 1);
+        }
+        const size_t slashPos = raw.find('/');
+        if(slashPos != std::string::npos) {
+            raw = raw.substr(0, slashPos);
+        }
+        std::string host;
+        std::string portStr;
+        if(!raw.empty() && raw.front() == '[') {
+            const size_t close = raw.find(']');
+            if(close == std::string::npos) return {};
+            host = raw.substr(1, close - 1);
+            if(close + 1 < raw.size() && raw[close + 1] == ':') {
+                portStr = raw.substr(close + 2);
+            }
+        }
+        else {
+            const size_t colonPos = raw.rfind(':'); // IPv6 走上方方括号分支, 此处为 host:port
+            if(colonPos == std::string::npos) return {};
+            host = raw.substr(0, colonPos);
+            portStr = raw.substr(colonPos + 1);
+        }
+        if(host.empty() || portStr.empty()) return {};
+        int port = 0;
+        try {
+            port = std::stoi(portStr);
+        }
+        catch(const std::exception&) {
+            return {};
+        }
+        if(port <= 0 || port > 65535) return {};
+        return std::make_pair(host, port);
+    }
 
+    inline std::optional<std::pair<std::string, int>> get_proxy_env() {
+        std::string p1 = GetEnvVar("HTTPS_PROXY");
+        if(p1.empty()) p1 = GetEnvVar("https_proxy");
         if(p1.empty()) {
             return {};
         }
-        size_t protocolEnd = p1.find("://");
-        std::string addrWithoutProtocol = (protocolEnd != std::string::npos)
-            ? p1.substr(protocolEnd + 3)
-            : p1;
-
-        // 2. 分割主机和端口（以第一个 : 为界）
-        size_t colonPos = addrWithoutProtocol.find(':');
-        if(colonPos == std::string::npos) {
-            std::cerr << "错误：代理地址无端口号！" << std::endl;
+        auto parsed = ParseProxyAddress(p1);
+        if(!parsed) {
+            std::cerr << "错误：代理地址无法解析（需形如 [http://]host:port、[IPv6]:port 或 user:pass@host:port）: " << p1 << std::endl;
             return {};
         }
-        // 3. 提取主机和端口
-        int port = 0;
-        std::string host = addrWithoutProtocol.substr(0, colonPos);
-        try {
-            port = std::stoi(addrWithoutProtocol.substr(colonPos + 1));
-        }
-        catch(const std::exception& e) {
-            std::cerr << "错误：端口号格式无效 - " << e.what() << std::endl;
-            return {};
-        }
-        if(port) {
-            return std::make_pair(host, port);
-        }
-        return {};
+        return parsed;
     }
 
     inline std::optional<std::pair<std::string, int>> GetSystemProxySettings() {
 #ifdef _WIN32
-        std::string address;
-        int port = 0;
+        std::optional<std::pair<std::string, int>> result;
         // Windows 实现
         WINHTTP_CURRENT_USER_IE_PROXY_CONFIG ieProxyConfig = { 0 };
 
         if(WinHttpGetIEProxyConfigForCurrentUser(&ieProxyConfig)) {
             if(ieProxyConfig.lpszProxy) {
-                //config.enabled = true;
-                std::wstring proxyW(ieProxyConfig.lpszProxy);
-                address = { proxyW.begin(), proxyW.end() };
-
-                // IE 代理配置可能为 "http=host:port;https=host:port" 形式：
-                // 取第一段并去除 scheme= 前缀
+                // IE 代理配置可能为 "http=host:port;https=host:port" 形式：取第一段并去掉 scheme= 前缀
+                // 宽转 UTF-8 统一走编码工具, 避免逐字符窄化丢失非 ASCII 主机
+                std::string address = utils::to_byte_string(ieProxyConfig.lpszProxy);
                 size_t semiPos = address.find(';');
                 if(semiPos != std::string::npos) {
                     address = address.substr(0, semiPos);
@@ -94,18 +115,7 @@ namespace utils {
                 if(eqPos != std::string::npos) {
                     address = address.substr(eqPos + 1);
                 }
-
-                // 尝试解析端口 (格式: address:port)
-                size_t pos = address.find(':');
-                if(pos != std::string::npos) {
-                    try {
-                        port = std::stoi(address.substr(pos + 1));
-                        address = address.substr(0, pos);
-                    }
-                    catch(...) {
-                        // 端口解析失败
-                    }
-                }
+                result = ParseProxyAddress(address);
             }
 
             // 清理资源
@@ -113,10 +123,7 @@ namespace utils {
             if(ieProxyConfig.lpszProxyBypass) GlobalFree(ieProxyConfig.lpszProxyBypass);
             if(ieProxyConfig.lpszAutoConfigUrl) GlobalFree(ieProxyConfig.lpszAutoConfigUrl);
         }
-        if(port) {
-            return std::make_pair(address, port);
-        }
-        return {};
+        return result;
 #else
         // POSIX 无 IE 代理配置, 统一走环境变量探测
         return get_proxy_env();

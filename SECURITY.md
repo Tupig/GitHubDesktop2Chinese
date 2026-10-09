@@ -36,7 +36,7 @@
     gh attestation verify <下载的文件> --repo Tupig/GitHubDesktop2Chinese
     ```
 
-- **代码与数据扫描**：CodeQL（C/C++，PR 与 main 推送）；`localization.json` 质量门（非法/危险正则黑名单、ReDoS 启发式、结构与占位符校验）；仓库已启用 Secret Scanning 与 Push Protection、Dependabot 漏洞告警与私密漏洞报告
+- **代码与数据扫描**：CodeQL（C/C++，PR 与 main 推送）；`localization.json` 质量门（非法/危险正则黑名单、ReDoS 启发式、结构与占位符校验）；仓库已启用 Secret Scanning 与 Push Protection、Dependabot 漏洞告警与私密漏洞报告；`.gitignore` 防御性排除凭据/密钥类文件（`.env*`/`*.pem`/`*.key` 等）
 
 ## 范围说明
 

@@ -36,7 +36,7 @@ export function renderMarkdown(report) {
     lines.push(`| 数组 | 序号 | 原因 | 正则 |`);
     lines.push(`| --- | --- | --- | --- |`);
     for (const f of failed.slice(0, MAX_FAILED_ROWS)) {
-      const reason = f.errors.map(e => (e.reason === 'not-found' ? 'not-found' : e.reason)).join('; ');
+      const reason = f.errors.map(e => e.reason).join('; ');
       lines.push(`| ${mdText(f.array)} | ${f.index} | ${mdText(reason)} | ${mdCode(f.errors[0].pattern)} |`);
     }
     if (failed.length > MAX_FAILED_ROWS) {

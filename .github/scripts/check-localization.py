@@ -24,17 +24,16 @@ for key in ["main", "renderer", "main_dev", "renderer_dev"]:
     elif not isinstance(data[key], list):
         errors.append(f"{key} 应为数组, 实际为 {type(data[key]).__name__}")
 
+# std::regex 不兼容语法黑名单: 与 tools/auto-maintain 共用单一事实来源
+try:
+    with open("tools/auto-maintain/regex-blacklist.json", encoding="utf-8") as f:
+        blacklist = [(r["regex"], r["why"]) for r in json.load(f)["rules"]]
+except (OSError, ValueError, KeyError, TypeError) as e:
+    errors.append(f"无法加载黑名单规则 tools/auto-maintain/regex-blacklist.json: {e}")
+    blacklist = []
+
 def check_array(name, arr):
     seen = {}
-    # std::regex 不兼容语法黑名单(JS 认但 C++ 会抛 regex_error, 失效检测无法覆盖)
-    blacklist = [
-        (r"\(\?<=", "后行断言 (?<=)"),
-        (r"\(\?<!", "负后行断言 (?<!)"),
-        (r"\(\?<[A-Za-z_]", "命名分组 (?<name>)"),
-        (r"\(\?P[<a-zA-Z]", "Python 命名分组 (?P<name>)"),
-        (r"\\p\{", r"Unicode 属性转义 \p{...}"),
-        (r"\(\?[a-zA-Z]+[):]", "内联 flag (?i:...)"),
-    ]
     for i, item in enumerate(arr):
         if not isinstance(item, list):
             errors.append(f"{name}[{i}] 不是数组")

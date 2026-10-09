@@ -200,7 +200,8 @@ namespace utils {
                     downfile.write(data, data_length);
                     downfile.flush(); // 立即刷入磁盘，不缓存
                 }
-                return downfile.is_open();
+                // 流状态检查: 磁盘满/写入失败时立即返回 false 中止请求(不再依赖后续尺寸校验兜底)
+                return static_cast<bool>(downfile);
             },
             [&](uint64_t len, uint64_t total) {
                 uint64_t total_ = downloaded_bytes + total;  // 文件总大小

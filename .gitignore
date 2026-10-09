@@ -14,3 +14,17 @@ _deps
 /build
 /build32
 # 注意：third_party/ 下三方依赖（含 openssl/lib 预编译库）随仓库提交，仅在缺失时由 CMake 自动下载
+# 凭据与密钥类文件：防御性排除（本仓库不应包含任何凭据/私钥，避免未来误提交）
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+*.jks
+*.keystore
+*.ppk
+*.p8
+credentials*
+id_rsa*
+id_ed25519*

@@ -34,6 +34,7 @@
 - 跨平台与CI: CMake 支持 MSVC/AppleClang/GCC 三工具链与 OpenSSL 自动发现, CI 新增 push main 自动触发与三目标构建+产物功能测试(Windows x64 / macOS 通用二进制(Intel+Apple Silicon, 静态链接 OpenSSL 自包含) / Linux x64), Release 发布多平台产物并附构建溯源证明; 汉化数据修正(9 条条目顺序、6 条问句全角、1 条译文尾空格)与质量校验加固(std::regex 不兼容语法黑名单、译文问句风格、报告 Markdown 转义); 工作流治理(大型脚本外置 .github/scripts、触发矩阵与「发布仅 main」边界、仓库仅保留单一工作流)与文档全面更新(新增命令行参数表与可运行示例); 发布触发增强(push main 有构建相关变更时自动补丁发版)（v1.2.24）
 - 优化 macOS 产物体积: 拆分 macos-x64 / macos-arm64 单架构包(替代 13.8MB 通用二进制)并 strip 裁剪 + LTO, 单包体积约减半; 静态链接自包含与安全校验(attestation/单架构断言)保持不变（v1.2.25）
 - CI 触发增强: 手动 release 触发纳入 CodeQL 与失效检测(旁路校验, 与构建并行, 不阻塞发布)（v1.2.26）
+- 修复 代码审计发现项: 工具解压改参数数组调用(消除注入面)、黑名单规则抽取共享 JSON、代理解析支持 IPv6/userinfo、rollback 原子化、下载写入流状态检查、CodeQL fork PR 守卫; 主/渲染处理去重重构为单一实现并启用正则匹配优化（v1.2.27）
 
 <!--
 #### 修复BUG:

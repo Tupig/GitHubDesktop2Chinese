@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 
@@ -44,7 +44,8 @@ export async function getLatestRelease() {
       const data = await res.json();
       const tag = data.tag_name; // 形如 release-3.6.6
       const version = tag.replace(/^release-/, '');
-      const asset = data.assets.find((a) => ASSET_PATTERN.test(a.name));
+      const assets = Array.isArray(data.assets) ? data.assets : [];
+      const asset = assets.find((a) => ASSET_PATTERN.test(a.name));
       if (!asset) {
         throw new Error(`未在 release ${tag} 中找到 Windows 完整包 ${ASSET_PATTERN}`);
       }
@@ -192,10 +193,11 @@ export function extractJs(zipPath, workDir) {
   fs.rmSync(extractDir, { recursive: true, force: true });
   fs.mkdirSync(extractDir, { recursive: true });
 
-  // 优先用系统 unzip / tar，跨平台
-  const unzip = tryExec(`unzip -q -o "${zipPath}" -d "${extractDir}"`);
+  // 优先用系统 unzip / tar，跨平台。
+  // execFileSync 数组参数: 路径不经过 shell 解释, 消除 zipPath/extractDir 的注入面
+  const unzip = tryExec('unzip', ['-q', '-o', zipPath, '-d', extractDir]);
   if (!unzip) {
-    const tar = tryExec(`tar -xf "${zipPath}" -C "${extractDir}"`);
+    const tar = tryExec('tar', ['-xf', zipPath, '-C', extractDir]);
     if (!tar) {
       throw new Error(`解压失败: unzip 与 tar 均不可用或解压出错 (${zipPath})`);
     }
@@ -214,9 +216,9 @@ export function extractJs(zipPath, workDir) {
   return { mainJsPath, rendererJsPath, appDir };
 }
 
-function tryExec(cmd) {
+function tryExec(cmd, args) {
   try {
-    execSync(cmd, { stdio: 'pipe' });
+    execFileSync(cmd, args, { stdio: 'pipe' });
     return true;
   } catch {
     return false;

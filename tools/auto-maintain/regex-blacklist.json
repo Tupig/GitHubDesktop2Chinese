@@ -1,0 +1,11 @@
+{
+  "comment": "C++ std::regex 不兼容语法黑名单（regex 为源码文本；tools/auto-maintain 与 .github/scripts 共用单一事实来源）",
+  "rules": [
+    { "regex": "\\(\\?<=", "why": "后行断言 (?<=)" },
+    { "regex": "\\(\\?<!", "why": "负后行断言 (?<!)" },
+    { "regex": "\\(\\?<[A-Za-z_]", "why": "命名分组 (?<name>)" },
+    { "regex": "\\(\\?P[<a-zA-Z]", "why": "Python 命名分组 (?P<name>)" },
+    { "regex": "\\\\p\\{", "why": "Unicode 属性转义 \\p{...}" },
+    { "regex": "\\(\\?[a-zA-Z]+[):]", "why": "内联 flag (?i:...)" }
+  ]
+}

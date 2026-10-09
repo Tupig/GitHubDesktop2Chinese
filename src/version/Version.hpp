@@ -51,8 +51,7 @@ public:
                 return true;
             }
             else {
-                if(betaversion == b.betaversion) return true;
-                else return false;
+                return betaversion == b.betaversion;
             }
         }
         return false;
@@ -60,15 +59,6 @@ public:
 
     bool operator<=(const Version& b) const {
         return *this < b || *this == b;
-
-        //if (major > b.major) return false;
-        //if (minor > b.minor) return false;
-        //if (revision > b.revision) return false;
-        //// 如果双方都为dev 或 beta版 则进行内部版本号的比较
-        //if (this->status == b.status && this->status != Status::Release) {
-        //    if (betaversion > b.betaversion) return false;
-        //}
-        //return true;
     }
 
     // 正式版 1.13.1 大于 非正式版 1.13.1.beta.1
@@ -88,8 +78,7 @@ public:
                 return false;
             }
             else {
-                if(betaversion < b.betaversion) return true;
-                else return false;
+                return betaversion < b.betaversion;
             }
         }
         else { // 公开版本类型不同

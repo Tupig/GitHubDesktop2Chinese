@@ -12,7 +12,7 @@
 
 ## 快速开始（30 秒版）
 
-1. 到 [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) 下载对应平台的 `GitHubDesktop2Chinese` 可执行文件（Windows x64 / macOS 通用二进制 / Linux x64）。
+1. 到 [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) 下载对应平台的 `GitHubDesktop2Chinese` 可执行文件（Windows x64 / macOS x64·arm64 / Linux x64）。
 2. 双击运行（macOS / Linux 在终端中运行），程序会：
    - 自动在注册表中定位 GitHub Desktop 安装目录（Windows）；
    - 自动联网拉取最新 `localization.json` 汉化映射；
@@ -76,7 +76,7 @@
 | 平台 | 产物 | 说明 |
 | --- | --- | --- |
 | Windows | `GitHubDesktop2Chinese.exe`（x64） | 自动探测注册表安装目录；界面文案以 Windows 版 GitHub Desktop 为基准 |
-| macOS | 通用二进制（Intel + Apple Silicon） | 静态链接 OpenSSL，自包含；安装目录需手动输入或用 `-g` 指定 |
+| macOS | `GitHubDesktop2Chinese-macos-x64` / `GitHubDesktop2Chinese-macos-arm64` | 按机器架构选择单架构包；静态链接 OpenSSL，自包含；安装目录需手动输入或用 `-g` 指定 |
 | Linux | x64 可执行文件 | 依赖系统 OpenSSL（`libssl-dev`）；安装目录需手动输入或用 `-g` 指定 |
 
 > 仅支持 64 位构建与运行；32 位版本已停止提供（v1.2.6 起）。

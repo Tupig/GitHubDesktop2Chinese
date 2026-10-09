@@ -14,6 +14,7 @@
 #   手动 release           ✓    ✓         ✓      ✓     ✓（仅 main, 始终发布）
 #   注1: tag 提交已在 push main 扫描过, 不重复跑 CodeQL
 #   注2: 定时不含 CodeQL（节省资源, 由 PR / push main 覆盖）
+#   注3: fork PR 不跑 CodeQL（其令牌无 security-events 写权限, 上传必失败）
 #   防重复: push 仅绑定 main 与 tag → PR 分支的推送不会二次触发(PR 由 pull_request 单路径负责);
 #           同一 PR 连续推送由 concurrency 取消陈旧运行
 #   边界:   发布类(auto/release)仅限 main 触发(防特性分支误发布); 其他 ref 可跑 build/security/maintain 排查
@@ -247,8 +248,9 @@ jobs:
   # ═════════════════════════════════════════════════
   codeql:
     name: CodeQL 安全扫描
+    # 触发: PR(仅同仓分支; fork PR 令牌无 security-events 写权限, 跳过避免上传必失败) / push main / 手动 auto|security|release
     if: |
-      github.event_name == 'pull_request' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'security' || inputs.type == 'release'))
     runs-on: windows-2025

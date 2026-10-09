@@ -8,6 +8,9 @@
 
 > 本仓库派生（fork）自 [cngege/GitHubDesktop2Chinese](https://github.com/cngege/GitHubDesktop2Chinese)，在此基础上继续维护与更新。原作者 [CNGEGE](https://github.com/cngege)，感谢其开创性工作。
 
+> [!TIP]
+> 📚 **更详细的文档**见 [docs/wiki 文档中心](docs/wiki/Home.md)：[安装与使用](docs/wiki/安装与使用.md) · [命令行参数](docs/wiki/命令行参数.md) · [常见问题](docs/wiki/常见问题.md) · [汉化原理](docs/wiki/汉化原理.md) · [映射文件格式](docs/wiki/映射文件格式.md) · [正则表达式指南](docs/wiki/正则表达式指南.md) · [编译指南](docs/wiki/编译指南.md) · [CI/CD](docs/wiki/CI-CD.md)
+
 ## 目录
 
 - [🥮 这是什么](#-这是什么)
@@ -35,7 +38,7 @@
 
 ## 🎯 怎么使用它
 
-[🎀 视频教程（BiliBili）](https://www.bilibili.com/video/BV17HpSeHEaC/)
+[🎀 视频教程（BiliBili）](https://www.bilibili.com/video/BV17HpSeHEaC/) · [📖 详细教程：安装与使用](docs/wiki/安装与使用.md)
 
 **方式一（推荐）**：前往 [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) 下载 `GitHubDesktop2Chinese.exe`，双击运行，程序自动联网获取最新 `localization.json` 完成汉化。
 
@@ -99,7 +102,7 @@ GitHubDesktop2Chinese.exe --rollback
 ```
 
 > [!TIP]
-> 查看内置帮助：`GitHubDesktop2Chinese.exe --help`。
+> 查看内置帮助：`GitHubDesktop2Chinese.exe --help`。完整参数说明（含开发者菜单、退出码、错误检查模式详解）见 [📖 Wiki：命令行参数](docs/wiki/命令行参数.md)。
 
 ## 🏗 怎么编译源代码
 

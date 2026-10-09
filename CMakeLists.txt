@@ -42,6 +42,9 @@ if(WIN32)
     # ── Windows: OpenSSL 静态库下载（预编译 x64 库）──
     # 官方与镜像 URL 内容一致, 均通过 EXPECTED_HASH(SHA256) 校验
     # 哈希来源: 自 GitHub 官方 Release URL 下载实测 (2026-10); 上游更新库文件时需同步更新哈希
+    # OpenSSL 预编译库根目录: 默认位于源码树; 只读源码目录场景可通过
+    # -DGHD2C_OPENSSL_ROOT=<可写目录> 覆盖(下载/查找/头文件/链接均使用该目录)
+    set(GHD2C_OPENSSL_ROOT "${PROJECT_SOURCE_DIR}/third_party/openssl" CACHE PATH "OpenSSL 预编译库根目录")
     if(DEFINED GitHubActions)
         set(LIBSSL_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libssl.lib)
         set(CRYPTO_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libcrypto.lib)
@@ -58,12 +61,12 @@ if(WIN32)
     SET(DOWNLOAD_OPENSSL_TIMEOUT 300 CACHE STRING "Timeout in seconds when downloading openssl_lib.")
     FIND_FILE(LOCAL_OPENSSL_LIBRARIES_PATH
         NAMES ""
-        HINTS "third_party/openssl/lib"
+        HINTS "${GHD2C_OPENSSL_ROOT}/lib"
         NO_DEFAULT_PATH)
-    if(NOT EXISTS "third_party/openssl/lib")
-        file(MAKE_DIRECTORY "third_party/openssl/lib")
-        SET(LOCAL_OPENSSL_LIBRARIES_PATH "third_party/openssl/lib")
-        MESSAGE(STATUS "Folder “third_party/openssl/lib” created successfully.")
+    if(NOT EXISTS "${GHD2C_OPENSSL_ROOT}/lib")
+        file(MAKE_DIRECTORY "${GHD2C_OPENSSL_ROOT}/lib")
+        SET(LOCAL_OPENSSL_LIBRARIES_PATH "${GHD2C_OPENSSL_ROOT}/lib")
+        MESSAGE(STATUS "Folder \"${GHD2C_OPENSSL_ROOT}/lib\" created successfully.")
     endif()
 
     # /////////////////////////////////////ssl库lib名称////////////////////////////////////////////////
@@ -75,7 +78,7 @@ if(WIN32)
     # 判断库文件是否已经存在
     FIND_FILE(LOCAL_OPENSSL_SSL_LIB
         NAMES ${OPENSSL_SSL_NAME}
-        HINTS "${PROJECT_SOURCE_DIR}/third_party/openssl/lib"
+        HINTS "${GHD2C_OPENSSL_ROOT}/lib"
         #NO_CACHE
         NO_DEFAULT_PATH)
     MESSAGE(STATUS "Checking url link ${LIBSSL_URL} ...")
@@ -116,7 +119,7 @@ if(WIN32)
     # 判断库文件是否已经存在
     FIND_FILE(LOCAL_OPENSSL_CRYPTO_LIB
         NAMES ${OPENSSL_CRYPTO_NAME}
-        HINTS "${PROJECT_SOURCE_DIR}/third_party/openssl/lib"
+        HINTS "${GHD2C_OPENSSL_ROOT}/lib"
         #NO_CACHE
         NO_DEFAULT_PATH)
     MESSAGE(STATUS "Checking url link ${CRYPTO_URL} ...")
@@ -149,7 +152,7 @@ if(WIN32)
     ENDIF()
 
     # 包含 openssl 的头文件
-    include_directories(third_party/openssl/include)
+    include_directories("${GHD2C_OPENSSL_ROOT}/include")
 else()
     # ── macOS/Linux: 系统包管理器提供的 OpenSSL（如 apt install libssl-dev / brew install openssl）──
     find_package(OpenSSL REQUIRED)
@@ -163,8 +166,8 @@ add_executable (GitHubDesktop2Chinese "src/GitHubDesktop2Chinese.cpp")
 if(WIN32)
     # 链接OpenSSL静态库（Windows 预编译 x64）
     target_link_libraries(GitHubDesktop2Chinese PRIVATE
-        ${CMAKE_SOURCE_DIR}/third_party/openssl/lib/${OPENSSL_SSL_NAME}
-        ${CMAKE_SOURCE_DIR}/third_party/openssl/lib/${OPENSSL_CRYPTO_NAME})
+        ${GHD2C_OPENSSL_ROOT}/lib/${OPENSSL_SSL_NAME}
+        ${GHD2C_OPENSSL_ROOT}/lib/${OPENSSL_CRYPTO_NAME})
     if(MSVC)
         # 进程级 UTF-8 主动代码页清单(见 src/app.manifest):
         # 缺少时窄字符路径按系统 ANSI 代码页解释, 非中文系统上中文路径参数会解析失败

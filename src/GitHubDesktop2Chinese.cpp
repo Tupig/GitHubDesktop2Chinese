@@ -5,11 +5,12 @@
 #define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING   //消除 converter.to_bytes的警告
 #define _CRT_SECURE_NO_WARNINGS                             //消除 sprintf的警告
 
-// PAUSE: Windows 等任意键(借 cmd pause), POSIX 等一行回车(EOF 时立即返回, 管道运行不挂起)
+// PAUSE: 等待确认(Windows 任意键 / POSIX 一行回车); 非交互 EOF 时立即返回, 管道运行不挂起
+// 展开调用下方 WaitAnyKey()(避免 system("pause") 每次调用创建 shell 进程)
 #ifdef _WIN32
-#define PAUSE if(!no_pause) { spdlog::info("按任意键继续..."); system("pause >nul"); }
+#define PAUSE if(!no_pause) { spdlog::info("按任意键继续..."); WaitAnyKey(); }
 #else
-#define PAUSE if(!no_pause) { spdlog::info("按回车键继续..."); std::cin.clear(); std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); }
+#define PAUSE if(!no_pause) { spdlog::info("按回车键继续..."); WaitAnyKey(); }
 #endif
 
 #include "GitHubDesktop2Chinese.h"
@@ -24,6 +25,9 @@
 #include <cstdio>
 #include <ctime>
 #include <iostream>
+#ifdef _WIN32
+#include <conio.h>                  // WaitAnyKey: 交互控制台下读取任意按键
+#endif
 
 #include <regex>
 
@@ -85,13 +89,23 @@ bool _debug_dev_setversion = false;				// 开发模式可以指定当前版本
 
 std::optional<std::string> formatTime(std::string time_str);
 
-// 清屏: 跨平台包装
+// 清屏: 跨平台 ANSI 转义(入口已为控制台启用 VT 处理, 不再创建 shell 进程)
 inline void ClearScreen() {
+    std::cout << "\033[2J\033[H" << std::flush;
+}
+
+// 等待确认: Windows 交互控制台读取任意按键; 非交互(重定向/无控制台)退化为等待一行(EOF 立即返回)
+inline void WaitAnyKey() {
 #ifdef _WIN32
-    system("cls");
-#else
-    system("clear");
+    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode = 0;
+    if(hIn != INVALID_HANDLE_VALUE && hIn != nullptr && GetConsoleMode(hIn, &mode)) {
+        (void)_getch();
+        return;
+    }
 #endif
+    std::cin.clear();
+    std::cin.ignore((std::numeric_limits<std::streamsize>::max)(), '\n');
 }
 
 // 转义 std::regex_replace format 串中的 $ (否则 $&/$`/$n 会被展开或吞掉): 用于把捕获文本安全回填到模板
@@ -122,6 +136,261 @@ BOOL WINAPI ConsoleHandler(DWORD dwCtrlType) {
 }
 #endif // _WIN32
 
+
+// ── 单文件处理(汉化替换 / 失效检测): main.js 与 renderer.js 共用的唯一实现(2026-10 审计 M2 去重) ──
+// 返回 0 成功; 返回 1 中止(错误已记录, 异常路径已从备份恢复, 调用方负责 PAUSE 与退出码)
+// invalid_count: 失效检测计数累计(用于 --invalidcheck 退出码)
+// fileTag: "main.js"/"renderer.js"; logTag: "main"/"renderer"; baseKey: 已按 dev 模式选择的映射数组键
+static int ProcessJsFile(const char* fileTag, const char* logTag, const char* baseKey,
+                         bool errorCheckMode, int& invalid_count) {
+    const fs::path target = Base / fileTag;
+    const fs::path bak = Base / (std::string(fileTag) + ".bak");
+
+    spdlog::info("正在处理{}文件,{}请勿关闭...{}", fileTag, "\033[33m", "\033[0m");
+    int out = 0;
+    // 如果"从备份文件中汉化"选项打开 则判断备份文件是否存在,以便尝试从备份文件中读取
+    std::string js_str = ((_debug_translation_from_bak || _debug_invalid_check_mode) && fs::exists(bak))
+        ? utils::ReadFile(bak.string())
+        : utils::ReadFile(target.string());
+    if(js_str.empty()) {
+        spdlog::error("读取 {} 失败或内容为空, 已中止以免覆盖源文件; 若文件损坏可从 {}.bak 恢复", fileTag, fileTag);
+        return 1;
+    }
+    bool process_failed = false;
+    try {
+        for(auto& item : localization[baseKey].items())
+        {
+#if NO_REPLACE
+            continue;
+#endif // NO_REPLACE
+            // E2: 条目前置校验, 畸形条目跳过而不是抛异常中断剩余替换
+            if(!item.value().is_array() || item.value().empty() || !item.value()[0].is_string()) {
+                spdlog::warn("[{}] 跳过格式无效的条目 {}", logTag, item.key());
+                continue;
+            }
+            std::string rege = item.value()[0].get<std::string>();
+            if(rege.empty() || rege == "\"\"") {
+                continue;
+            }
+            std::regex pattern(rege, std::regex::optimize);
+
+            // 开发者选项 失效检测
+            if(_debug_invalid_check_mode) {
+                bool found = std::regex_search(js_str, pattern);
+                if(!found) {
+                    spdlog::warn("[{}] 检测到失效项: {}", logTag, rege);
+                    invalid_count++;
+                }
+                if(item.value().size() >= 3) {
+                    std::regex pattern3(item.value()[2].get<std::string>(), std::regex::optimize);
+                    found = std::regex_search(js_str, pattern3);
+                    if(!found) {
+                        spdlog::warn("[{}] 检测到失效项: {}", logTag, item.value()[2].get<std::string>());
+                        invalid_count++;
+                    }
+                }
+                continue;
+            }
+            if(item.value().size() < 2 || !item.value()[1].is_string()) {
+                spdlog::warn("[{}] 跳过缺少替换文本的条目 {}", logTag, item.key());
+                continue;
+            }
+            if(item.value().size() >= 3) {
+                // 在全文中查找数组第三项(pattern3), 用首个匹配的捕获组回填替换文本中的 #{} 占位符
+                std::string regex_str = item.value()[2].is_string() ? item.value()[2].get<std::string>() : std::string();
+                std::regex pattern3(regex_str, std::regex::optimize);
+                std::sregex_iterator it = std::sregex_iterator(js_str.begin(), js_str.end(), pattern3);
+                if(it != std::sregex_iterator()) {
+                    const std::smatch& match = *it;
+                    for(size_t i = 1; i < match.size(); i++) {
+                        if(!match[i].matched) continue;
+                        // 逐字面查找 #{i} 并回填; 捕获文本先转义 $, 防止其作为 format 串时 $&/$n 被展开
+                        const std::string ph = "#{" + std::to_string(i) + "}";
+                        const std::string val = EscapeDollar(match[i].str());
+                        std::string text = item.value()[1].get<std::string>();
+                        size_t pos = 0;
+                        while((pos = text.find(ph, pos)) != std::string::npos) {
+                            text.replace(pos, ph.size(), val);
+                            pos += val.size();
+                        }
+                        item.value()[1] = text;
+                    }
+                    // 捕获组数不足导致的残留占位符若写入 JS 会造成语法破坏, 必须跳过该条
+                    static const std::regex leftover_ph(R"(#\{\d+\})", std::regex::optimize);
+                    if(std::regex_search(item.value()[1].get<std::string>(), leftover_ph)) {
+                        spdlog::warn("[{}] 替换文本存在未回填的占位符, 此项将跳过: {}", logTag, regex_str);
+                        continue;
+                    }
+                }
+                else {
+                    // 如果没有找到，则应该进行提示并跳过此项，以免进行错误的字符插入，造成程序无法打开
+                    spdlog::warn("[{}] 出现一处失效项,此项将跳过: {}", logTag, regex_str);
+                    continue;
+                }
+            }
+
+            // 替换
+            js_str = std::regex_replace(js_str, pattern, item.value()[1].get<std::string>());
+            if(errorCheckMode) {
+                // 控制台已设为 UTF-8, 直接输出原文, 不再经 GBK 转码造成乱码
+                spdlog::info("[{}][out:{}]已经替换:{}->{}", logTag, out, rege, item.value()[1].get<std::string>());
+                out--;
+                if(out <= 0) {
+                    if(!utils::WriteFile(target.string(), js_str)) {
+                        spdlog::error("写入 {} 失败(原文件未改动), 已中止", fileTag);
+                        return 1;
+                    }
+                    spdlog::info("已写入. 你希望下次替换多少条后写入:");
+                    if(!(std::cin >> out)) {
+                        // 输入流已结束(非交互运行): 置为极大值, 等价于剩余项全部替换后一次性写入
+                        out = (std::numeric_limits<int>::max)();
+                    }
+                }
+            }
+        }
+
+        // 循环select 如果是非测试替换
+        if(!_debug_dev_replace) {
+            // 循环select 列表
+            for(auto& item_select : localization["select"].items()) {
+                // 判断此项 是否是 对应js， 并且enable项是否开启 (value() 带默认值: 键缺失不抛异常)
+                if(!item_select.value().is_object()) continue;
+                const auto& sel = item_select.value();
+                if(sel.value("replaceFile", std::string()) == fileTag && sel.value("enable", false)) {
+                    // 拿到替换项，双层容器 (手动解析: 跳过缺列/非字符串的坏行, 防止 get 抛异常中断整个 select 段)
+                    std::vector<std::vector<std::string>> replaces;
+                    if(sel.contains("replace") && sel.at("replace").is_array()) {
+                        for(const auto& row : sel.at("replace")) {
+                            std::vector<std::string> vrow;
+                            bool bad = !row.is_array() || row.size() < 2;
+                            if(!bad) {
+                                for(const auto& e : row) {
+                                    if(!e.is_string()) { bad = true; break; }
+                                    vrow.push_back(e.get<std::string>());
+                                }
+                            }
+                            if(bad || vrow.size() < 2) {
+                                spdlog::warn("[select {}] 跳过格式无效的替换行: {}", logTag, item_select.key());
+                                continue;
+                            }
+                            replaces.push_back(std::move(vrow));
+                        }
+                    }
+                    if(_debug_invalid_check_mode) { // 开启了失效项检测
+                        // 遍历循环外层替换项
+                        for(auto& v_item : replaces) {
+                            if(v_item.size() < 2) continue; // F2 防御: 解析已过滤, 此处兜底防越界
+                            // 如果此替换字符串第一个是空字符串，如果是空 则跳出此次循环
+                            std::string rege = v_item[0];
+                            if(rege.empty() || rege == "\"\"") {
+                                continue;
+                            }
+                            std::regex pattern(rege, std::regex::optimize);
+                            // 搜索第一项 是否存在
+                            if(!std::regex_search(js_str, pattern)) {
+                                spdlog::warn("[select {}] 检测到失效项: {}", logTag, rege.c_str());
+                                invalid_count++;
+                            }
+                            //如果二层数组字符串有三项
+                            if(v_item.size() >= 3) {
+                                std::regex pattern3(v_item[2], std::regex::optimize);
+                                // 搜索第三项是否存在
+                                if(!std::regex_search(js_str, pattern3)) {
+                                    spdlog::warn("[select {} 3] 检测到失效项: {}", logTag, v_item[2].c_str());
+                                    invalid_count++;
+                                }
+                            }
+                        }
+                    }
+                    else {  // 正常替换
+                        // 询问提示 输出json中的输出提示字符串
+                        spdlog::info(">>>>>> {}", sel.value("tooltip", std::string()));
+                        // 读取用户输入
+                        if(utils::ReadUserInput_bool({ "n","y" }, 1)) {
+                            // 循环两层数组的外层数组
+                            for(auto& v_item : replaces) {
+                                if(v_item.size() < 2) continue; // F2 防御: 解析已过滤, 此处兜底防越界
+                                // 如果此替换字符串第一个是空字符串，如果是空 则跳出此次循环
+                                std::string rege = v_item[0];
+                                if(rege.empty() || rege == "\"\"") {
+                                    continue;
+                                }
+                                std::regex pattern(rege, std::regex::optimize);
+                                // 如果有第三个字符串
+                                if(v_item.size() >= 3) {
+                                    // 预备用第三个字符串查找关键字 用来替换第二个字符串
+                                    std::regex pattern3(v_item[2], std::regex::optimize);
+                                    std::sregex_iterator it = std::sregex_iterator(js_str.begin(), js_str.end(), pattern3);
+                                    if(it != std::sregex_iterator()) {
+                                        const std::smatch& match = *it;
+                                        for(size_t i = 1; i < match.size(); i++) {
+                                            if(!match[i].matched) continue;
+                                            // 逐字面回填; 捕获文本转义 $ 防止 format 特殊序列展开
+                                            const std::string ph = "#{" + std::to_string(i) + "}";
+                                            const std::string val = EscapeDollar(match[i].str());
+                                            size_t pos = 0;
+                                            while((pos = v_item[1].find(ph, pos)) != std::string::npos) {
+                                                v_item[1].replace(pos, ph.size(), val);
+                                                pos += val.size();
+                                            }
+                                        }
+                                        static const std::regex leftover_ph(R"(#\{\d+\})", std::regex::optimize);
+                                        if(std::regex_search(v_item[1], leftover_ph)) {
+                                            spdlog::warn("[select {}] 替换文本存在未回填的占位符, 此项将跳过: {}", logTag, v_item[2]);
+                                            continue;
+                                        }
+                                    }
+                                    else {
+                                        // 如果没有找到，则应该进行提示并跳过此项，以免进行错误的字符插入，造成程序无法打开
+                                        spdlog::warn("[select {} 3] 出现一处失效项,此项将跳过: {}", logTag, v_item[2].c_str());
+                                        continue;
+                                    }
+                                }
+                                // 最终替换
+                                js_str = std::regex_replace(js_str, pattern, v_item[1]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    catch(const std::regex_error& re) {
+        spdlog::error("处理{}时匹配正则出现错误 code:{}, message:{}", fileTag, re.code(), re.what());
+        process_failed = true;
+    }
+    catch(const std::exception& e) {
+        // 覆盖 runtime_error 及 json 类型异常等, 避免未捕获导致进程终止
+        spdlog::error("处理{}时出现错误: {}", fileTag, e.what());
+        process_failed = true;
+    }
+
+    if(process_failed) {
+        // E1: 异常时不写入半成品, 从备份恢复目标文件, 与 README"汉化异常后从备份恢复"一致
+        spdlog::error("{} 处理异常, 已中止且不写入部分汉化结果", fileTag);
+        if(!_debug_invalid_check_mode && !_debug_no_replace_res && fs::exists(bak)) {
+            std::error_code ec;
+            fs::copy_file(bak, target, fs::copy_options::overwrite_existing, ec);
+            if(ec) {
+                spdlog::error("从备份恢复 {} 失败: {}", fileTag, ec.message());
+            }
+            else {
+                spdlog::info("{} 已从备份恢复", fileTag);
+            }
+        }
+        return 1;
+    }
+
+    if(!_debug_invalid_check_mode && !_debug_no_replace_res) {
+        // 写入
+        if(!utils::WriteFile(target.string(), js_str)) {
+            spdlog::error("写入 {} 失败(原文件未改动), 已中止", fileTag);
+            return 1;
+        }
+    }
+    spdlog::info("{} 文件汉化结束.", fileTag);
+    return 0;
+}
 
 #ifdef _WIN32
 // wmain: 使用宽字符命令行, 避免非UTF-8代码页(如中文GBK)下参数在CLI11内部转换时崩溃
@@ -392,7 +661,7 @@ int main(int argc, char* argv[])
                                 if(autoupdate) {
                                     // 下载地址形如:
                                     //https://github.com/Tupig/GitHubDesktop2Chinese/releases/download/v1.0.14/GitHubDesktop2Chinese.exe
-                                    std::regex url_regex(R"(^((?:https?://)[^/]+)(/.*)?$)");
+                                    std::regex url_regex(R"(^((?:https?://)[^/]+)(/.*)?$)", std::regex::optimize);
                                     std::smatch matches;
                                     if(std::regex_match(downlink, matches, url_regex)) {
                                         auto result = utils::UpdateProgram(matches[1].str(), matches[2].str(), self_path, max_size, proxy, asset_digest);
@@ -548,18 +817,20 @@ int main(int argc, char* argv[])
                 restore_fail++;
                 return;
             }
+            // 原子化: 先复制到临时文件, 成功后再改名覆盖, 中断不会留下缺失/半截的目标文件
+            const fs::path tmp = dst.string() + ".restoring";
             std::error_code ec;
-            if(fs::exists(dst)) {
-                fs::remove(dst, ec);
-                if(ec) {
-                    spdlog::error("回滚时删除 {} 失败: {}", dst.string().c_str(), ec.message());
-                    restore_fail++;
-                    return;
-                }
-            }
-            fs::copy_file(bak, dst, ec);
+            fs::copy_file(bak, tmp, fs::copy_options::overwrite_existing, ec);
             if(ec) {
-                spdlog::error("回滚复制 {} -> {} 失败: {}", bak.string().c_str(), dst.string().c_str(), ec.message());
+                spdlog::error("回滚复制 {} -> {} 失败: {}", bak.string().c_str(), tmp.string().c_str(), ec.message());
+                restore_fail++;
+                return;
+            }
+            fs::rename(tmp, dst, ec);
+            if(ec) {
+                spdlog::error("回滚替换 {} -> {} 失败: {}", tmp.string().c_str(), dst.string().c_str(), ec.message());
+                std::error_code rmec;
+                fs::remove(tmp, rmec);
                 restore_fail++;
                 return;
             }
@@ -781,509 +1052,23 @@ int main(int argc, char* argv[])
     }
     
     int ret_num = 0;
-    // 处理 main[_dev].json文件
+    // 处理 main[_dev].js 映射（与 renderer 共用 ProcessJsFile 单一实现, 2026-10 审计 M2 去重）
     {
-        spdlog::info("正在处理{}文件,{}请勿关闭...{}", "main.js","\033[33m","\033[0m");
-        int out = 0;
-        // 如果"从备份文件中汉化"选项打开 则判断备份文件是否存在,以便尝试从备份文件中读取
-        std::string main_str = ((_debug_translation_from_bak || _debug_invalid_check_mode) && fs::exists(Base / "main.js.bak")) ? utils::ReadFile(fs::path(Base / "main.js.bak").string()) : utils::ReadFile(fs::path(Base / "main.js").string());
-        if(main_str.empty()) {
-            spdlog::error("读取 main.js 失败或内容为空, 已中止以免覆盖源文件; 若文件损坏可从 main.js.bak 恢复");
+        const char* target_key = _debug_dev_replace ? "main_dev" : "main";
+        if(ProcessJsFile("main.js", "main", target_key, _debug_error_check_mode_main, ret_num) != 0) {
             PAUSE
             return 1;
         }
-        bool process_failed = false;
-        try {
-            for (auto& item : localization[_debug_dev_replace?"main_dev":"main"].items())
-            {
-    #if NO_REPLACE
-                continue;
-    #endif // NO_REPLACE
-                // E2: 条目前置校验, 畸形条目跳过而不是抛异常中断剩余替换
-                if(!item.value().is_array() || item.value().empty() || !item.value()[0].is_string()) {
-                    spdlog::warn("[main] 跳过格式无效的条目 {}", item.key());
-                    continue;
-                }
-                std::string rege = item.value()[0].get<std::string>();
-                if (rege.empty() || rege == "\"\"") {
-                    continue;
-                }
-                std::regex pattern(rege);
-
-                // 开发者选项 失效检测
-                if (_debug_invalid_check_mode) {
-                    bool found = std::regex_search(main_str, pattern);
-                    if (!found) {
-                        spdlog::warn("[main] 检测到失效项: {}", rege);
-                        ret_num++;
-                    }
-                    if(item.value().size() >= 3) {
-                        std::regex pattern3(item.value()[2].get<std::string>());
-                        found = std::regex_search(main_str, pattern3);
-                        if(!found) {
-                            spdlog::warn("[main] 检测到失效项: {}", item.value()[2].get<std::string>());
-                            ret_num++;
-                        }
-                    }
-                    continue;
-                }
-                if(item.value().size() < 2 || !item.value()[1].is_string()) {
-                    spdlog::warn("[main] 跳过缺少替换文本的条目 {}", item.key());
-                    continue;
-                }
-                if(item.value().size() >= 3) {
-                    // 在全文中查找数组第三项(pattern3), 用首个匹配的捕获组回填替换文本中的 #{} 占位符
-                    std::string regex_str = item.value()[2].is_string() ? item.value()[2].get<std::string>() : std::string();
-                    std::regex pattern3(regex_str);
-                    std::sregex_iterator it = std::sregex_iterator(main_str.begin(), main_str.end(), pattern3);
-                    if(it != std::sregex_iterator()) {
-                        const std::smatch& match = *it;
-                        for(size_t i = 1; i < match.size(); i++) {
-                            if(!match[i].matched) continue;
-                            // 逐字面查找 #{i} 并回填; 捕获文本先转义 $, 防止其作为 format 串时 $&/$n 被展开
-                            const std::string ph = "#{" + std::to_string(i) + "}";
-                            const std::string val = EscapeDollar(match[i].str());
-                            std::string text = item.value()[1].get<std::string>();
-                            size_t pos = 0;
-                            while((pos = text.find(ph, pos)) != std::string::npos) {
-                                text.replace(pos, ph.size(), val);
-                                pos += val.size();
-                            }
-                            item.value()[1] = text;
-                        }
-                        // 捕获组数不足导致的残留占位符若写入 JS 会造成语法破坏, 必须跳过该条
-                        static const std::regex leftover_ph(R"(#\{\d+\})");
-                        if(std::regex_search(item.value()[1].get<std::string>(), leftover_ph)) {
-                            spdlog::warn("[main] 替换文本存在未回填的占位符, 此项将跳过: {}", regex_str);
-                            continue;
-                        }
-                    }
-                    else {
-                        // 如果没有找到，则应该进行提示并跳过此项，以免进行错误的字符插入，造成程序无法打开
-                        spdlog::warn("[main] 出现一处失效项,此项将跳过: {}", regex_str);
-                        continue;
-                    }
-                }
-
-                // 替换
-                main_str = std::regex_replace(main_str, pattern, item.value()[1].get<std::string>());
-                if (_debug_error_check_mode_main) {
-                    // 控制台已设为 UTF-8, 直接输出原文, 不再经 GBK 转码造成乱码
-                    spdlog::info("[main][out:{}]已经替换:{}->{}", out, rege, item.value()[1].get<std::string>());
-                    out--;
-                    if (out <= 0) {
-                        if(!utils::WriteFile(fs::path(Base / "main.js").string(), main_str)) {
-                            spdlog::error("写入 main.js 失败(原文件未改动), 已中止");
-                            PAUSE
-                            return 1;
-                        }
-                        spdlog::info("已写入. 你希望下次替换多少条后写入:");
-                        if(!(std::cin >> out)) {
-                            // 输入流已结束(非交互运行): 置为极大值, 等价于剩余项全部替换后一次性写入
-                            out = std::numeric_limits<int>::max();
-                        }
-                    }
-                }
-            }
-
-                // 循环select 如果是非测试替换
-            if(!_debug_dev_replace) {
-                // 循环select 列表
-                for(auto& item_select : localization["select"].items()) {
-                    // 判断此项 是否是 对应js， 并且enable项是否开启 (value() 带默认值: 键缺失不抛异常)
-                    if(!item_select.value().is_object()) continue;
-                    const auto& sel = item_select.value();
-                    if(sel.value("replaceFile", std::string()) == "main.js" && sel.value("enable", false)) {
-                        // 拿到替换项，双层容器 (手动解析: 跳过缺列/非字符串的坏行, 防止 get 抛异常中断整个 select 段)
-                        std::vector<std::vector<std::string>> replaces;
-                        if(sel.contains("replace") && sel.at("replace").is_array()) {
-                            for(const auto& row : sel.at("replace")) {
-                                std::vector<std::string> vrow;
-                                bool bad = !row.is_array() || row.size() < 2;
-                                if(!bad) {
-                                    for(const auto& e : row) {
-                                        if(!e.is_string()) { bad = true; break; }
-                                        vrow.push_back(e.get<std::string>());
-                                    }
-                                }
-                                if(bad || vrow.size() < 2) {
-                                    spdlog::warn("[select main] 跳过格式无效的替换行: {}", item_select.key());
-                                    continue;
-                                }
-                                replaces.push_back(std::move(vrow));
-                            }
-                        }
-                        if(_debug_invalid_check_mode) { // 开启了失效项检测
-                            // 遍历循环外层替换项
-                            for(auto& v_item : replaces) {
-                                if(v_item.size() < 2) continue; // F2 防御: 解析已过滤, 此处兜底防越界
-                                // 如果此替换字符串第一个是空字符串，如果是空 则跳出此次循环
-                                std::string rege = v_item[0];
-                                if(rege.empty() || rege == "\"\"") {
-                                    continue;
-                                }
-                                std::regex pattern(rege);
-                                // 搜索第一项 是否存在
-                                if(!std::regex_search(main_str, pattern)) {
-                                    spdlog::warn("[select main] 检测到失效项: {}", rege.c_str());
-                                    ret_num++;
-                                }
-                                //如果二层数组字符串有三项
-                                if(v_item.size() >= 3) {
-                                    std::regex pattern3(v_item[2]);
-                                    // 搜索第三项是否存在
-                                    if(!std::regex_search(main_str, pattern3)) {
-                                        spdlog::warn("[select main 3] 检测到失效项: {}", v_item[2].c_str());
-                                        ret_num++;
-                                    }
-                                }
-                            }
-                        }
-                        else {  // 正常替换
-                            // 询问提示 输出json中的输出提示字符串
-                            spdlog::info(">>>>>> {}", sel.value("tooltip", std::string()));
-                            // 读取用户输入
-                            if(utils::ReadUserInput_bool({ "n","y" }, 1)) {
-                                // 循环两层数组的外层数组
-                                for(auto& v_item : replaces) {
-                                    if(v_item.size() < 2) continue; // F2 防御: 解析已过滤, 此处兜底防越界
-                                    // 如果此替换字符串第一个是空字符串，如果是空 则跳出此次循环
-                                    std::string rege = v_item[0];
-                                    if(rege.empty() || rege == "\"\"") {
-                                        continue;
-                                    }
-                                    std::regex pattern(rege);
-                                    // 如果有第三个字符串
-                                    if(v_item.size() >= 3) {
-                                        // 预备用第三个字符串查找关键字 用来替换第二个字符串
-                                        std::regex pattern3(v_item[2]);
-                                        std::sregex_iterator it = std::sregex_iterator(main_str.begin(), main_str.end(), pattern3);
-                                        if(it != std::sregex_iterator()) {
-                                            const std::smatch& match = *it;
-                                            for(size_t i = 1; i < match.size(); i++) {
-                                                if(!match[i].matched) continue;
-                                                // 逐字面回填; 捕获文本转义 $ 防止 format 特殊序列展开
-                                                const std::string ph = "#{" + std::to_string(i) + "}";
-                                                const std::string val = EscapeDollar(match[i].str());
-                                                size_t pos = 0;
-                                                while((pos = v_item[1].find(ph, pos)) != std::string::npos) {
-                                                    v_item[1].replace(pos, ph.size(), val);
-                                                    pos += val.size();
-                                                }
-                                            }
-                                            static const std::regex leftover_ph(R"(#\{\d+\})");
-                                            if(std::regex_search(v_item[1], leftover_ph)) {
-                                                spdlog::warn("[select main] 替换文本存在未回填的占位符, 此项将跳过: {}", v_item[2]);
-                                                continue;
-                                            }
-                                        }
-                                        else {
-                                            // 如果没有找到，则应该进行提示并跳过此项，以免进行错误的字符插入，造成程序无法打开
-                                            spdlog::warn("[select main 3] 出现一处失效项,此项将跳过: {}", v_item[2].c_str());
-                                            continue;
-                                        }
-                                    }
-                                    // 最终替换
-                                    main_str = std::regex_replace(main_str, pattern, v_item[1]);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        catch(const std::regex_error& re) {
-            spdlog::error("处理main.js时匹配正则出现错误 code:{}, message:{}", re.code(), re.what());
-            process_failed = true;
-        }
-        catch(const std::exception& e) {
-            // 覆盖 runtime_error 及 json 类型异常等, 避免未捕获导致进程终止
-            spdlog::error("处理main.js时出现错误: {}", e.what());
-            process_failed = true;
-        }
-
-        if(process_failed) {
-            // E1: 异常时不写入半成品, 从备份恢复目标文件, 与 README"汉化异常后从备份恢复"一致
-            spdlog::error("main.js 处理异常, 已中止且不写入部分汉化结果");
-            if(!_debug_invalid_check_mode && !_debug_no_replace_res && fs::exists(Base / "main.js.bak")) {
-                std::error_code ec;
-                fs::copy_file(Base / "main.js.bak", Base / "main.js", fs::copy_options::overwrite_existing, ec);
-                if(ec) {
-                    spdlog::error("从备份恢复 main.js 失败: {}", ec.message());
-                }
-                else {
-                    spdlog::info("main.js 已从备份恢复");
-                }
-            }
-            PAUSE
-            return 1;
-        }
-
-        if (!_debug_invalid_check_mode && !_debug_no_replace_res) {
-            // 写入
-            if(!utils::WriteFile(fs::path(Base / "main.js").string(), main_str)) {
-                spdlog::error("写入 main.js 失败(原文件未改动), 已中止");
-                PAUSE
-                return 1;
-            }
-        }
-        spdlog::info("{} 文件汉化结束.", "main.js");
     }
 
-
-
-    // 处理renderer.js文件
+    // 处理 renderer[_dev].js 映射
     {
-        spdlog::info("正在处理{}文件,{}请勿关闭...{}", "renderer.js", "\033[33m", "\033[0m");
-        int out = 0;
-        std::string renderer_str = ((_debug_translation_from_bak || _debug_invalid_check_mode) && fs::exists(Base / "renderer.js.bak")) ? utils::ReadFile(fs::path(Base / "renderer.js.bak").string()) :  utils::ReadFile(fs::path(Base / "renderer.js").string());
-        if(renderer_str.empty()) {
-            spdlog::error("读取 renderer.js 失败或内容为空, 已中止以免覆盖源文件; 若文件损坏可从 renderer.js.bak 恢复");
+        const char* target_key = _debug_dev_replace ? "renderer_dev" : "renderer";
+        if(ProcessJsFile("renderer.js", "renderer", target_key, _debug_error_check_mode_renderer, ret_num) != 0) {
             PAUSE
             return 1;
         }
-        bool process_failed = false;
-        try{
-            for (auto& item : localization[_debug_dev_replace?"renderer_dev":"renderer"].items())
-            {
-    #if NO_REPLACE
-                continue;
-    #endif // NO_REPLACE
-                // E2: 条目前置校验, 畸形条目跳过而不是抛异常中断剩余替换
-                if(!item.value().is_array() || item.value().empty() || !item.value()[0].is_string()) {
-                    spdlog::warn("[renderer] 跳过格式无效的条目 {}", item.key());
-                    continue;
-                }
-                std::string rege = item.value()[0].get<std::string>();
-                if (rege.empty() || rege == "\"\"") {
-                    continue;
-                }
-                std::regex pattern(rege);
-
-                // 开发者选项 失效检测
-                if (_debug_invalid_check_mode) {
-                    bool found = std::regex_search(renderer_str, pattern);
-                    if (!found) {
-                        spdlog::warn("[renderer] 检测到失效项: {}", rege);
-                        ret_num++;
-                    }
-                    if(item.value().size() >= 3) {
-                        std::regex pattern3(item.value()[2].get<std::string>());
-                        found = std::regex_search(renderer_str, pattern3);
-                        if(!found) {
-                            spdlog::warn("[renderer] 检测到失效项: {}", item.value()[2].get<std::string>());
-                            ret_num++;
-                        }
-                    }
-                    continue;
-                }
-
-                if(item.value().size() < 2 || !item.value()[1].is_string()) {
-                    spdlog::warn("[renderer] 跳过缺少替换文本的条目 {}", item.key());
-                    continue;
-                }
-                if(item.value().size() >= 3) {
-                    // 在全文中查找数组第三项(pattern3), 用首个匹配的捕获组回填替换文本中的 #{} 占位符
-                    std::string regex_str = item.value()[2].is_string() ? item.value()[2].get<std::string>() : std::string();
-                    std::regex pattern3(regex_str);
-                    std::sregex_iterator it = std::sregex_iterator(renderer_str.begin(), renderer_str.end(), pattern3);
-                    if(it != std::sregex_iterator()) {
-                        const std::smatch& match = *it;
-                        for(size_t i = 1; i < match.size(); i++) {
-                            if(!match[i].matched) continue;
-                            // 逐字面查找 #{i} 并回填; 捕获文本先转义 $, 防止其作为 format 串时 $&/$n 被展开
-                            const std::string ph = "#{" + std::to_string(i) + "}";
-                            const std::string val = EscapeDollar(match[i].str());
-                            std::string text = item.value()[1].get<std::string>();
-                            size_t pos = 0;
-                            while((pos = text.find(ph, pos)) != std::string::npos) {
-                                text.replace(pos, ph.size(), val);
-                                pos += val.size();
-                            }
-                            item.value()[1] = text;
-                        }
-                        // 捕获组数不足导致的残留占位符若写入 JS 会造成语法破坏, 必须跳过该条
-                        static const std::regex leftover_ph(R"(#\{\d+\})");
-                        if(std::regex_search(item.value()[1].get<std::string>(), leftover_ph)) {
-                            spdlog::warn("[renderer] 替换文本存在未回填的占位符, 此项将跳过: {}", regex_str);
-                            continue;
-                        }
-                    }
-                    else {
-                        // 如果没有找到，则应该进行提示并跳过此项，以免进行错误的字符插入，造成程序无法打开
-                        spdlog::warn("[renderer] 出现一处失效项,此项将跳过: {}", regex_str.c_str());
-                        continue;
-                    }
-                }
-
-                renderer_str = std::regex_replace(renderer_str, pattern, item.value()[1].get<std::string>());
-                if (_debug_error_check_mode_renderer) {
-                    // 控制台已设为 UTF-8, 直接输出原文, 不再经 GBK 转码造成乱码
-                    spdlog::info("[renderer][out:{}]已经替换:{}->{}", out, rege.c_str(), item.value()[1].get<std::string>());
-                    out--;
-                    if (out <= 0) {
-                        if(!utils::WriteFile(fs::path(Base / "renderer.js").string(), renderer_str)) {
-                            spdlog::error("写入 renderer.js 失败(原文件未改动), 已中止");
-                            PAUSE
-                            return 1;
-                        }
-                        spdlog::info("已写入. 你希望下次替换多少条后写入:");
-                        if(!(std::cin >> out)) {
-                            // 输入流已结束(非交互运行): 置为极大值, 等价于剩余项全部替换后一次性写入
-                            out = std::numeric_limits<int>::max();
-                        }
-                    }
-                }
-            }
-
-            // 循环select 如果是非测试替换
-            if(!_debug_dev_replace) {
-                // 循环select 列表
-                for(auto& item_select : localization["select"].items()) {
-                    // 判断此项 是否是 对应js， 并且enable项是否开启 (value() 带默认值: 键缺失不抛异常)
-                    if(!item_select.value().is_object()) continue;
-                    const auto& sel = item_select.value();
-                    if(sel.value("replaceFile", std::string()) == "renderer.js" && sel.value("enable", false)) {
-                        // 拿到替换项，双层容器 (手动解析: 跳过缺列/非字符串的坏行, 防止 get 抛异常中断整个 select 段)
-                        std::vector<std::vector<std::string>> replaces;
-                        if(sel.contains("replace") && sel.at("replace").is_array()) {
-                            for(const auto& row : sel.at("replace")) {
-                                std::vector<std::string> vrow;
-                                bool bad = !row.is_array() || row.size() < 2;
-                                if(!bad) {
-                                    for(const auto& e : row) {
-                                        if(!e.is_string()) { bad = true; break; }
-                                        vrow.push_back(e.get<std::string>());
-                                    }
-                                }
-                                if(bad || vrow.size() < 2) {
-                                    spdlog::warn("[select renderer] 跳过格式无效的替换行: {}", item_select.key());
-                                    continue;
-                                }
-                                replaces.push_back(std::move(vrow));
-                            }
-                        }
-                        // 用户是否开启了失效项检测
-                        if(_debug_invalid_check_mode) { // 开启了失效项检测
-                            // 遍历循环外层替换项
-                            for(auto& v_item : replaces) {
-                                if(v_item.size() < 2) continue; // F2 防御: 解析已过滤, 此处兜底防越界
-                                // 如果此替换字符串第一个是空字符串，如果是空 则跳出此次循环
-                                std::string rege = v_item[0];
-                                if(rege.empty() || rege == "\"\"") {
-                                    continue;
-                                }
-                                std::regex pattern(rege);
-                                // 搜索第一项 是否存在
-                                if(!std::regex_search(renderer_str, pattern)) {
-                                    spdlog::warn("[select renderer] 检测到失效项: {}", rege.c_str());
-                                    ret_num++;
-                                }
-                                //如果二层数组字符串有三项
-                                if(v_item.size() >= 3) {
-                                    std::regex pattern3(v_item[2]);
-                                    // 搜索第三项是否存在
-                                    if(!std::regex_search(renderer_str, pattern3)) {
-                                        spdlog::warn("[select renderer 3] 检测到失效项: {}", v_item[2].c_str());
-                                        ret_num++;
-                                    }
-                                }
-                            }
-                        }
-                        else {  // 正常替换
-                            // 询问提示 输出json中的输出提示字符串
-                            spdlog::info(">>>>>> {}", sel.value("tooltip", std::string()));
-                            // 读取用户输入
-                            if(utils::ReadUserInput_bool({"n","y"},1)) {
-                                // 循环两层数组的外层数组
-                                for(auto& v_item : replaces) {
-                                    if(v_item.size() < 2) continue; // F2 防御: 解析已过滤, 此处兜底防越界
-                                    // 如果此替换字符串第一个是空字符串，如果是空 则跳出此次循环
-                                    std::string rege = v_item[0];
-                                    if(rege.empty() || rege == "\"\"") {
-                                        continue;
-                                    }
-                                    std::regex pattern(rege);
-                                    // 如果有第三个字符串
-                                    if(v_item.size() >= 3) {
-                                        // 预备用第三个字符串查找关键字 用来替换第二个字符串
-                                        std::regex pattern3(v_item[2]);
-                                        std::sregex_iterator it = std::sregex_iterator(renderer_str.begin(), renderer_str.end(), pattern3);
-                                        if(it != std::sregex_iterator()) {
-                                            const std::smatch& match = *it;
-                                            for(size_t i = 1; i < match.size(); i++) {
-                                                if(!match[i].matched) continue;
-                                                // 逐字面回填; 捕获文本转义 $ 防止 format 特殊序列展开
-                                                const std::string ph = "#{" + std::to_string(i) + "}";
-                                                const std::string val = EscapeDollar(match[i].str());
-                                                size_t pos = 0;
-                                                while((pos = v_item[1].find(ph, pos)) != std::string::npos) {
-                                                    v_item[1].replace(pos, ph.size(), val);
-                                                    pos += val.size();
-                                                }
-                                            }
-                                            static const std::regex leftover_ph(R"(#\{\d+\})");
-                                            if(std::regex_search(v_item[1], leftover_ph)) {
-                                                spdlog::warn("[select renderer] 替换文本存在未回填的占位符, 此项将跳过: {}", v_item[2]);
-                                                continue;
-                                            }
-                                        }
-                                        else {
-                                            // 如果没有找到，则应该进行提示并跳过此项，以免进行错误的字符插入，造成程序无法打开
-                                            spdlog::warn("[select renderer 3] 出现一处失效项,此项将跳过: {}", v_item[2].c_str());
-                                            continue;
-                                        }
-                                    }
-                                    // 最终替换
-                                    renderer_str = std::regex_replace(renderer_str, pattern, v_item[1]);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        catch(const std::regex_error& re) {
-            spdlog::error("处理renderer.js时匹配正则出现错误 code:{}, message:{}", re.code(), re.what());
-            process_failed = true;
-        }
-        catch(const std::exception& e) {
-            // 覆盖 runtime_error 及 json 类型异常等, 避免未捕获导致进程终止
-            spdlog::error("处理renderer.js时出现错误: {}", e.what());
-            process_failed = true;
-        }
-
-        if(process_failed) {
-            // E1: 异常时不写入半成品, 从备份恢复目标文件, 与 README"汉化异常后从备份恢复"一致
-            spdlog::error("renderer.js 处理异常, 已中止且不写入部分汉化结果");
-            if(!_debug_invalid_check_mode && !_debug_no_replace_res && fs::exists(Base / "renderer.js.bak")) {
-                std::error_code ec;
-                fs::copy_file(Base / "renderer.js.bak", Base / "renderer.js", fs::copy_options::overwrite_existing, ec);
-                if(ec) {
-                    spdlog::error("从备份恢复 renderer.js 失败: {}", ec.message());
-                }
-                else {
-                    spdlog::info("renderer.js 已从备份恢复");
-                }
-            }
-            PAUSE
-            return 1;
-        }
-
-        if (!_debug_invalid_check_mode && !_debug_no_replace_res) {
-            // 写入
-            if(!utils::WriteFile(fs::path(Base / "renderer.js").string(), renderer_str)) {
-                spdlog::error("写入 renderer.js 失败(原文件未改动), 已中止");
-                PAUSE
-                return 1;
-            }
-        }
-        spdlog::info("{} 文件汉化结束.", "renderer.js");
     }
-
-
-
-
 
     // 获取项目参与者:
     // https://api.github.com/repos/Tupig/GitHubDesktop2Chinese/contributors
