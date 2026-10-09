@@ -5,25 +5,39 @@
 #define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING   //消除 converter.to_bytes的警告
 #define _CRT_SECURE_NO_WARNINGS                             //消除 sprintf的警告
 
+// PAUSE: Windows 等任意键(借 cmd pause), POSIX 等一行回车(EOF 时立即返回, 管道运行不挂起)
+#ifdef _WIN32
 #define PAUSE if(!no_pause) { spdlog::info("按任意键继续..."); system("pause >nul"); }
+#else
+#define PAUSE if(!no_pause) { spdlog::info("按回车键继续..."); std::cin.clear(); std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); }
+#endif
 
 #include "GitHubDesktop2Chinese.h"
 #include <string>
 #include <vector>
 #include <limits>
 #include <filesystem>
+#include <sstream>
+#include <iomanip>
+#include <chrono>
+#include <optional>
+#include <iostream>
 
 #include <regex>
 
 #include "spdlog/spdlog.h"          // 日志式输出库
 #include "nlohmann/json.hpp"        // JSON读取本地配置库
-#include "WinReg/WinReg.hpp"        // 注册表操作库
+#ifdef _WIN32
+#include "WinReg/WinReg.hpp"        // 注册表操作库(仅 Windows)
+#endif
 
 #include <CLI/CLI.hpp>              // 参数管理器:   https://github.com/CLIUtils/CLI11
 #include "utils/utils.hpp"
 #include "version/Version.hpp"
 
+#ifdef _MSC_VER
 #pragma comment(lib, "winhttp.lib")
+#endif
 
 // 不进行替换 以便调试
 #define NO_REPLACE 0
@@ -69,7 +83,27 @@ bool _debug_dev_setversion = false;				// 开发模式可以指定当前版本
 
 std::optional<std::string> formatTime(std::string time_str);
 
+// 清屏: 跨平台包装
+inline void ClearScreen() {
+#ifdef _WIN32
+    system("cls");
+#else
+    system("clear");
+#endif
+}
 
+// 转义 std::regex_replace format 串中的 $ (否则 $&/$`/$n 会被展开或吞掉): 用于把捕获文本安全回填到模板
+inline auto EscapeDollar(const std::string& s) -> std::string {
+    std::string out;
+    out.reserve(s.size());
+    for(char c : s) {
+        if(c == '$') out += "$$";
+        else out += c;
+    }
+    return out;
+}
+
+#ifdef _WIN32
 BOOL WINAPI ConsoleHandler(DWORD dwCtrlType) {
     // 仅拦截窗口关闭事件
     if(dwCtrlType == CTRL_CLOSE_EVENT) {
@@ -84,8 +118,10 @@ BOOL WINAPI ConsoleHandler(DWORD dwCtrlType) {
     // 其他事件（Ctrl+C、Ctrl+Break、关机等）不处理，让系统默认执行
     return FALSE;
 }
+#endif // _WIN32
 
 
+#ifdef _WIN32
 // wmain: 使用宽字符命令行, 避免非UTF-8代码页(如中文GBK)下参数在CLI11内部转换时崩溃
 int wmain(int argc, wchar_t* wargv[])
 {
@@ -113,6 +149,12 @@ int wmain(int argc, wchar_t* wargv[])
     for(auto& arg : utf8_args) {
         argv.push_back(arg.data());
     }
+#else
+// POSIX 入口: argv 本身即 UTF-8, 无需转换
+int main(int argc, char* argv[])
+{
+    fs::path self_path(argv[0]);
+#endif // _WIN32
 
     FileVer = versionparse::Version(FILEVERSION);
     // 设置控制台打印日志输出等级
@@ -149,9 +191,18 @@ int wmain(int argc, wchar_t* wargv[])
                     throw CLI::ValidationError("(-j,--json) 指定的本地化文件路径必须以.json结尾");
                 }
                 if (!fs::exists(LocalizationJSON)) {
+                    std::error_code ec;
+                    if(LocalizationJSON.has_parent_path()) {
+                        fs::create_directories(LocalizationJSON.parent_path(), ec);
+                    }
                     std::ofstream io(LocalizationJSON);
                     io << std::setw(4) << localization << std::endl;
+                    const bool ok = io.good();
                     io.close();
+                    if(!ok || !fs::exists(LocalizationJSON)) {
+                        // 权限不足/父目录不可写时不能谎报"已创建"(随后 CLI11 以 105 退出)
+                        throw CLI::ValidationError("(-j,--json) 指定位置无法创建本地化文件(权限或路径问题)");
+                    }
                     throw CLI::ValidationError("(-j,--json) 指定的本地化文件不存在,已在指定位置创建");
                 }
             }
@@ -180,9 +231,16 @@ int wmain(int argc, wchar_t* wargv[])
             return 3;
         }
     }
-    if(GetKeyState(VK_SHIFT) & 0x8000 || _debug_goto_devoptions) {
+    if(
+#ifdef _WIN32
+       // 无消息循环的控制台程序中 GetKeyState 返回的是过期状态, 用 GetAsyncKeyState 查询当前物理键状态
+       (GetAsyncKeyState(VK_SHIFT) & 0x8000) ||
+#endif
+       _debug_goto_devoptions) {
         // 如果Shift按下, 则进入开发者选项
+#ifdef _WIN32
         SetConsoleTitleW(L"开发者模式");
+#endif
         spdlog::info("您已进入开发者模式");
         DeveloperOptions();
     }
@@ -205,15 +263,17 @@ int wmain(int argc, wchar_t* wargv[])
             }
             else {
                 FileVer = ver;
-                system("cls");
+                ClearScreen();
                 break;
             }
         }
     }
     
+#ifdef _WIN32
     if(!SetConsoleCtrlHandler(ConsoleHandler, TRUE)) {
         spdlog::error("注册关闭二次确认弹窗处理失败！");
     }
+#endif
 
     // 开发者声明
     spdlog::info("开发者：Tupig（原作 CNGEGE，项目始于 2024/04/13）");
@@ -249,7 +309,9 @@ int wmain(int argc, wchar_t* wargv[])
     
 
 
+#ifdef _WIN32
     SetConsoleTitle(FileVer.toString(true).c_str());
+#endif
 
     if (LocalizationJSON.empty()) {
         LocalizationJSON = "localization.json";
@@ -267,7 +329,13 @@ int wmain(int argc, wchar_t* wargv[])
                 }
             }
         }
-        catch(...) {}
+        catch(const std::exception& e) {
+            // 装饰性信息: 解析失败不中断主流程, 但保留原因便于诊断
+            spdlog::debug("查询仓库更新时间失败: {}", e.what());
+        }
+        catch(...) {
+            spdlog::debug("查询仓库更新时间出现未知异常");
+        }
     }
 
     // 检查更新
@@ -345,99 +413,19 @@ int wmain(int argc, wchar_t* wargv[])
                     spdlog::warn("远程信息读取失败..");
                 }
             }
-            catch(...) {
-                spdlog::warn("检查更新时出现异常");
-            }
-        }
-    }
-
-    // 如果是仅从远程仓库读取汉化文件
-    if (only_read_from_remote) {
-        spdlog::info("尝试从远程仓库中获取");
-        std::string httpjson;
-        if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/Tupig/GitHubDesktop2Chinese/main/json/localization.json", httpjson, proxy)) {
-            try {
-                localization = json::parse(httpjson);
-                spdlog::info("远程读取成功");
-            }
             catch(const std::exception& e) {
-                spdlog::error("远程映射文件解析失败: {}", e.what());
-                PAUSE
-                return 1;
+                spdlog::warn("检查更新时出现异常: {}", e.what());
             }
-        }
-        else {
-            spdlog::warn("远程获取失败,请检查网络和代理,并稍后再试");
-            PAUSE
-            return 1;
-        }
-    }
-    // 没有指定仅从远程仓库获取汉化文件
-    else {
-        // 判断汉化映射文件是否存在, 不存在则创建一个
-        if (!fs::exists(LocalizationJSON)) {
-            // 没有发现json文件,尝试从远程开源项目中获取
-            spdlog::warn("没有指定,或从指定位置没有发现 {} 文件", "localization.json");
-            spdlog::info("尝试从远程仓库中获取");
-            std::string httpjson;
-            if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/Tupig/GitHubDesktop2Chinese/main/json/localization.json", httpjson, proxy)) {
-                try {
-                    localization = json::parse(httpjson);
-                    spdlog::info("远程读取成功");
-                }
-                catch(const std::exception& e) {
-                    spdlog::error("远程映射文件解析失败: {}", e.what());
-                    PAUSE
-                    return 1;
-                }
-            }
-            else {
-                spdlog::warn("远程获取失败 - 请{}重试", !proxy.second ? "尝试开启代理或":"");
-                PAUSE
-                return 1;
-            }
-        }
-        else
-        {
-            // 本地读取汉化文件到json中
-            std::ifstream config(LocalizationJSON);
-            if (!config) {
-                spdlog::error("localization.json 打开失败,无法读取");
-                PAUSE
-                return 1;
-            }
-            try
-            {
-                config >> localization;
-            }
-            catch (const std::exception& e)
-            {
-                spdlog::error("{} at line {}", e.what(), __LINE__);
-                PAUSE
-                return 1;
+            catch(...) {
+                spdlog::warn("检查更新时出现未知异常");
             }
         }
     }
 
-    // 映射文件顶层必须为 JSON 对象, 否则后续下标访问是未定义行为
-    if(!localization.is_object()) {
-        spdlog::error("映射文件格式无效, 顶层必须为 JSON 对象");
-        PAUSE
-        return 1;
-    }
-
-    // 读取映射文件中的提示信息
-    if (localization.contains("tip") && localization.at("tip").is_array() && !localization.at("tip").empty()) {
-        for(auto& it : localization.at("tip")) {
-            if (it.is_string()) {
-                spdlog::info(" **通知** {}", it.get<std::string>());
-            }
-        }
-    }
-
-
+    // ── 目录解析(前置于 json 加载): 回滚只需目录+备份, 不应被 json 损坏/断网阻断(F4) ──
     // Github Desktop 存在目录没有提前设置
     if (!fs::exists(Base) || !fs::exists(Base / "index.html")) {
+#ifdef _WIN32
         //	检查注册表中是否存在GithubDesktop
         winreg::RegKey key;
         winreg::RegResult result = key.TryOpen(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\GitHubDesktop");
@@ -528,6 +516,15 @@ int wmain(int argc, wchar_t* wargv[])
             }
         }
         key.Close();
+#else
+        spdlog::warn("非 Windows 平台无法自动探测 GitHub Desktop 安装目录");
+        Base = utils::to_path(LoopGetBasePath());
+        if(Base.empty()) {
+            spdlog::error("未能获取资源目录, 请使用 -g 参数手动指定");
+            PAUSE
+            return 1;
+        }
+#endif // _WIN32
     }
 
     fs::path mainjs = "main.js";
@@ -536,7 +533,7 @@ int wmain(int argc, wchar_t* wargv[])
     fs::path rendererjs = "renderer.js";
     fs::path rendererjsbak = "renderer.js.bak";
 
-    // 指定还原
+    // 指定还原(短路: 在 json 加载之前执行, json 损坏/断网不阻断回滚)
     if(rollback) {
         int restore_fail = 0;
         auto restore_one = [&](const fs::path& bak, const fs::path& dst) {
@@ -567,6 +564,111 @@ int wmain(int argc, wchar_t* wargv[])
         PAUSE
         return restore_fail ? 1 : 0;
     }
+
+    // 如果是仅从远程仓库读取汉化文件
+    if (only_read_from_remote) {
+        spdlog::info("尝试从远程仓库中获取");
+        std::string httpjson;
+        if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/Tupig/GitHubDesktop2Chinese/main/json/localization.json", httpjson, proxy)) {
+            try {
+                localization = json::parse(httpjson);
+                spdlog::info("远程读取成功");
+            }
+            catch(const std::exception& e) {
+                spdlog::error("远程映射文件解析失败: {}", e.what());
+                PAUSE
+                return 1;
+            }
+        }
+        else {
+            spdlog::warn("远程获取失败,请检查网络和代理,并稍后再试");
+            PAUSE
+            return 1;
+        }
+    }
+    // 没有指定仅从远程仓库获取汉化文件
+    else {
+        // 判断汉化映射文件是否存在, 不存在则创建一个
+        if (!fs::exists(LocalizationJSON)) {
+            // 没有发现json文件,尝试从远程开源项目中获取
+            spdlog::warn("没有指定,或从指定位置没有发现 {} 文件", "localization.json");
+            spdlog::info("尝试从远程仓库中获取");
+            std::string httpjson;
+            if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/Tupig/GitHubDesktop2Chinese/main/json/localization.json", httpjson, proxy)) {
+                try {
+                    localization = json::parse(httpjson);
+                    spdlog::info("远程读取成功");
+                }
+                catch(const std::exception& e) {
+                    spdlog::error("远程映射文件解析失败: {}", e.what());
+                    PAUSE
+                    return 1;
+                }
+            }
+            else {
+                spdlog::warn("远程获取失败 - 请{}重试", !proxy.second ? "尝试开启代理或":"");
+                PAUSE
+                return 1;
+            }
+        }
+        else
+        {
+            // 本地读取汉化文件到json中
+            std::ifstream config(LocalizationJSON);
+            if (!config) {
+                spdlog::error("localization.json 打开失败,无法读取");
+                PAUSE
+                return 1;
+            }
+            try
+            {
+                config >> localization;
+            }
+            catch (const std::exception& e)
+            {
+                spdlog::error("{} at line {}", e.what(), __LINE__);
+                PAUSE
+                return 1;
+            }
+        }
+    }
+
+    // 映射文件顶层必须为 JSON 对象, 否则后续下标访问是未定义行为
+    if(!localization.is_object()) {
+        spdlog::error("映射文件格式无效, 顶层必须为 JSON 对象");
+        PAUSE
+        return 1;
+    }
+
+    // E3: 必需顶层键缺失时 nlohmann 迭代空区间, 会 0 条替换仍报成功, 必须显式校验
+    {
+        const char* main_key = _debug_dev_replace ? "main_dev" : "main";
+        const char* renderer_key = _debug_dev_replace ? "renderer_dev" : "renderer";
+        for(const char* k : { main_key, renderer_key }) {
+            if(!localization.contains(k) || !localization.at(k).is_array() || localization.at(k).empty()) {
+                spdlog::error("映射文件缺少或为空的必需条目: {}", k);
+                PAUSE
+                return 1;
+            }
+        }
+        if(!_debug_dev_replace) {
+            if(!localization.contains("select") || !localization.at("select").is_array()) {
+                spdlog::error("映射文件缺少必需条目: select");
+                PAUSE
+                return 1;
+            }
+        }
+    }
+
+    // 读取映射文件中的提示信息
+    if (localization.contains("tip") && localization.at("tip").is_array() && !localization.at("tip").empty()) {
+        for(auto& it : localization.at("tip")) {
+            if (it.is_string()) {
+                spdlog::info(" **通知** {}", it.get<std::string>());
+            }
+        }
+    }
+
 
 
     // 如果没有js文件却有备份文件 则从备份恢复
@@ -638,8 +740,10 @@ int wmain(int argc, wchar_t* wargv[])
     if(FileVer.status != versionparse::Version::Dev && !minver_str.empty()) {
         versionparse::Version JsonVer(minver_str.c_str());
         if(!JsonVer) {
-            spdlog::warn("映射文件中 minversion 解析失败... at {}", minver_str);
+            // 无法确认最低兼容版本: 中止比带着未知兼容性继续替换更安全
+            spdlog::error("映射文件中 minversion 解析失败, 无法确认最低兼容版本, 已中止: {}", minver_str);
             PAUSE
+            return 1;
         }
         else {
             if(FileVer < JsonVer) {
@@ -652,9 +756,13 @@ int wmain(int argc, wchar_t* wargv[])
                     spdlog::info("输入(f)强制执行替换(可能会导致无法打开), 其他退出..");
                     std::string input;
                     std::cin >> input;
-                    if(input != "f" && input != "F") {
+                    if(!std::cin || (input != "f" && input != "F")) {
+                        PAUSE
                         return 1;
                     }
+                }
+                else {
+                    spdlog::warn("版本不满足要求, 因 --nopause 已跳过询问并强制执行");
                 }
             }
             else {
@@ -678,12 +786,18 @@ int wmain(int argc, wchar_t* wargv[])
             PAUSE
             return 1;
         }
+        bool process_failed = false;
         try {
             for (auto& item : localization[_debug_dev_replace?"main_dev":"main"].items())
             {
     #if NO_REPLACE
                 continue;
     #endif // NO_REPLACE
+                // E2: 条目前置校验, 畸形条目跳过而不是抛异常中断剩余替换
+                if(!item.value().is_array() || item.value().empty() || !item.value()[0].is_string()) {
+                    spdlog::warn("[main] 跳过格式无效的条目 {}", item.key());
+                    continue;
+                }
                 std::string rege = item.value()[0].get<std::string>();
                 if (rege.empty() || rege == "\"\"") {
                     continue;
@@ -707,17 +821,35 @@ int wmain(int argc, wchar_t* wargv[])
                     }
                     continue;
                 }
+                if(item.value().size() < 2 || !item.value()[1].is_string()) {
+                    spdlog::warn("[main] 跳过缺少替换文本的条目 {}", item.key());
+                    continue;
+                }
                 if(item.value().size() >= 3) {
-                    // 对数组第三项进行全局查找
-                    std::string regex_str = item.value()[2].get<std::string>();
+                    // 在全文中查找数组第三项(pattern3), 用首个匹配的捕获组回填替换文本中的 #{} 占位符
+                    std::string regex_str = item.value()[2].is_string() ? item.value()[2].get<std::string>() : std::string();
                     std::regex pattern3(regex_str);
                     std::sregex_iterator it = std::sregex_iterator(main_str.begin(), main_str.end(), pattern3);
                     if(it != std::sregex_iterator()) {
                         const std::smatch& match = *it;
                         for(size_t i = 1; i < match.size(); i++) {
-                            std::string replace_str = "#\\{" + std::to_string(i) + "\\}";
-                            std::regex replace_regx(replace_str);
-                            item.value()[1] = std::regex_replace(item.value()[1].get<std::string>(), replace_regx, match[i].str());
+                            if(!match[i].matched) continue;
+                            // 逐字面查找 #{i} 并回填; 捕获文本先转义 $, 防止其作为 format 串时 $&/$n 被展开
+                            const std::string ph = "#{" + std::to_string(i) + "}";
+                            const std::string val = EscapeDollar(match[i].str());
+                            std::string text = item.value()[1].get<std::string>();
+                            size_t pos = 0;
+                            while((pos = text.find(ph, pos)) != std::string::npos) {
+                                text.replace(pos, ph.size(), val);
+                                pos += val.size();
+                            }
+                            item.value()[1] = text;
+                        }
+                        // 捕获组数不足导致的残留占位符若写入 JS 会造成语法破坏, 必须跳过该条
+                        static const std::regex leftover_ph(R"(#\{\d+\})");
+                        if(std::regex_search(item.value()[1].get<std::string>(), leftover_ph)) {
+                            spdlog::warn("[main] 替换文本存在未回填的占位符, 此项将跳过: {}", regex_str);
+                            continue;
                         }
                     }
                     else {
@@ -730,7 +862,8 @@ int wmain(int argc, wchar_t* wargv[])
                 // 替换
                 main_str = std::regex_replace(main_str, pattern, item.value()[1].get<std::string>());
                 if (_debug_error_check_mode_main) {
-                    spdlog::info("[main][out:{}]已经替换:{}->{}", out, rege, utils::utf8ToAnsi(item.value()[1].get<std::string>()));
+                    // 控制台已设为 UTF-8, 直接输出原文, 不再经 GBK 转码造成乱码
+                    spdlog::info("[main][out:{}]已经替换:{}->{}", out, rege, item.value()[1].get<std::string>());
                     out--;
                     if (out <= 0) {
                         if(!utils::WriteFile(fs::path(Base / "main.js").string(), main_str)) {
@@ -747,18 +880,37 @@ int wmain(int argc, wchar_t* wargv[])
                 }
             }
 
-            // 循环select 如果是非测试替换
+                // 循环select 如果是非测试替换
             if(!_debug_dev_replace) {
                 // 循环select 列表
                 for(auto& item_select : localization["select"].items()) {
-                    // 判断此项 是否是 对应js， 并且enable项是否开启
-                    if(item_select.value()["replaceFile"].get<std::string>() == "main.js" && item_select.value()["enable"].get<bool>()) {
-                        // 拿到替换项，双层容器
-                        std::vector<std::vector<std::string>> replaces = item_select.value()["replace"].get<std::vector<std::vector<std::string>>>();
-                        // 用户是否开启了失效项检测
+                    // 判断此项 是否是 对应js， 并且enable项是否开启 (value() 带默认值: 键缺失不抛异常)
+                    if(!item_select.value().is_object()) continue;
+                    const auto& sel = item_select.value();
+                    if(sel.value("replaceFile", std::string()) == "main.js" && sel.value("enable", false)) {
+                        // 拿到替换项，双层容器 (手动解析: 跳过缺列/非字符串的坏行, 防止 get 抛异常中断整个 select 段)
+                        std::vector<std::vector<std::string>> replaces;
+                        if(sel.contains("replace") && sel.at("replace").is_array()) {
+                            for(const auto& row : sel.at("replace")) {
+                                std::vector<std::string> vrow;
+                                bool bad = !row.is_array() || row.size() < 2;
+                                if(!bad) {
+                                    for(const auto& e : row) {
+                                        if(!e.is_string()) { bad = true; break; }
+                                        vrow.push_back(e.get<std::string>());
+                                    }
+                                }
+                                if(bad || vrow.size() < 2) {
+                                    spdlog::warn("[select main] 跳过格式无效的替换行: {}", item_select.key());
+                                    continue;
+                                }
+                                replaces.push_back(std::move(vrow));
+                            }
+                        }
                         if(_debug_invalid_check_mode) { // 开启了失效项检测
                             // 遍历循环外层替换项
                             for(auto& v_item : replaces) {
+                                if(v_item.size() < 2) continue; // F2 防御: 解析已过滤, 此处兜底防越界
                                 // 如果此替换字符串第一个是空字符串，如果是空 则跳出此次循环
                                 std::string rege = v_item[0];
                                 if(rege.empty() || rege == "\"\"") {
@@ -783,11 +935,12 @@ int wmain(int argc, wchar_t* wargv[])
                         }
                         else {  // 正常替换
                             // 询问提示 输出json中的输出提示字符串
-                            spdlog::info(">>>>>> {}", item_select.value()["tooltip"].get<std::string>().c_str());
+                            spdlog::info(">>>>>> {}", sel.value("tooltip", std::string()));
                             // 读取用户输入
                             if(utils::ReadUserInput_bool({ "n","y" }, 1)) {
                                 // 循环两层数组的外层数组
                                 for(auto& v_item : replaces) {
+                                    if(v_item.size() < 2) continue; // F2 防御: 解析已过滤, 此处兜底防越界
                                     // 如果此替换字符串第一个是空字符串，如果是空 则跳出此次循环
                                     std::string rege = v_item[0];
                                     if(rege.empty() || rege == "\"\"") {
@@ -802,10 +955,20 @@ int wmain(int argc, wchar_t* wargv[])
                                         if(it != std::sregex_iterator()) {
                                             const std::smatch& match = *it;
                                             for(size_t i = 1; i < match.size(); i++) {
-                                                std::string replace_str = "#\\{" + std::to_string(i) + "\\}";
-                                                std::regex replace_regx(replace_str);
-                                                // 替换第二个字符串
-                                                v_item[1] = std::regex_replace(v_item[1], replace_regx, match[i].str());
+                                                if(!match[i].matched) continue;
+                                                // 逐字面回填; 捕获文本转义 $ 防止 format 特殊序列展开
+                                                const std::string ph = "#{" + std::to_string(i) + "}";
+                                                const std::string val = EscapeDollar(match[i].str());
+                                                size_t pos = 0;
+                                                while((pos = v_item[1].find(ph, pos)) != std::string::npos) {
+                                                    v_item[1].replace(pos, ph.size(), val);
+                                                    pos += val.size();
+                                                }
+                                            }
+                                            static const std::regex leftover_ph(R"(#\{\d+\})");
+                                            if(std::regex_search(v_item[1], leftover_ph)) {
+                                                spdlog::warn("[select main] 替换文本存在未回填的占位符, 此项将跳过: {}", v_item[2]);
+                                                continue;
                                             }
                                         }
                                         else {
@@ -823,12 +986,31 @@ int wmain(int argc, wchar_t* wargv[])
                 }
             }
         }
-        catch(std::regex_error& re) {
-            spdlog::error("处理main.js时匹配正则表达式时出现错误 code:{}, message:{}, LINE: {}", re.code(), re.what(), __LINE__);
+        catch(const std::regex_error& re) {
+            spdlog::error("处理main.js时匹配正则出现错误 code:{}, message:{}", re.code(), re.what());
+            process_failed = true;
         }
         catch(const std::exception& e) {
             // 覆盖 runtime_error 及 json 类型异常等, 避免未捕获导致进程终止
-            spdlog::error("处理main.js时出现错误 message:{}, LINE: {}", e.what(), __LINE__);
+            spdlog::error("处理main.js时出现错误: {}", e.what());
+            process_failed = true;
+        }
+
+        if(process_failed) {
+            // E1: 异常时不写入半成品, 从备份恢复目标文件, 与 README"汉化异常后从备份恢复"一致
+            spdlog::error("main.js 处理异常, 已中止且不写入部分汉化结果");
+            if(!_debug_invalid_check_mode && !_debug_no_replace_res && fs::exists(Base / "main.js.bak")) {
+                std::error_code ec;
+                fs::copy_file(Base / "main.js.bak", Base / "main.js", fs::copy_options::overwrite_existing, ec);
+                if(ec) {
+                    spdlog::error("从备份恢复 main.js 失败: {}", ec.message());
+                }
+                else {
+                    spdlog::info("main.js 已从备份恢复");
+                }
+            }
+            PAUSE
+            return 1;
         }
 
         if (!_debug_invalid_check_mode && !_debug_no_replace_res) {
@@ -854,12 +1036,18 @@ int wmain(int argc, wchar_t* wargv[])
             PAUSE
             return 1;
         }
+        bool process_failed = false;
         try{
             for (auto& item : localization[_debug_dev_replace?"renderer_dev":"renderer"].items())
             {
     #if NO_REPLACE
                 continue;
     #endif // NO_REPLACE
+                // E2: 条目前置校验, 畸形条目跳过而不是抛异常中断剩余替换
+                if(!item.value().is_array() || item.value().empty() || !item.value()[0].is_string()) {
+                    spdlog::warn("[renderer] 跳过格式无效的条目 {}", item.key());
+                    continue;
+                }
                 std::string rege = item.value()[0].get<std::string>();
                 if (rege.empty() || rege == "\"\"") {
                     continue;
@@ -884,17 +1072,35 @@ int wmain(int argc, wchar_t* wargv[])
                     continue;
                 }
 
+                if(item.value().size() < 2 || !item.value()[1].is_string()) {
+                    spdlog::warn("[renderer] 跳过缺少替换文本的条目 {}", item.key());
+                    continue;
+                }
                 if(item.value().size() >= 3) {
-                    // 对数组第三项进行全局查找
-                    std::string regex_str = item.value()[2].get<std::string>();
+                    // 在全文中查找数组第三项(pattern3), 用首个匹配的捕获组回填替换文本中的 #{} 占位符
+                    std::string regex_str = item.value()[2].is_string() ? item.value()[2].get<std::string>() : std::string();
                     std::regex pattern3(regex_str);
                     std::sregex_iterator it = std::sregex_iterator(renderer_str.begin(), renderer_str.end(), pattern3);
                     if(it != std::sregex_iterator()) {
                         const std::smatch& match = *it;
                         for(size_t i = 1; i < match.size(); i++) {
-                            std::string replace_str = "#\\{" + std::to_string(i) + "\\}";
-                            std::regex replace_regx(replace_str);
-                            item.value()[1] = std::regex_replace(item.value()[1].get<std::string>(), replace_regx, match[i].str());
+                            if(!match[i].matched) continue;
+                            // 逐字面查找 #{i} 并回填; 捕获文本先转义 $, 防止其作为 format 串时 $&/$n 被展开
+                            const std::string ph = "#{" + std::to_string(i) + "}";
+                            const std::string val = EscapeDollar(match[i].str());
+                            std::string text = item.value()[1].get<std::string>();
+                            size_t pos = 0;
+                            while((pos = text.find(ph, pos)) != std::string::npos) {
+                                text.replace(pos, ph.size(), val);
+                                pos += val.size();
+                            }
+                            item.value()[1] = text;
+                        }
+                        // 捕获组数不足导致的残留占位符若写入 JS 会造成语法破坏, 必须跳过该条
+                        static const std::regex leftover_ph(R"(#\{\d+\})");
+                        if(std::regex_search(item.value()[1].get<std::string>(), leftover_ph)) {
+                            spdlog::warn("[renderer] 替换文本存在未回填的占位符, 此项将跳过: {}", regex_str);
+                            continue;
                         }
                     }
                     else {
@@ -906,7 +1112,8 @@ int wmain(int argc, wchar_t* wargv[])
 
                 renderer_str = std::regex_replace(renderer_str, pattern, item.value()[1].get<std::string>());
                 if (_debug_error_check_mode_renderer) {
-                    spdlog::info("[renderer][out:{}]已经替换:{}->{}",out , rege.c_str(), utils::utf8ToAnsi(item.value()[1].get<std::string>()).c_str());
+                    // 控制台已设为 UTF-8, 直接输出原文, 不再经 GBK 转码造成乱码
+                    spdlog::info("[renderer][out:{}]已经替换:{}->{}", out, rege.c_str(), item.value()[1].get<std::string>());
                     out--;
                     if (out <= 0) {
                         if(!utils::WriteFile(fs::path(Base / "renderer.js").string(), renderer_str)) {
@@ -927,14 +1134,34 @@ int wmain(int argc, wchar_t* wargv[])
             if(!_debug_dev_replace) {
                 // 循环select 列表
                 for(auto& item_select : localization["select"].items()) {
-                    // 判断此项 是否是 对应js， 并且enable项是否开启
-                    if(item_select.value()["replaceFile"].get<std::string>() == "renderer.js" && item_select.value()["enable"].get<bool>()) {
-                        // 拿到替换项，双层容器
-                        std::vector<std::vector<std::string>> replaces = item_select.value()["replace"].get<std::vector<std::vector<std::string>>>();
+                    // 判断此项 是否是 对应js， 并且enable项是否开启 (value() 带默认值: 键缺失不抛异常)
+                    if(!item_select.value().is_object()) continue;
+                    const auto& sel = item_select.value();
+                    if(sel.value("replaceFile", std::string()) == "renderer.js" && sel.value("enable", false)) {
+                        // 拿到替换项，双层容器 (手动解析: 跳过缺列/非字符串的坏行, 防止 get 抛异常中断整个 select 段)
+                        std::vector<std::vector<std::string>> replaces;
+                        if(sel.contains("replace") && sel.at("replace").is_array()) {
+                            for(const auto& row : sel.at("replace")) {
+                                std::vector<std::string> vrow;
+                                bool bad = !row.is_array() || row.size() < 2;
+                                if(!bad) {
+                                    for(const auto& e : row) {
+                                        if(!e.is_string()) { bad = true; break; }
+                                        vrow.push_back(e.get<std::string>());
+                                    }
+                                }
+                                if(bad || vrow.size() < 2) {
+                                    spdlog::warn("[select renderer] 跳过格式无效的替换行: {}", item_select.key());
+                                    continue;
+                                }
+                                replaces.push_back(std::move(vrow));
+                            }
+                        }
                         // 用户是否开启了失效项检测
                         if(_debug_invalid_check_mode) { // 开启了失效项检测
                             // 遍历循环外层替换项
                             for(auto& v_item : replaces) {
+                                if(v_item.size() < 2) continue; // F2 防御: 解析已过滤, 此处兜底防越界
                                 // 如果此替换字符串第一个是空字符串，如果是空 则跳出此次循环
                                 std::string rege = v_item[0];
                                 if(rege.empty() || rege == "\"\"") {
@@ -959,11 +1186,12 @@ int wmain(int argc, wchar_t* wargv[])
                         }
                         else {  // 正常替换
                             // 询问提示 输出json中的输出提示字符串
-                            spdlog::info(">>>>>> {}", item_select.value()["tooltip"].get<std::string>().c_str());
+                            spdlog::info(">>>>>> {}", sel.value("tooltip", std::string()));
                             // 读取用户输入
                             if(utils::ReadUserInput_bool({"n","y"},1)) {
                                 // 循环两层数组的外层数组
                                 for(auto& v_item : replaces) {
+                                    if(v_item.size() < 2) continue; // F2 防御: 解析已过滤, 此处兜底防越界
                                     // 如果此替换字符串第一个是空字符串，如果是空 则跳出此次循环
                                     std::string rege = v_item[0];
                                     if(rege.empty() || rege == "\"\"") {
@@ -978,10 +1206,20 @@ int wmain(int argc, wchar_t* wargv[])
                                         if(it != std::sregex_iterator()) {
                                             const std::smatch& match = *it;
                                             for(size_t i = 1; i < match.size(); i++) {
-                                                std::string replace_str = "#\\{" + std::to_string(i) + "\\}";
-                                                std::regex replace_regx(replace_str);
-                                                // 替换第二个字符串
-                                                v_item[1] = std::regex_replace(v_item[1], replace_regx, match[i].str());
+                                                if(!match[i].matched) continue;
+                                                // 逐字面回填; 捕获文本转义 $ 防止 format 特殊序列展开
+                                                const std::string ph = "#{" + std::to_string(i) + "}";
+                                                const std::string val = EscapeDollar(match[i].str());
+                                                size_t pos = 0;
+                                                while((pos = v_item[1].find(ph, pos)) != std::string::npos) {
+                                                    v_item[1].replace(pos, ph.size(), val);
+                                                    pos += val.size();
+                                                }
+                                            }
+                                            static const std::regex leftover_ph(R"(#\{\d+\})");
+                                            if(std::regex_search(v_item[1], leftover_ph)) {
+                                                spdlog::warn("[select renderer] 替换文本存在未回填的占位符, 此项将跳过: {}", v_item[2]);
+                                                continue;
                                             }
                                         }
                                         else {
@@ -999,12 +1237,31 @@ int wmain(int argc, wchar_t* wargv[])
                 }
             }
         }
-        catch(std::regex_error& re) {
-            spdlog::error("处理renderer.js时匹配正则表达式时出现错误 code:{}, message:{}, LINE: {}", re.code(), re.what(), __LINE__);
+        catch(const std::regex_error& re) {
+            spdlog::error("处理renderer.js时匹配正则出现错误 code:{}, message:{}", re.code(), re.what());
+            process_failed = true;
         }
         catch(const std::exception& e) {
             // 覆盖 runtime_error 及 json 类型异常等, 避免未捕获导致进程终止
-            spdlog::error("处理renderer.js时出现错误 message:{}, LINE: {}", e.what(), __LINE__);
+            spdlog::error("处理renderer.js时出现错误: {}", e.what());
+            process_failed = true;
+        }
+
+        if(process_failed) {
+            // E1: 异常时不写入半成品, 从备份恢复目标文件, 与 README"汉化异常后从备份恢复"一致
+            spdlog::error("renderer.js 处理异常, 已中止且不写入部分汉化结果");
+            if(!_debug_invalid_check_mode && !_debug_no_replace_res && fs::exists(Base / "renderer.js.bak")) {
+                std::error_code ec;
+                fs::copy_file(Base / "renderer.js.bak", Base / "renderer.js", fs::copy_options::overwrite_existing, ec);
+                if(ec) {
+                    spdlog::error("从备份恢复 renderer.js 失败: {}", ec.message());
+                }
+                else {
+                    spdlog::info("renderer.js 已从备份恢复");
+                }
+            }
+            PAUSE
+            return 1;
         }
 
         if (!_debug_invalid_check_mode && !_debug_no_replace_res) {
@@ -1038,8 +1295,11 @@ int wmain(int argc, wchar_t* wargv[])
             }
         }
     }
+    catch(const std::exception& e) {
+        spdlog::warn("读取解析数据出现异常: {}", e.what());
+    }
     catch(...) {
-        spdlog::warn("读取解析数据出现异常.");
+        spdlog::warn("读取解析数据出现未知异常.");
     }
 
 
@@ -1122,7 +1382,7 @@ std::string LoopGetBasePath() {
 void DeveloperOptions() {
     while (true)
     {
-        system("cls");
+        ClearScreen();
         spdlog::info("选择你要修改的功能");
         spdlog::info("0) 跳出.");
         spdlog::info("1) [{}] main崩溃调试.", _debug_error_check_mode_main);
@@ -1173,7 +1433,16 @@ void DeveloperOptions() {
             _debug_dev_replace = utils::ReadUserInput_bool({ "false", "true" });
             break;
         case 20:
-            _debug_dev_setversion = utils::ReadUserInput_bool({ "false", "true" });
+            // 与菜单显示/CLI注册一致: release 版本不可开启指定版本(仅 dev 0.0.0 可用)
+            if(FileVer.major == 0 && FileVer.minor == 0 && FileVer.revision == 0) {
+                _debug_dev_setversion = utils::ReadUserInput_bool({ "false", "true" });
+            }
+            else {
+                spdlog::warn("该选项仅限开发者版本使用");
+            }
+            break;
+        default:
+            spdlog::warn("无效选项");
             break;
         }
     }

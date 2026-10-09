@@ -50,6 +50,11 @@
 
    报告位于系统临时目录 `ghdesktop-auto-maintain/report.md`，按「来源」列把条目放入 `main`（main.js）或 `renderer`（renderer.js）数组，将草稿中的 `【待翻译】` 替换为中文译文即可（查找项已按字面量转义）。
 
+   > [!NOTE]
+   > **条目顺序**：查找正则逐字面从头替换，先匹配者生效。新条目若与已有条目「短含长」（查找项是另一条的子串，如 `"Save"` 与 `"Save":"Add"`），须**插在更宽泛（更短）条目之前**，否则宽泛条目会先命中、专条失效。CI 的质量校验会对此告警。
+   >
+   > **译文风格**：句末问号统一使用全角 `？`；译文末尾不留多余空格。
+
 ## 发布说明（docs/ReleaseBody.md）
 
 `json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 任一变更都会在每日定时或手动 `auto` 时触发新版本发布（补丁号 +1）。CI 发布时从 `docs/ReleaseBody.md` 中提取**行尾含全角版本标记**（如 `（v1.2.23）`）的变更行拼进 Release 说明：

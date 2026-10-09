@@ -17,11 +17,30 @@ export function loadLocalization(jsonPath) {
 }
 
 /**
+ * std::regex(ECMAScript 语法子集) 不兼容语法黑名单。
+ * JS new RegExp 接受但 C++ std::regex 会抛 regex_error(或行为不同)的写法:
+ *  - (?<= / (?<!  后行断言(ECMAScript 2018+, std::regex 不支持)
+ *  - (?<name>    命名分组
+ *  - \p{...}     Unicode 属性转义
+ *  - (?i) 等内联 flag
+ * 若不显式拦截, 这些 pattern 会被 JS 判为 ok, 实际运行时 C++ 侧 regex_error 中断汉化。
+ */
+const STD_REGEX_BLACKLIST = [
+  { re: /\(\?<=/, why: '后行断言 (?<=)' },
+  { re: /\(\?<!/, why: '负后行断言 (?<!)' },
+  { re: /\(\?<[A-Za-z_]/, why: '命名分组 (?<name>)' },
+  { re: /\(\?P[<a-zA-Z]/, why: 'Python 命名分组 (?P<name>)' },
+  { re: /\\p\{/, why: 'Unicode 属性转义 \\p{...}' },
+  { re: /\(\?[a-zA-Z]+[):]/, why: '内联 flag (?i:...)' },
+];
+
+/**
  * 对单个映射项执行失效检测（与 C++ std::regex 语义对齐）。
  * 规则（对应 GitHubDesktop2Chinese.cpp 的 --invalidcheck）：
  *  - item[0] 为查找正则，为空跳过
  *  - item[2]（可选）为第三个参数正则，需额外匹配
- * 返回 { ok, errors: [{ reason, pattern }] }，reason 为 'not-found' | 'regex-error'
+ * 返回 { ok, errors: [{ reason, pattern }] }，
+ * reason 为 'not-found' | 'regex-error' | 'unsupported-syntax'
  */
 export function checkEntry(jsText, item) {
   const errors = [];
@@ -35,6 +54,11 @@ export function checkEntry(jsText, item) {
 
   for (const p of patterns) {
     if (!p || p === '""') continue;
+    const hit = STD_REGEX_BLACKLIST.find(b => b.re.test(p));
+    if (hit) {
+      errors.push({ reason: `unsupported-syntax: ${hit.why}`, pattern: p });
+      continue;
+    }
     try {
       const re = new RegExp(p);
       if (!re.test(jsText)) {

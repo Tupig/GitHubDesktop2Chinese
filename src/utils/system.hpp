@@ -8,12 +8,16 @@
 #include <optional>
 #include <utility>
 #include <iostream>
+#include <cstdlib>
+#ifdef _WIN32
 #include <windows.h>
 #include <winhttp.h>
+#endif
 
 namespace utils {
 
     inline std::string GetEnvVar(const std::string& varName) {
+#ifdef _WIN32
         // Windows API 优先使用宽字符版本，避免编码问题
         std::wstring wVarName(varName.begin(), varName.end());
         wchar_t* wValue = _wgetenv(wVarName.c_str());
@@ -26,6 +30,11 @@ namespace utils {
         WideCharToMultiByte(CP_UTF8, 0, wValue, -1, &value[0], len, nullptr, nullptr);
         value.pop_back(); // 移除末尾的空字符
         return value;
+#else
+        // POSIX 环境变量为字节串(UTF-8), 直接读取
+        const char* value = std::getenv(varName.c_str());
+        return value == nullptr ? std::string() : std::string(value);
+#endif
     }
 
     inline std::optional<std::pair<std::string, int>> get_proxy_env() {
@@ -63,6 +72,7 @@ namespace utils {
     }
 
     inline std::optional<std::pair<std::string, int>> GetSystemProxySettings() {
+#ifdef _WIN32
         std::string address;
         int port = 0;
         // Windows 实现
@@ -107,6 +117,10 @@ namespace utils {
             return std::make_pair(address, port);
         }
         return {};
+#else
+        // POSIX 无 IE 代理配置, 统一走环境变量探测
+        return get_proxy_env();
+#endif
     }
 
 }

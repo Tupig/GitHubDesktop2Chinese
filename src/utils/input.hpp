@@ -8,15 +8,14 @@
 #include <vector>
 #include <iostream>
 #include <limits>
-#include <format>
-#include <exception>
+#include <stdexcept>
 #include <spdlog/spdlog.h>
 
 namespace utils {
 
     inline auto ReadUserInput_bool(std::vector<std::string> input = {"false", "true"}, int defaultval = -1) -> bool {
-        if (input.size() != 2) throw std::exception("读取 bool 类型值时 input 数组长度必须为两个");
-        if (defaultval > (int)input.size() - 1 || defaultval < -1) throw std::exception(std::format("defaultval 必须能够指向 input数组，或者为 -1, defaultval:{}" , defaultval).c_str());
+        if (input.size() != 2) throw std::runtime_error("读取 bool 类型值时 input 数组长度必须为两个");
+        if (defaultval > (int)input.size() - 1 || defaultval < -1) throw std::runtime_error("defaultval 必须能够指向 input数组，或者为 -1, defaultval:" + std::to_string(defaultval));
         while (true)
         {
             // 输出提示
@@ -26,9 +25,10 @@ namespace utils {
                 spdlog::info("请输入一个表示bool的值({}/{} 默认 {})", input[0], input[1], input[defaultval]);
 
             std::string instr;
-            //std::cin >> instr;
             std::cin.clear();
-            if(std::cin.rdbuf()->in_avail() > 0) std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            // 调用契约: 上一次 stdin 操作必须是 >> 提取(残留换行留在缓冲)。
+            // MSVC filebuf 未重写 showmanyc, in_avail() 恒为 0, 不能用它判断残留 —— 必须无条件清扫
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             if(!std::getline(std::cin, instr)) {
                 // 输入流已结束(管道/重定向运行): 有默认值返回默认, 否则返回false, 避免死循环
                 return defaultval != -1 ? (defaultval == 1) : false;

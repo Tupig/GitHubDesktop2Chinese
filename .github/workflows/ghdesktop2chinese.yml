@@ -2,6 +2,7 @@
 # 一个工作流完成：自动构建、质量与安全检查、失效检测/候选提取、Release 发布。
 #
 # ── 触发 ─────────────────────────────────────────────────────
+#   推送 main         全平台构建 + 产物功能测试 + 质量与安全检查（不发布）
 #   定时（每日北京时间上午 10:00 = UTC 02:00）
 #                     扫描 GitHub Desktop 最新版 + 提取翻译候选 + 构建产物
 #                     （仅当 json/src/third_party/CMake 有变更时才发布 Release）
@@ -15,24 +16,28 @@
 #
 # ── job 依赖关系 ─────────────────────────────────────────────
 #   version（版本解析，无依赖）
-#       ├── build（需 version）
-#       └── release（需 version + build 产物）
+#       ├── build（需 version，矩阵：windows-x64 / macos-x64 / macos-arm64 / linux-x64）
+#       └── release（需 version + build 全平台产物）
 #   json-quality / tools-test / codeql / auto-maintain 相互独立、与上述并行
 #
 # ── 构建产物约定 ─────────────────────────────────────────────
-#   编译输出  build/Release/GitHubDesktop2Chinese.exe
-#             （cmake -B build；MSVC 多配置生成器 → Release 子目录）
-#   Artifact  GitHubDesktop2Chinese-x64-<版本号|SHA>
-#   发布资产  release/GitHubDesktop2Chinese.exe 与 release/localization.json
-#             （上传至对应 v* tag 的 Release）
+#   编译输出  Windows: build/Release/GitHubDesktop2Chinese.exe（MSVC 多配置生成器）
+#             macOS/Linux: build/GitHubDesktop2Chinese（单配置生成器）
+#   Artifact  GitHubDesktop2Chinese-<平台>-<版本号|SHA>
+#   发布资产  GitHubDesktop2Chinese.exe        — Windows x64（保留历史文件名，向后兼容）
+#             GitHubDesktop2Chinese-macos-x64  — macOS Intel
+#             GitHubDesktop2Chinese-macos-arm64 — macOS Apple Silicon (M 系列)
+#             GitHubDesktop2Chinese-linux-x64  — Linux x86_64
+#             localization.json                — 汉化映射（最新）
 #
 # ── 版本号规则 ───────────────────────────────────────────────
 #   tag 触发     取 tag 版本（v1.2.5 → 1.2.5）
 #   手动 version 使用输入值
 #   auto/release/定时 未输入时自动升级补丁号（最新 v* tag +1）
+#   push main     不发布，版本留空（产物名回退为 commit SHA）
 #
 # ── 稳定性设计 ───────────────────────────────────────────────
-#   - runner 固定版本（ubuntu-24.04 / windows-2025），CodeQL v4
+#   - runner 固定版本（ubuntu-24.04 / windows-2025 / macos-15 / macos-15-intel），CodeQL v4
 #   - 所有 job 均设 timeout-minutes 上限
 #   - 网络/配置类关键步骤内置超时与自动重试
 #   - OpenSSL 静态库、GitHub Desktop 安装包与提取结果均走 actions/cache
@@ -45,6 +50,8 @@ on:
     - cron: "0 2 * * *"
   pull_request:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
@@ -78,7 +85,7 @@ permissions:
 env:
   BUILD_TYPE: Release
   EXE_NAME: GitHubDesktop2Chinese.exe
-  ARTIFACT_PREFIX: GitHubDesktop2Chinese-x64
+  ARTIFACT_PREFIX: GitHubDesktop2Chinese
 
 jobs:
   # ═════════════════════════════════════════════════
@@ -164,25 +171,55 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   # ═════════════════════════════════════════════════
-  # 1. 构建（仅 64 位 x64）
-  #    触发：tag / PR / 定时 / 手动(auto/build/release)
+  # 1. 构建矩阵（Windows x64 / macOS Intel / macOS Apple Silicon / Linux x64）
+  #    每平台编译 + 产物功能测试（--help / 非法参数拒绝 / 中文路径完整流程）
+  #    触发：push main / tag / PR / 定时 / 手动(auto/build/release)
   # ═════════════════════════════════════════════════
   build:
-    name: 构建 (x64)
+    name: 构建 (${{ matrix.name }})
     needs: version
     if: |
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
       github.event_name == 'pull_request' ||
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'build' || inputs.type == 'release'))
-    runs-on: windows-2025
-    timeout-minutes: 30
+    strategy:
+      # 单平台失败不取消其余平台: 一次运行尽可能拿到全部平台结果
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-2025
+            artifact: GitHubDesktop2Chinese.exe
+          - name: macos-x64
+            os: macos-15-intel
+            artifact: GitHubDesktop2Chinese-macos-x64
+          - name: macos-arm64
+            os: macos-15
+            artifact: GitHubDesktop2Chinese-macos-arm64
+          - name: linux-x64
+            os: ubuntu-24.04
+            artifact: GitHubDesktop2Chinese-linux-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     env:
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Configure CMake (x64)
+      - name: 安装 OpenSSL (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          dpkg -s libssl-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libssl-dev; }
+
+      - name: 安装 OpenSSL (macOS)
+        if: runner.os == 'macOS'
+        # brew 的 openssl 为 keg-only, 已安装时 list 成功; 否则安装
+        run: |
+          brew list openssl@3 >/dev/null 2>&1 || brew list openssl >/dev/null 2>&1 || brew install openssl@3
+
+      - name: Configure CMake (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           chcp 65001 | Out-Null
@@ -196,30 +233,110 @@ jobs:
             Start-Sleep -Seconds 15
           }
 
-      - name: Build (x64)
-        shell: pwsh
+      - name: Configure CMake (macOS/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
-          chcp 65001 | Out-Null
-          cmake --build build --config $env:BUILD_TYPE
+          set -euo pipefail
+          VER="${RELEASE_VERSION:+v$RELEASE_VERSION}"
+          VER="${VER:-ci-${GITHUB_SHA}}"
+          EXTRA=()
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            # brew 的 openssl 为 keg-only, 不在默认搜索路径, 显式指定根目录
+            PREFIX="$(brew --prefix openssl@3 2>/dev/null || brew --prefix openssl 2>/dev/null || true)"
+            [[ -n "$PREFIX" ]] && EXTRA+=("-DOPENSSL_ROOT_DIR=$PREFIX")
+          fi
+          for attempt in 1 2 3; do
+            if cmake -B build -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DGitHubActions=1 "-DFILE_VERSION=$VER" ${EXTRA[@]+"${EXTRA[@]}"}; then
+              break
+            fi
+            [[ $attempt -ge 3 ]] && { echo "::error::CMake 配置连续失败 3 次"; exit 1; }
+            echo "::warning::CMake 配置失败(第 $attempt 次)，15 秒后重试"
+            sleep 15
+          done
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cmake --build build --config "$BUILD_TYPE"
+          else
+            JOBS="$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
+            cmake --build build --config "$BUILD_TYPE" -j "$JOBS"
+          fi
+
+      - name: 产物功能测试
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            BIN="build/Release/${EXE_NAME}"
+          else
+            BIN="build/GitHubDesktop2Chinese"
+          fi
+          [[ -f "$BIN" ]] || { echo "::error::未找到构建产物 $BIN"; exit 1; }
+
+          echo "== 测试1: --help 应 exit 0 =="
+          "$BIN" --help > /dev/null
+          echo "OK"
+
+          echo "== 测试2: 非法参数应被拒绝(exit!=0) =="
+          if "$BIN" thisargdoesnotexist > /dev/null 2>&1; then
+            echo "::error::非法参数未被拒绝"
+            exit 1
+          fi
+          echo "OK"
+
+          echo "== 测试3: 中文路径 + EOF 完整汉化流程应 exit 0 =="
+          FIXTURE="$RUNNER_TEMP/汉化测试目录"
+          rm -rf "$FIXTURE"
+          mkdir -p "$FIXTURE"
+          printf '<html></html>' > "$FIXTURE/index.html"
+          printf '// fixture main\n' > "$FIXTURE/main.js"
+          printf '// fixture renderer\n' > "$FIXTURE/renderer.js"
+          set +e
+          OUT="$(echo "" | "$BIN" -g "$FIXTURE" --nopause 2>&1)"
+          CODE=$?
+          set -e
+          if [[ $CODE -ne 0 ]]; then
+            echo "$OUT"
+            echo "::error::完整流程 exit=$CODE"
+            exit 1
+          fi
+          grep -q "renderer.js 文件汉化结束" <<< "$OUT" || { echo "$OUT"; echo "::error::流程未到达 renderer 汉化完成"; exit 1; }
+          echo "OK"
+
+      - name: 准备发布文件名
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp "build/Release/${EXE_NAME}" "dist/${{ matrix.artifact }}"
+          else
+            cp build/GitHubDesktop2Chinese "dist/${{ matrix.artifact }}"
+            chmod +x "dist/${{ matrix.artifact }}"
+          fi
+          ls -l dist/
 
       - name: 上传构建产物
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: ${{ env.ARTIFACT_PREFIX }}-${{ needs.version.outputs.version || github.sha }}
+          name: ${{ env.ARTIFACT_PREFIX }}-${{ matrix.name }}-${{ needs.version.outputs.version || github.sha }}
           if-no-files-found: error
-          # 编译输出固定于 build/Release/（MSVC 多配置生成器）
-          path: build/Release/${{ env.EXE_NAME }}
+          path: dist/
 
   # ═════════════════════════════════════════════════
   # 2. localization.json 质量校验
   # ═════════════════════════════════════════════════
   json-quality:
     name: localization.json 质量校验
-    # push tag 分支: 发布(release needs 本任务)在推 tag 场景同样受本质量门约束
+    # push main/tag 分支: 发布(release needs 本任务)在推 tag 场景同样受本质量门约束; push main 仅验证不发布
     if: |
       github.event_name == 'pull_request' ||
       github.event_name == 'schedule' ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'security' || inputs.type == 'release'))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -255,6 +372,15 @@ jobs:
 
           def check_array(name, arr):
               seen = {}
+              # std::regex 不兼容语法黑名单(JS 认但 C++ 会抛 regex_error, 失效检测无法覆盖)
+              blacklist = [
+                  (r"\(\?<=", "后行断言 (?<=)"),
+                  (r"\(\?<!", "负后行断言 (?<!)"),
+                  (r"\(\?<[A-Za-z_]", "命名分组 (?<name>)"),
+                  (r"\(\?P[<a-zA-Z]", "Python 命名分组 (?P<name>)"),
+                  (r"\\p\{", r"Unicode 属性转义 \p{...}"),
+                  (r"\(\?[a-zA-Z]+[):]", "内联 flag (?i:...)"),
+              ]
               for i, item in enumerate(arr):
                   if not isinstance(item, list):
                       errors.append(f"{name}[{i}] 不是数组")
@@ -268,6 +394,9 @@ jobs:
                   pat = item[0]
                   if not pat or pat == '""':
                       continue  # 空串与 "" 占位(应用侧视为跳过)不参与校验
+                  for rx, why in blacklist:
+                      if re.search(rx, pat):
+                          errors.append(f"{name}[{i}] std::regex 不兼容语法({why}): {pat!r}")
                   try:
                       re.compile(pat)
                   except re.error as e:
@@ -279,6 +408,11 @@ jobs:
                   # ReDoS 启发式(仅告警不阻断): 嵌套量词(如 (a+)+ 、 (.*x)* )在长文本上可能灾难性回溯卡死加载器
                   if re.search(r"\([^()]*[+*][^()]*\)\s*[+*{]", pat):
                       warnings.append(f"{name}[{i}] 疑似灾难性回溯(嵌套量词), 请改写该正则: {pat!r}")
+                  # 译文问句风格: 去掉尾部引号后以 半角? 收尾且 ? 前为汉字 → 建议全角？
+                  # (JS 三元/正则语法的 ? 不满足"以 ? 收尾"或 ? 前非汉字, 不会误报)
+                  t = item[1].rstrip("\"'")
+                  if t.endswith("?") and re.search(r"[一-鿿]\?$", t):
+                      warnings.append(f"{name}[{i}] 译文以半角 ? 结尾, 建议改全角？: {item[1]!r}")
 
           for key in ["main", "renderer", "main_dev", "renderer_dev"]:
               if isinstance(data.get(key), list):
@@ -328,11 +462,11 @@ jobs:
   # ═════════════════════════════════════════════════
   tools-test:
     name: 自动维护工具自检
-    # push tag / dispatch release 分支: 保证发布(release needs 本任务)前工具自检已通过
+    # push main/tag 分支: 保证发布(release needs 本任务)前工具自检已通过; push main 仅验证不发布
     if: |
       github.event_name == 'pull_request' ||
       github.event_name == 'schedule' ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'security' || inputs.type == 'maintain' || inputs.type == 'release'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -392,12 +526,13 @@ jobs:
           "
 
   # ═════════════════════════════════════════════════
-  # 4. CodeQL 安全扫描（PR / 手动 auto|security，不含定时以节省资源）
+  # 4. CodeQL 安全扫描（PR / push main / 手动 auto|security，不含定时以节省资源）
   # ═════════════════════════════════════════════════
   codeql:
     name: CodeQL 安全扫描
     if: |
       github.event_name == 'pull_request' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'security'))
     runs-on: windows-2025
     timeout-minutes: 30
@@ -626,11 +761,13 @@ jobs:
           fi
           echo "发布版本: v$VER"
 
-      - name: 下载构建产物 (x64)
+      - name: 下载全部构建产物
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: ${{ env.ARTIFACT_PREFIX }}-${{ needs.version.outputs.version || github.sha }}
+          # GitHubDesktop2Chinese-<平台>-<版本|SHA>（windows-x64 / macos-x64 / macos-arm64 / linux-x64）
+          pattern: ${{ env.ARTIFACT_PREFIX }}-*-${{ needs.version.outputs.version || github.sha }}
           path: release/
+          merge-multiple: true
 
       - name: 准备 localization.json
         run: |
@@ -649,15 +786,19 @@ jobs:
             echo "# GitHubDesktop2Chinese v$VER"
             echo ""
             echo "自动构建产物："
-            echo "- \`GitHubDesktop2Chinese.exe\` — 64 位（仅支持 64 位 Windows）"
+            echo "- \`GitHubDesktop2Chinese.exe\` — Windows x64（64 位 Windows）"
+            echo "- \`GitHubDesktop2Chinese-macos-x64\` — macOS Intel 芯片"
+            echo "- \`GitHubDesktop2Chinese-macos-arm64\` — macOS Apple 芯片（M 系列）"
+            echo "- \`GitHubDesktop2Chinese-linux-x64\` — Linux x86_64"
             echo "- \`localization.json\` — 汉化映射（最新）"
             echo ""
             echo "## 使用方法"
-            echo "1. 下载 \`GitHubDesktop2Chinese.exe\` 双击运行，自动联网获取最新 \`localization.json\` 完成汉化"
-            echo "2. 或下载 exe 与 \`localization.json\` 放在同一文件夹运行"
+            echo "1. 下载对应平台的程序文件直接运行，自动联网获取最新 \`localization.json\` 完成汉化"
+            echo "2. 或将程序文件与 \`localization.json\` 放在同一文件夹运行"
             echo "3. GitHub Desktop 每次版本更新后需重新运行一次"
             echo ""
-            echo "> ⚠️ 仅支持 64 位 Windows / GitHub Desktop；找不到 openssl dll 请升级到本版本；缺失 MSVCP140_ATOMIC_WAIT.dll 请安装 Microsoft Visual C++ Redistributable"
+            echo "> ⚠️ 仅支持 64 位系统 / GitHub Desktop。macOS/Linux 首次运行请先 \`chmod +x\`；"
+            echo "> Windows 找不到 openssl dll 请升级到本版本；缺失 MSVCP140_ATOMIC_WAIT.dll 请安装 Microsoft Visual C++ Redistributable"
             if [[ -f docs/ReleaseBody.md ]]; then
               # 仅提取当前版本的变更行(行内含版本标记: 全角括号+vX.Y.Z),
               # 不再整篇附带从 v1.2.0 起的历史日志
@@ -705,14 +846,14 @@ jobs:
             done
           }
           if gh release view "$VER" >/dev/null 2>&1; then
-            retry 3 gh release upload "$VER" release/GitHubDesktop2Chinese.exe release/localization.json --clobber
+            retry 3 gh release upload "$VER" release/* --clobber
             retry 3 gh release edit "$VER" --title "$TITLE" --notes-file release-notes.md
           else
-            if ! retry 3 gh release create "$VER" release/GitHubDesktop2Chinese.exe release/localization.json --title "$TITLE" --notes-file release-notes.md; then
+            if ! retry 3 gh release create "$VER" release/* --title "$TITLE" --notes-file release-notes.md; then
               # view 可能因网络错误误判为不存在, 而 create 实际已存在(already exists):
               # 此时转 上传+编辑 自愈, 避免"release 已建但资产/说明半成品"永久挂死
               echo "::warning::gh release create 失败, 按已存在场景转上传+编辑自愈"
-              retry 3 gh release upload "$VER" release/GitHubDesktop2Chinese.exe release/localization.json --clobber
+              retry 3 gh release upload "$VER" release/* --clobber
               retry 3 gh release edit "$VER" --title "$TITLE" --notes-file release-notes.md
             fi
           fi

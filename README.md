@@ -41,23 +41,27 @@
 **方式二**：下载 `GitHubDesktop2Chinese.exe` 与 `localization.json`，放在同一文件夹后运行。
 
 > [!IMPORTANT]
-> - 本程序**仅支持 64 位 Windows**（x64），不提供 32 位版本。
+> - 本程序提供 **64 位 Windows / macOS（Intel 与 Apple Silicon）/ Linux（x64）** 多平台版本，从 [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) 页选择对应产物下载。
+> - 汉化映射以 **Windows 版** GitHub Desktop 文案为准，其他平台文案基本一致，个别条目可能不匹配。
 > - GitHub Desktop 每次版本更新后，都需要重新运行一次本程序才能完成汉化。
 
 ## 🏗 怎么编译源代码
 
-> 项目**仅支持 64 位（x64）构建**，使用其他架构配置会在 CMake 阶段直接报错。
+> 项目基于 CMake，支持 **MSVC（Windows）/ AppleClang（macOS）/ GCC（Linux）** 三套工具链，仅支持 64 位（x64 / arm64）构建，其他架构会在 CMake 阶段直接报错。
 
 1. 克隆仓库
 2. 使用 **VS2022** 直接打开项目文件夹（通过 CMake 打开）
 3. 选择 `x64-debug` / `x64-release` 预设进行构建
 
-命令行构建（可选）：
+命令行构建（Windows / macOS / Linux 通用）：
 
 ```powershell
-cmake -B build -A x64
+cmake -B build
 cmake --build build --config Release
 ```
+
+> [!NOTE]
+> OpenSSL 依赖：Windows 使用 CMake 内置下载（无需预装）；macOS 执行 `brew install openssl`，Linux 安装 `libssl-dev` 后 CMake 会通过 `find_package(OpenSSL)` 自动发现。
 
 ## 👕 怎么贡献汉化
 
@@ -99,12 +103,12 @@ cmake --build build --config Release
 
 | 功能 | 触发方式 | 说明 |
 | --- | --- | --- |
-| 构建 | PR / tag `v*` / 定时 / 手动 auto、build、release | 仅 64 位（x64）构建 |
-| JSON 质量校验 | PR / tag `v*` / 定时 / 手动 auto、security、release | 正则合法性、结构完整性、占位符检查 |
+| 构建 | push `main` / PR / tag `v*` / 定时 / 手动 auto、build、release | 四目标构建 + 产物功能测试：Windows x64、macOS Intel、macOS Apple Silicon、Linux x64 |
+| JSON 质量校验 | PR / tag `v*` / 定时 / 手动 auto、security、release | 正则合法性、结构完整性、占位符检查、std::regex 不兼容语法黑名单、译文问句全角风格 |
 | 工具自检 | PR / tag `v*` / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 |
-| CodeQL 扫描 | PR / 手动 auto、security | C/C++ 安全扫描 |
+| CodeQL 扫描 | PR / push `main` / 手动 auto、security | C/C++ 安全扫描 |
 | 失效检测 + 候选提取 | 定时（每日）/ 手动 auto、maintain | 检测失效映射、提取未翻译候选，自动创建/关闭 Issue |
-| Release 发布 | tag `v*` / 定时（有变更时）/ 手动 auto（有变更）、release | 自动升级版本号，发布 exe + localization.json |
+| Release 发布 | tag `v*` / 定时（有变更时）/ 手动 auto（有变更）、release | 自动升级版本号，发布四平台产物 + localization.json |
 
 > 手动触发的 `type` 除表中所列外（`build` 等）仅执行对应子集，`version` 输入须为 `x.y.z` 纯数字格式，否则 CI 在版本号校验处直接失败。
 
@@ -189,7 +193,7 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 >
 > **想撤销汉化、还原为汉化前状态**：执行 `GitHubDesktop2Chinese.exe --rollback`（从 `main.js.bak` / `renderer.js.bak` 还原）。
 >
-> **是否支持 macOS / Linux？**：不支持。本工具基于 Windows 专用 API（MSVC 构建），且汉化映射针对 **Windows 版** GitHub Desktop 的界面文案（含 `&` 访问键等 Windows 专属内容），仅提供 64 位 Windows 版本。
+> **是否支持 macOS / Linux？**：提供 macOS（Intel / Apple Silicon）与 Linux x64 版本（Release 页下载）。汉化映射针对 **Windows 版** GitHub Desktop 的界面文案（含 `&` 访问键等 Windows 专属内容），其他平台个别条目可能不匹配。
 
 有任何建议欢迎提 [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues)。
 

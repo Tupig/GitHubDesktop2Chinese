@@ -11,9 +11,12 @@
 #include <cstdio>
 #include <cstdint>
 #include <cctype>
+#include <cstdlib>
 #include <thread>
 #include <chrono>
+#ifdef _WIN32
 #include <windows.h>
+#endif
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "http/httplib.h"
 #include <openssl/evp.h>
@@ -23,9 +26,21 @@ namespace fs = std::filesystem;
 
 namespace utils {
 
-    // 配置TLS: 启用服务器证书校验, httplib未指定CA文件时会自动加载Windows系统根证书存储作为信任锚
-    inline void SetupTlsVerification(httplib::Client& cli) {
-        cli.enable_server_certificate_verification(true);
+    // 网络超时(秒): 防止失效代理指向黑洞地址时按 httplib 默认 300s × 4 次重试卡死约 20 分钟
+    inline constexpr int kConnectTimeoutSec = 10;
+    inline constexpr int kReadTimeoutSec = 30;
+
+    // 构造带超时与 TLS 校验的 HTTP 客户端
+    inline auto MakeHttpClient(const std::string& url_host, const std::pair<std::string, int>& proxy = {}) -> httplib::Client {
+        httplib::Client cli(url_host);
+        cli.set_connection_timeout(kConnectTimeoutSec);
+        cli.set_read_timeout(kReadTimeoutSec);
+        if(proxy.second) {
+            cli.set_proxy(proxy.first, proxy.second);
+        }
+        cli.enable_server_certificate_verification(true); // httplib 未指定CA文件时自动加载系统根证书存储
+        cli.set_follow_location(true);                    // https://raw.github.com 会要求301重定向
+        return cli;
     }
 
     // 计算文件的 SHA256 十六进制小写字符串; 读取或计算失败时返回空串
@@ -67,12 +82,7 @@ namespace utils {
      * @return 是否成功
      */
     inline auto ReadHttpDataString(std::string url_host, std::string params, std::string& out, std::pair<std::string, int> proxy = {}) -> bool {
-        httplib::Client cli(url_host);
-        if(proxy.second) {
-            cli.set_proxy(proxy.first, proxy.second);
-        }
-        SetupTlsVerification(cli);
-        cli.set_follow_location(true);                          //https://raw.github.com 会要求301重定向
+        httplib::Client cli = MakeHttpClient(url_host, proxy);
 
         // 瞬时性错误(连接失败/403 限流/429/5xx)自动重试: GitHub API 与资产 CDN 在共享 IP 下偶发此类错误
         httplib::Result res;
@@ -92,10 +102,12 @@ namespace utils {
                 return true;
             }
             spdlog::warn("请求 {}{} 返回状态码 {}", url_host, params, res->status);
+            out.clear();
             return false;
         }
         else {
             spdlog::warn("请求 {}{} 失败: {}", url_host, params, httplib::to_string(res.error()));
+            out.clear();
             return false;
         }
     }
@@ -128,7 +140,8 @@ namespace utils {
             downloaded_bytes = 0;
         }
 
-        if(downloaded_bytes < static_cast<uint64_t>(max_size)) {
+        if(max_size <= 0 || downloaded_bytes < static_cast<uint64_t>(max_size)) {
+            // max_size<=0 表示无大小预期: 即使已有残留也继续下载(续传), 由 416 自愈兜底错位残留
             // 以 二进制追加模式 打开文件（断点续传关键）
             std::ofstream downfile(tmp_file, std::ios::binary | std::ios::out | std::ios::app);
             if(!downfile.is_open()) {
@@ -136,12 +149,7 @@ namespace utils {
                 return false;
             }
 
-            httplib::Client cli(url_host);
-            if(proxy.second) {
-                cli.set_proxy(proxy.first, proxy.second);
-            }
-            SetupTlsVerification(cli);
-            cli.set_follow_location(true);                          //https://raw.github.com 会要求301重定向
+            httplib::Client cli = MakeHttpClient(url_host, proxy);
             httplib::Headers headers;
             if(downloaded_bytes > 0) {
                 headers.emplace("Range", "bytes=" + std::to_string(downloaded_bytes) + "-");
@@ -178,10 +186,10 @@ namespace utils {
                 uint64_t now_ = downloaded_bytes + len;
                 int percent_ = total_ ? static_cast<int>(now_ * 100 / total_) : 0;
 
-                printf_s("\r %s %d%% ==>  %lld / %lld", (downloaded_bytes > 0) ? "[续传]" : "[下载]", percent_, now_, total_);
+                printf("\r %s %d%% ==>  %lld / %lld", (downloaded_bytes > 0) ? "[续传]" : "[下载]", percent_, (long long)now_, (long long)total_);
                 return true;
             });
-            printf_s("\n");
+            printf("\n");
             downfile.close();
 
             if(!res) {
@@ -194,6 +202,13 @@ namespace utils {
                 return false;
             }
             if(res->status != httplib::StatusCode::OK_200 && res->status != httplib::StatusCode::PartialContent_206) {
+                // 416 Range Not Satisfiable: 临时文件大小与服务器端实际长度错位(资产被重新发布), 续传永久失败
+                // 删除残留让上层重试时整包重下(与 JS 侧 fetch.js 的 416 自愈一致)
+                if(res->status == 416 && fs::exists(tmp_file)) {
+                    spdlog::warn("断点与服务器端错位(416), 删除残留临时文件后重新完整下载");
+                    std::error_code ec;
+                    fs::remove(tmp_file, ec);
+                }
                 spdlog::error("更新错误, 服务器返回错误的状态码: {}", res->status);
                 return false;
             }
@@ -248,9 +263,12 @@ namespace utils {
         return true;
     }
 
-    // 拉起 cmd 脚本: 等待当前进程退出后, 用临时文件替换自身并重启
-    // 全程宽字符 + 文件名引号转义: 兼容含空格/%/&等特殊字符的文件名
-    inline void LaunchReplaceAndRestart(const fs::path& self, const fs::path& tmp_file) {
+    // 拉起替换脚本: 等待当前进程退出后, 用临时文件替换自身并重启
+    // Windows: cmd 脚本(move/start), 全程宽字符 + 文件名引号转义, 兼容含空格/%/&等特殊字符的文件名
+    // POSIX:   sh 脚本(mv/exec), 后台 nohup 运行, 单引号转义路径
+    // 返回是否成功拉起; 失败时调用方不得假定会自动重启
+    inline auto LaunchReplaceAndRestart(const fs::path& self, const fs::path& tmp_file) -> bool {
+#ifdef _WIN32
         auto quote_name = [](std::wstring name) {
             std::wstring out = L"\"";
             for(wchar_t c : name) {
@@ -271,13 +289,50 @@ namespace utils {
         p += quote_name(exe_name.wstring());
         p += L" & start \"\" ";
         p += quote_name(exe_name.wstring());
-        ShellExecuteW(
+        // HINSTANCE <= 32 表示失败(权限不足/策略阻止/路径异常); 不校验会导致"提示自动重启"却不会发生且 exit 0
+        const auto r = reinterpret_cast<intptr_t>(ShellExecuteW(
             NULL,                       // 父窗口句柄
             L"open",                    // 操作
             L"cmd.exe",                 // 应用程序
             p.c_str(),                  // 参数
             self.parent_path().wstring().c_str(), // 工作目录
-            SW_SHOW);                   // 显示方式
+            SW_SHOW));                  // 显示方式
+        if(r <= 32) {
+            spdlog::error("无法启动替换脚本(ShellExecuteW 返回 {}), 请手动用 {} 覆盖 {}", r, tmp_file.string(), self.string());
+            return false;
+        }
+        return true;
+#else
+        auto sh_quote = [](const std::string& s) {
+            std::string out = "'";
+            for(char c : s) {
+                if(c == '\'') out += "'\\''";
+                else out += c;
+            }
+            out += "'";
+            return out;
+        };
+        const fs::path script = self.parent_path() / (self.filename().string() + ".update.sh");
+        {
+            std::ofstream sh(script, std::ios::binary | std::ios::trunc);
+            if(!sh) {
+                spdlog::error("无法创建更新脚本 {}", script.string());
+                return false;
+            }
+            sh << "#!/bin/sh\n"
+               << "sleep 5\n"
+               << "mv -f " << sh_quote(tmp_file.string()) << " " << sh_quote(self.string()) << "\n"
+               << "exec " << sh_quote(self.string()) << "\n";
+        }
+        std::error_code ec;
+        fs::permissions(script, fs::perms::owner_all, ec);
+        const std::string cmd = "nohup /bin/sh " + sh_quote(script.string()) + " >/dev/null 2>&1 &";
+        if(std::system(cmd.c_str()) != 0) {
+            spdlog::error("无法启动更新脚本, 请手动用 {} 覆盖 {}", tmp_file.string(), self.string());
+            return false;
+        }
+        return true;
+#endif
     }
 
     /**
@@ -312,7 +367,9 @@ namespace utils {
         }
 
         spdlog::info("下载完成, 请稍等, 随后自动完成并(无参)重启..");
-        LaunchReplaceAndRestart(Self, tmp_file);
+        if(!LaunchReplaceAndRestart(Self, tmp_file)) {
+            return false;
+        }
         return true;
     }
 
