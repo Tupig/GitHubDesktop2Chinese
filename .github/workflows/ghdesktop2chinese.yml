@@ -1,18 +1,22 @@
 # GitHubDesktop2Chinese 统一 CI/CD 工作流
 # 一个工作流完成：自动构建、质量与安全检查、失效检测/候选提取、Release 发布。
 #
-# ── 触发 ─────────────────────────────────────────────────────
-#   推送 main         全平台构建 + 产物功能测试 + 质量与安全检查（不发布）
-#   定时（每日北京时间上午 10:00 = UTC 02:00）
-#                     扫描 GitHub Desktop 最新版 + 提取翻译候选 + 构建产物
-#                     （仅当 json/src/third_party/CMake 有变更时才发布 Release）
-#   PR                构建 + 质量与安全检查（不发布）
-#   推送 tag v*       构建并发布（版本号取 tag）
-#   手动触发 type=    auto     构建 + 质量 + 维护 + 发布（无变更则跳过发布）
-#                     build    仅构建
-#                     security 仅质量与安全扫描
-#                     maintain 仅失效检测/候选提取
-#                     release  构建 + 发布（始终发布）
+# ── 触发矩阵（自动 + 手动；与各 job 的 if 条件逐项对应）──────
+#   触发场景               构建  质量/自检  CodeQL  维护  发布
+#   push main              ✓    ✓         ✓      -     -
+#   push tag v*            ✓    ✓         -(注1) -     ✓（版本=tag）
+#   PR（目标 main）         ✓    ✓         ✓      -     -
+#   定时 每日 UTC 02:00     ✓    ✓         -(注2) ✓     ✓（仅构建相关变更, 补丁号+1）
+#   手动 build             ✓    -         -      -     -
+#   手动 security          -    ✓         ✓      -     -
+#   手动 maintain          -    ✓(仅自检) -      ✓     -
+#   手动 auto              ✓    ✓         ✓      ✓     ✓（仅 main 且变更时）
+#   手动 release           ✓    ✓         -      -     ✓（仅 main, 始终发布）
+#   注1: tag 提交已在 push main 扫描过, 不重复跑 CodeQL
+#   注2: 定时不含 CodeQL（节省资源, 由 PR / push main 覆盖）
+#   防重复: push 仅绑定 main 与 tag → PR 分支的推送不会二次触发(PR 由 pull_request 单路径负责);
+#           同一 PR 连续推送由 concurrency 取消陈旧运行
+#   边界:   发布类(auto/release)仅限 main 触发(防特性分支误发布); 其他 ref 可跑 build/security/maintain 排查
 #
 # ── jobs 总览与依赖 ─────────────────────────────────────────
 #   0. version        解析版本号与变更检测（构建/发布类任务的前置）
@@ -54,20 +58,26 @@
 
 name: GitHubDesktop2Chinese
 
+# 触发配置（执行矩阵见文件头注释；各 job 的 if 条件与矩阵逐项对应）
 on:
-  # 每日北京时间上午 10:00（UTC 02:00）
-  schedule:
-    - cron: "0 2 * * *"
-  pull_request:
+  # 推送 main（校验, 不发布）/ 推送 tag v*（构建并发布, 版本号取 tag）
   push:
     branches:
       - main
     tags:
       - "v*"
+  # PR: 仅目标分支为 main 时触发（边界: 其他目标分支不执行, 避免无意义消耗）
+  pull_request:
+    branches:
+      - main
+  # 每日北京时间 10:00 = UTC 02:00: 构建 + 质量 + 维护, 有构建相关变更时发布
+  schedule:
+    - cron: "0 2 * * *"
+  # 手动触发（建议在 main 上执行; 发布类 auto/release 仅 main 生效, 见 release job 边界注释）
   workflow_dispatch:
     inputs:
       type:
-        description: "执行类型"
+        description: "执行类型: auto=构建+质量+维护+发布 | build=仅构建 | security=仅质量与安全扫描 | maintain=仅失效检测/候选提取 | release=构建+发布"
         required: false
         default: "auto"
         type: choice
@@ -78,7 +88,7 @@ on:
           - maintain
           - release
       version:
-        description: "发布版本号（不带 v 前缀，如 1.2.5；留空则自动升级补丁号）"
+        description: "版本号（不带 v 前缀, 如 1.2.5; 留空自动升级补丁号; 仅对 build/auto/release 的产物命名与发布生效）"
         required: false
         type: string
 
@@ -627,10 +637,11 @@ jobs:
     # json-quality/tools-test 与 release 同属任务门: 发布前强制过质量门与工具自检
     # (二者 if 已覆盖 push tag / dispatch release / schedule 分支, 不会出现 needs 悬空)
     needs: [version, build, json-quality, tools-test]
+    # 发布边界: 手动 auto/release 仅限 main 触发（防从特性分支误发布）; tag 推送与定时不受此限
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
-      (github.event_name == 'workflow_dispatch' && inputs.type == 'release') ||
-      (github.event_name == 'workflow_dispatch' && inputs.type == 'auto' && needs.version.outputs.changed == 'true') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.type == 'release') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.type == 'auto' && needs.version.outputs.changed == 'true') ||
       (github.event_name == 'schedule' && needs.version.outputs.changed == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
