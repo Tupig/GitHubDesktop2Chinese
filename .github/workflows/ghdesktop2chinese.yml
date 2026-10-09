@@ -3,7 +3,7 @@
 #
 # ── 触发矩阵（自动 + 手动；与各 job 的 if 条件逐项对应）──────
 #   触发场景               构建  质量/自检  CodeQL  维护  发布
-#   push main              ✓    ✓         ✓      -     -
+#   push main              ✓    ✓         ✓      ✓     -
 #   push tag v*            ✓    ✓         -(注1) -     ✓（版本=tag）
 #   PR（目标 main）         ✓    ✓         ✓      -     -
 #   定时 每日 UTC 02:00     ✓    ✓         -(注2) ✓     ✓（仅构建相关变更, 补丁号+1）
@@ -553,12 +553,14 @@ jobs:
 
   # ═════════════════════════════════════════════════
   # 5. 自动维护（失效检测 + 候选提取 → 创建/更新 Issue）
-  #    触发：定时 / 手动(auto|maintain)
+  #    触发：push main / 定时 / 手动(auto|maintain)
   # ═════════════════════════════════════════════════
   auto-maintain:
     name: 失效检测 + 未翻译候选提取
+    # 触发: push main(每次提交巡检映射健康度) / 定时 / 手动 auto|maintain; tag 与 PR 不触发
     if: |
       github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'maintain'))
     runs-on: ubuntu-24.04
     # 检测步骤 2×20min 重试 + 版本查询最坏约 6.5min, 需覆盖完整重试设计(30min 会把第二次重试 cancel 掉)
