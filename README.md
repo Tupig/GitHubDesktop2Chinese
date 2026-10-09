@@ -12,6 +12,7 @@
 
 - [🥮 这是什么](#-这是什么)
 - [🎯 怎么使用它](#-怎么使用它)
+- [⚙️ 命令行参数](#-命令行参数)
 - [🏗 怎么编译源代码](#-怎么编译源代码)
 - [👕 怎么贡献汉化](#-怎么贡献汉化)
 - [🍬 映射文件 localization.json](#-映射文件-localizationjson)
@@ -45,6 +46,61 @@
 > - 汉化映射以 **Windows 版** GitHub Desktop 文案为准，其他平台文案基本一致，个别条目可能不匹配。
 > - GitHub Desktop 每次版本更新后，都需要重新运行一次本程序才能完成汉化。
 
+## ⚙️ 命令行参数
+
+> 所有参数均为可选；不带参数双击运行即走默认流程（自动查找 GitHub Desktop 目录 + 联网获取最新映射）。
+>
+> **参数顺序**：`--nopause` 是程序级参数，必须写在子命令（如 `dev`）**之前**，例如 `GitHubDesktop2Chinese.exe --nopause dev --invalidcheck`。
+
+### 通用参数
+
+| 参数 | 说明 |
+| --- | --- |
+| `-h, --help` | 显示帮助并退出 |
+| `-g, --githubdesktoppath <目录>` | 指定 GitHub Desktop 的 js 所在目录（须含 `index.html`、`main.js`、`renderer.js`） |
+| `-j, --json <路径>` | 指定本地 `localization.json`（须以 `.json` 结尾；文件不存在时会自动创建模板并提示退出） |
+| `-r, --onlyfromremote` | 仅从远程仓库读取映射文件（忽略本地） |
+| `--rollback` | 从 `main.js.bak` / `renderer.js.bak` 还原到汉化前状态 |
+| `--nopause` | 结束前不再暂停等待（脚本/自动化场景；版本不满足时不再询问、直接强制替换） |
+
+### 开发者参数（`dev` 子命令）
+
+| 参数 | 说明 |
+| --- | --- |
+| `-d, --dev` | 启动时直接进入开发者选项菜单（等同按住 `Shift` 启动） |
+| `--mainerrorcheck` | [错误检查模式] 对 `main.js` 逐条排查 |
+| `--rendererrorcheck` | [错误检查模式] 对 `renderer.js` 逐条排查 |
+| `--invalidcheck` | 检测 `localization.json` 中失效（匹配不到/正则非法）的条目 |
+| `--noreplaceres` | 不替换资源（不影响错误检查模式） |
+| `--translationfrombak` | 优先从 `.bak` 备份读取 js 内容进行替换（建议配合 `--invalidcheck`） |
+| `--devreplace` | 仅替换 `main_dev` / `renderer_dev` 中的映射，快速调试 |
+| `--devsetver` | 指定当前程序版本（仅开发者版本 `0.0.0-Dev` 可用） |
+
+### 常用示例
+
+```powershell
+# 常规汉化（自动查找目录 + 联网获取最新映射）
+GitHubDesktop2Chinese.exe
+
+# 指定 GitHub Desktop 目录与本地映射文件
+GitHubDesktop2Chinese.exe -g "$env:LOCALAPPDATA\GitHubDesktop\app-<版本>\resources\app" -j .\localization.json
+
+# 仅使用远程映射（忽略本地同名文件）
+GitHubDesktop2Chinese.exe -r
+
+# 批量检测失效条目（免交互：--nopause 必须在 dev 之前）
+GitHubDesktop2Chinese.exe --nopause dev --invalidcheck
+
+# 汉化后主程序无法打开：从备份恢复
+GitHubDesktop2Chinese.exe dev --translationfrombak
+
+# 撤销汉化、还原汉化前状态
+GitHubDesktop2Chinese.exe --rollback
+```
+
+> [!TIP]
+> 查看内置帮助：`GitHubDesktop2Chinese.exe --help`。
+
 ## 🏗 怎么编译源代码
 
 > 项目基于 CMake，支持 **MSVC（Windows）/ AppleClang（macOS）/ GCC（Linux）** 三套工具链，仅支持 64 位（x64 / arm64）构建，其他架构会在 CMake 阶段直接报错。
@@ -69,7 +125,7 @@ cmake --build build --config Release
 2. 在 [`json/localization.json`](json/localization.json) 中参照已有格式补充翻译条目
 3. 提交 PR
 
-**开发调试技巧**：新写的条目可先放入 `main_dev` 或 `renderer_dev`，然后按住 `Shift` 启动程序，开启「仅替换指定映射项」进行快速测试；完成后将条目移动到 `main` 或 `renderer` 数组末尾再提交 PR。
+**开发调试技巧**：新写的条目可先放入 `main_dev` 或 `renderer_dev`，然后按住 `Shift` 启动程序，开启「仅替换指定映射项」进行快速测试；完成后按 [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) 的条目顺序规则移动到 `main` / `renderer`（一般追加到末尾；若与更宽泛条目存在「短含长」，须插到其前面）再提交 PR。
 
 ## 🍬 映射文件 localization.json
 
@@ -110,7 +166,7 @@ cmake --build build --config Release
 | 失效检测 + 候选提取 | 定时（每日）/ 手动 auto、maintain | 检测失效映射、提取未翻译候选，自动创建/关闭 Issue |
 | Release 发布 | tag `v*` / 定时（有变更时）/ 手动 auto（仅 main, 有变更）、release（仅 main） | 自动升级版本号，发布多平台产物 + localization.json |
 
-> 手动触发的 `type` 除表中所列外（`build` 等）仅执行对应子集，`version` 输入须为 `x.y.z` 纯数字格式，否则 CI 在版本号校验处直接失败。
+> 手动触发的 `type` 仅执行对应子集；`version` 为可选覆盖——**留空即自动升级补丁号**（如 `1.2.24 → 1.2.25`），填写时须为 `x.y.z` 纯数字，否则 CI 在版本号校验处直接失败。
 
 > [!TIP]
 > 手动触发 `type=auto` 会跑完整链路（构建 → 检查 → 维护 → 发布），版本号自动升级补丁号（如 `1.2.4 → 1.2.5`）；也可在 `version` 输入框手动指定（`x.y.z` 格式）。
@@ -197,6 +253,8 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 > **想撤销汉化、还原为汉化前状态**：执行 `GitHubDesktop2Chinese.exe --rollback`（从 `main.js.bak` / `renderer.js.bak` 还原）。
 >
 > **是否支持 macOS / Linux？**：提供 macOS 通用二进制（Intel / Apple Silicon 通用）与 Linux x64 版本（Release 页下载）。汉化映射针对 **Windows 版** GitHub Desktop 的界面文案（含 `&` 访问键等 Windows 专属内容），其他平台个别条目可能不匹配。
+>
+> **脚本 / 自动化运行**：加 `--nopause` 免交互；注意它是程序级参数，须写在 `dev` 等子命令之前。
 
 有任何建议欢迎提 [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues)。
 

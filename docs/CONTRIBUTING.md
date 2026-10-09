@@ -55,6 +55,19 @@
    >
    > **译文风格**：句末问号统一使用全角 `？`；译文末尾不留多余空格。
 
+## 本地验证改动
+
+1. 按 [README「怎么编译源代码」](../README.md#-怎么编译源代码) 编译加载器。
+2. **快速验证**：把新条目放入 `main_dev` / `renderer_dev`，启动时按住 `Shift` 进入开发者选项，选择「仅替换指定映射项」；验证通过后再移动到正式数组。
+3. **批量自检失效条目**（推荐提交前运行；需本机已安装 GitHub Desktop，或用 `-g` 指定 js 目录）：
+
+   ```powershell
+   GitHubDesktop2Chinese.exe --nopause dev --invalidcheck --translationfrombak
+   ```
+
+   > `--nopause` 为程序级参数，必须写在 `dev` 子命令之前；输出会逐个报告匹配失败 / 正则非法的条目。
+4. 也可用自动维护工具离线检测与提取候选：`cd tools/auto-maintain && npm run all`，详见[工具说明](../tools/auto-maintain/README.md)。
+
 ## 发布说明（docs/ReleaseBody.md）
 
 `json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 任一变更都会在每日定时或手动 `auto` 时触发新版本发布（补丁号 +1）。CI 发布时从 `docs/ReleaseBody.md` 中提取**行尾含全角版本标记**（如 `（v1.2.23）`）的变更行拼进 Release 说明：
