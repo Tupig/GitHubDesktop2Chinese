@@ -126,6 +126,12 @@ async function main() {
         )).join('; ');
         console.log(`  ${c('31', `[${f.array}#${f.index}]`)} ${reason}: ${f.errors[0].pattern}`);
       }
+      if (result.warnings.length > 0) {
+        console.log(c('1;33', `  告警项(不阻断): ${result.warnings.length}`));
+        for (const w of result.warnings) {
+          console.log(`  ${c('33', `[${w.array}#${w.index}]`)} ${w.reason}: ${w.pattern}`);
+        }
+      }
     }
 
     if (args.cmds.includes('extract') || args.cmds.includes('all')) {

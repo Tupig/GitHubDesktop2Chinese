@@ -43,6 +43,15 @@ export function renderMarkdown(report) {
       lines.push(`| … | … | … | 其余 ${failed.length - MAX_FAILED_ROWS} 条失效项未展示，本地运行 \`npm run all\` 查看完整报告 |`);
     }
     lines.push('');
+    const warnList = report.checks.warnings ?? [];
+    if (warnList.length > 0) {
+      lines.push(`### 告警（不阻断）`);
+      lines.push('');
+      for (const w of warnList) {
+        lines.push(`- \`${mdText(w.array)}[${w.index}]\` ${mdText(w.reason)}: ${mdCode(w.pattern)}`);
+      }
+      lines.push('');
+    }
   }
   if (report.candidates) {
     const { candidates, patternsCount } = report.candidates;

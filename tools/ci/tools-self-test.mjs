@@ -1,6 +1,7 @@
-// 自动维护工具单元测试(提取过滤 + 草稿生成 + 报告体积防护; 工作流 tools-test job 调用)
+// 自动维护工具单元测试(提取过滤 + 草稿生成 + 报告体积防护 + 告警通道; 工作流 tools-test job 调用)
 import { isLikelyUiText, buildDraftLine } from '../auto-maintain/src/extract-new.js';
 import { renderMarkdown } from '../auto-maintain/src/report.js';
+import { checkEntry } from '../auto-maintain/src/check-invalid.js';
 const cases = [
   ['Do not show this message again', true],
   ['into ', false],
@@ -33,5 +34,15 @@ const fakeFailed = Array.from({ length: 1000 }, (_, i) => ({ array: 'renderer', 
 const big = renderMarkdown({ version: 't', generatedAt: 't', checks: { total: 1000, ok: 0, failedCount: 1000, failed: fakeFailed }, candidates: { candidates: [], patternsCount: 0 } });
 if (!big.includes('其余 850 条失效项未展示')) { console.error('FAIL: 失效表截断说明缺失'); process.exit(1); }
 if (big.length >= 65536) { console.error('FAIL: 报告超出体积上限', big.length); process.exit(1); }
+pass++;
+// 告警通道: ReDoS 启发式仅告警不阻断, 且进入报告渲染
+const warned = checkEntry('text', ['(a+)+x', 'y']);
+if (warned.ok !== false || warned.warnings.length !== 1 || warned.warnings[0].reason !== 'redos-suspect') {
+  console.error('FAIL: ReDoS 告警通道异常', JSON.stringify(warned)); process.exit(1);
+}
+const warnedMd = renderMarkdown({ version: 't', generatedAt: 't', checks: { total: 1, ok: 0, failedCount: 1, failed: [{ array: 'main', index: 0, errors: warned.errors }], warnings: [{ array: 'main', index: 0, ...warned.warnings[0] }] }, candidates: null });
+if (!warnedMd.includes('告警（不阻断）') || !warnedMd.includes('redos-suspect')) {
+  console.error('FAIL: 报告未渲染告警段'); process.exit(1);
+}
 pass++;
 console.log('单元测试通过:', pass, '项');

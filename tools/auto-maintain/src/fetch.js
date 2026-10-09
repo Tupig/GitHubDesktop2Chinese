@@ -175,13 +175,14 @@ export async function downloadZip(url, destDir, expectedSize) {
 /**
  * 解压 nupkg，提取 main.js 和 renderer.js
  * nupkg 内含 "lib/net45/resources/app/{main,renderer}.js"
+ * versionTag: 上游版本号, 用于提取结果复用标记(缺省回退文件名, 防同尺寸跨版本误复用)
  * 返回 { mainJsPath, rendererJsPath, appDir }
  */
-export function extractJs(zipPath, workDir) {
+export function extractJs(zipPath, workDir, versionTag = '') {
   const extractDir = path.join(workDir, 'extracted');
   // 提取结果与来源包一致时直接复用（配合 CI 缓存，避免每次重复解压 150MB+ 安装包）；
-  // 来源包文件名固定为 github-desktop.nupkg，以文件大小识别版本变化
-  const sourceId = `${path.basename(zipPath)}:${fs.statSync(zipPath).size}`;
+  // 标记含版本号与文件尺寸(旧格式 "文件:尺寸" 因格式变化自然失效重建)
+  const sourceId = `${versionTag || path.basename(zipPath)}:${fs.statSync(zipPath).size}`;
   const markerPath = path.join(extractDir, '.source.txt');
   if (fs.existsSync(markerPath) && fs.readFileSync(markerPath, 'utf8').trim() === sourceId) {
     const cached = findAppDir(extractDir);
@@ -258,6 +259,6 @@ function findAppDir(root) {
 export async function fetchLatest(workDir) {
   const release = await getLatestRelease();
   const zipPath = await downloadZip(release.zipUrl, workDir, release.zipSize);
-  const js = extractJs(zipPath, workDir);
+  const js = extractJs(zipPath, workDir, release.version);
   return { ...release, ...js };
 }

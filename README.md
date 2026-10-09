@@ -250,6 +250,8 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 > [!TIP]
 > **找不到 openssl 的 DLL**：请更新到 [最新版本](https://github.com/Tupig/GitHubDesktop2Chinese/releases)。
 >
+> **提示「文件要求加载器版本至少为…」/ 版本不满足**：远程映射自 v1.2.30 起仅适配最新版加载器，请到 [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) 升级加载器；也可在提示时输入 `f` 强制替换（不建议，可能出现条目不匹配）。
+>
 > **程序不运行 / 一闪而过 / 缺失 `MSVCP140_ATOMIC_WAIT.dll`**：安装 [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/zh-cn/cpp/windows/latest-supported-vc-redist?view=msvc-170) 的 **x64** 版本（`vc_redist.x64.exe`）。
 >
 > 安装最新 VC++ 运行库后仍无法运行时，请检查程序目录下是否残留 `MSVCP140.dll`、`VCRUNTIME140.dll` 等文件，如有请删除。

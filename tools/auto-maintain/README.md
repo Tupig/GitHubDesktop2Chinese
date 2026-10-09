@@ -67,6 +67,7 @@ node src/index.js check extract --keep-js
   - 匹配不到记为 `not-found`；正则编译失败记为 `regex-error`；
     使用 C++ `std::regex` 不兼容的语法（后行断言、命名捕获组、`\p{...}`、内联 flag 等，JS 侧可编译但 C++ 运行时会抛错）记为 `unsupported-syntax`
     （规则清单见目录下 `regex-blacklist.json`，与 CI 数据质量校验共用）
+  - 疑似灾难性回溯（嵌套量词）记为 `redos-suspect`，**仅告警不阻断**（本地控制台与 report.md 均呈现，与 CI 质量门告警一致）
 - 对 `select` 中 `enable=true` 的条目：按 `replaceFile` **精确等于** `main.js` / `renderer.js` 分别用对应 JS 检测（与 C++ 应用侧按字面量相等的判断一致；其它取值整条 select 不生效，直接跳过不计数）
 
 ### 未翻译候选提取

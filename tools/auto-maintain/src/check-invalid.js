@@ -31,11 +31,13 @@ const STD_REGEX_BLACKLIST = JSON.parse(
  * 规则（对应 GitHubDesktop2Chinese.cpp 的 --invalidcheck）：
  *  - item[0] 为查找正则，为空跳过
  *  - item[2]（可选）为第三个参数正则，需额外匹配
- * 返回 { ok, errors: [{ reason, pattern }] }，
- * reason 为 'not-found' | 'regex-error' | 'unsupported-syntax'
+ * 返回 { ok, errors, warnings }，
+ * reason 为 'not-found' | 'regex-error' | 'unsupported-syntax'；
+ * warnings 为仅告警项（如 'redos-suspect'），不参与 ok 判定
  */
 export function checkEntry(jsText, item) {
   const errors = [];
+  const warnings = [];
   const patterns = [];
   if (item && typeof item[0] === 'string') {
     patterns.push(item[0]);
@@ -51,9 +53,9 @@ export function checkEntry(jsText, item) {
       errors.push({ reason: `unsupported-syntax: ${hit.why}`, pattern: p });
       continue;
     }
-    // ReDoS 启发式(仅告警不阻断): 与 CI 的 tools/ci/check-localization.py 对齐
+    // ReDoS 启发式(仅告警不阻断): 与 CI 的 tools/ci/check-localization.py 对齐, 由调用方纳入输出与报告
     if (/\([^()]*[+*][^()]*\)\s*[+*{]/.test(p)) {
-      console.warn(`[redos] 疑似灾难性回溯(嵌套量词), 建议改写: ${p}`);
+      warnings.push({ reason: 'redos-suspect', pattern: p });
     }
     try {
       const re = new RegExp(p);
@@ -64,15 +66,17 @@ export function checkEntry(jsText, item) {
       errors.push({ reason: 'regex-error', pattern: p });
     }
   }
-  return { ok: errors.length === 0, errors };
+  return { ok: errors.length === 0, errors, warnings };
 }
 
 /**
  * 遍历映射数组，对每个条目做失效检测。
- * 返回 { total, ok, failed, summary }，failed 为失效条目（含来源数组名）。
+ * 返回 { total, ok, failed, failedCount, warnings }，failed 为失效条目（含来源数组名），
+ * warnings 为仅告警项（含来源数组名与序号）
  */
 export function checkInvalid(localization, mainJsText, rendererJsText) {
   const failed = [];
+  const warnings = [];
   let total = 0;
   let okCount = 0;
 
@@ -81,7 +85,8 @@ export function checkInvalid(localization, mainJsText, rendererJsText) {
     if (!Array.isArray(arr)) return;
     for (let i = 0; i < arr.length; i++) {
       total++;
-      const { ok, errors } = checkEntry(jsText, arr[i]);
+      const { ok, errors, warnings: entryWarnings } = checkEntry(jsText, arr[i]);
+      for (const w of entryWarnings) warnings.push({ array: arrayName, index: i, ...w });
       if (ok) {
         okCount++;
       } else {
@@ -116,7 +121,8 @@ export function checkInvalid(localization, mainJsText, rendererJsText) {
       const targetJs = rf === 'main.js' ? mainJsText : rendererJsText;
       for (let j = 0; j < replaces.length; j++) {
         total++;
-        const { ok, errors } = checkEntry(targetJs, replaces[j]);
+        const { ok, errors, warnings: entryWarnings } = checkEntry(targetJs, replaces[j]);
+        for (const w of entryWarnings) warnings.push({ array: `select[${s}].replace`, index: j, ...w });
         if (ok) {
           okCount++;
         } else {
@@ -131,5 +137,5 @@ export function checkInvalid(localization, mainJsText, rendererJsText) {
     }
   }
 
-  return { total, ok: okCount, failed, failedCount: failed.length };
+  return { total, ok: okCount, failed, failedCount: failed.length, warnings };
 }
