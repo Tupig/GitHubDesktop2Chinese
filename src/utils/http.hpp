@@ -29,6 +29,8 @@ namespace utils {
     // 网络超时(秒): 防止失效代理指向黑洞地址时按 httplib 默认 300s × 4 次重试卡死约 20 分钟
     inline constexpr int kConnectTimeoutSec = 10;
     inline constexpr int kReadTimeoutSec = 30;
+    // 单次请求可接受的响应体上限(32MB): 防止异常/恶意服务端响应撑爆内存
+    inline constexpr size_t kMaxResponseBytes = 32 * 1024 * 1024;
 
     // 构造带超时与 TLS 校验的 HTTP 客户端
     inline auto MakeHttpClient(const std::string& url_host, const std::pair<std::string, int>& proxy = {}) -> httplib::Client {
@@ -119,6 +121,13 @@ namespace utils {
 
         if (res) {
             if (res->status == httplib::StatusCode::OK_200) {
+                // 响应体上限: 防御异常/恶意服务端返回超大内容(正常 API/文本响应远小于此);
+                // 注: httplib 已在内存接收响应, 此处为接受边界而非下载防线
+                if(res->body.size() > kMaxResponseBytes) {
+                    spdlog::warn("请求 {}{} 响应体过大({} bytes), 已拒绝", url_host, params, res->body.size());
+                    out.clear();
+                    return false;
+                }
                 out = res->body;
                 return true;
             }

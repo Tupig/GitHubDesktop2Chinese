@@ -51,6 +51,10 @@ export function checkEntry(jsText, item) {
       errors.push({ reason: `unsupported-syntax: ${hit.why}`, pattern: p });
       continue;
     }
+    // ReDoS 启发式(仅告警不阻断): 与 CI 的 tools/ci/check-localization.py 对齐
+    if (/\([^()]*[+*][^()]*\)\s*[+*{]/.test(p)) {
+      console.warn(`[redos] 疑似灾难性回溯(嵌套量词), 建议改写: ${p}`);
+    }
     try {
       const re = new RegExp(p);
       if (!re.test(jsText)) {

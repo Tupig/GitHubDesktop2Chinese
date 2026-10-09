@@ -70,9 +70,13 @@ export function isZipComplete(zipPath) {
     try {
       const size = fs.fstatSync(fd).size;
       if (size < 22) return false;
-      const buf = Buffer.alloc(22);
-      fs.readSync(fd, buf, 0, 22, size - 22);
-      return buf.readUInt32LE(0) === 0x06054b50;
+      // EOCD(签名 PK\x05\x06)位于归档尾部; 归档带 archive comment 时会前移,
+      // 因此在尾部 64KB(注释最大 65535 字节 + EOCD 22 字节)窗口内向前搜索
+      const windowLen = Math.min(size, 65557);
+      const buf = Buffer.alloc(windowLen);
+      fs.readSync(fd, buf, 0, windowLen, size - windowLen);
+      const sig = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
+      return buf.lastIndexOf(sig) !== -1;
     } finally {
       fs.closeSync(fd);
     }
@@ -227,7 +231,11 @@ function tryExec(cmd, args) {
 
 function findAppDir(root) {
   const SKIP = new Set(['node_modules', 'Frameworks', 'MacOS', 'copilot', 'git', 'static']);
-  const walk = (dir) => {
+  // 显式栈迭代(避免极深目录树递归栈深风险); 目标 app 目录唯一, 遍历顺序不影响结果
+  const stack = [root];
+  while (stack.length > 0) {
+    const dir = stack.pop();
+    const children = [];
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       if (SKIP.has(entry.name)) continue;
@@ -235,12 +243,13 @@ function findAppDir(root) {
       if (entry.name === 'app' && fs.existsSync(path.join(full, 'main.js')) && fs.existsSync(path.join(full, 'renderer.js'))) {
         return full;
       }
-      const deeper = walk(full);
-      if (deeper) return deeper;
+      children.push(full);
     }
-    return null;
-  };
-  return walk(root);
+    for (let i = children.length - 1; i >= 0; i--) {
+      stack.push(children[i]);
+    }
+  }
+  return null;
 }
 
 /**
