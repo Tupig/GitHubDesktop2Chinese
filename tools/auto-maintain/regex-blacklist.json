@@ -1,5 +1,5 @@
 {
-  "comment": "C++ std::regex 不兼容语法黑名单（regex 为源码文本；tools/auto-maintain 与 .github/scripts 共用单一事实来源）",
+  "comment": "C++ std::regex 不兼容语法黑名单（regex 为源码文本；tools/auto-maintain 与 tools/ci 共用单一事实来源）",
   "rules": [
     { "regex": "\\(\\?<=", "why": "后行断言 (?<=)" },
     { "regex": "\\(\\?<!", "why": "负后行断言 (?<!)" },

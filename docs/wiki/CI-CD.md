@@ -1,6 +1,6 @@
 # CI / CD
 
-仓库只有**一个工作流**：[`.github/workflows/ghdesktop2chinese.yml`](../../.github/workflows/ghdesktop2chinese.yml)。大型脚本全部外置于 `.github/scripts/`（数据质量校验 / 工具自检 / 维护报告），YAML 内只保留编排逻辑。
+仓库只有**一个工作流**：[`.github/workflows/ghdesktop2chinese.yml`](../../.github/workflows/ghdesktop2chinese.yml)。大型脚本全部外置于 `tools/ci/`（数据质量校验 / 工具自检 / 维护报告），YAML 内只保留编排逻辑。
 
 ## 触发方式
 
@@ -29,14 +29,16 @@
 
 ## Job 矩阵
 
+Job 依赖关系：`build ← version`；`release ← version + build + json-quality + tools-test`。**CodeQL 与 auto-maintain 是旁路校验**——手动 `release` 时也会执行（发现问题出 Issue / 告警），但**不阻塞发布**。
+
 | Job | 触发 | 内容 |
 | --- | --- | --- |
 | `version`（变更检测） | push main / tag / 定时 / 手动 | 以最新 `v*` tag 为基准，检测 `json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 的实际变更，输出 `changed` 供发布环节判断 |
-| `build` | PR / push / tag / 定时 / 手动 auto、build、release | **三目标构建 + 产物功能测试**：Windows x64、macOS 通用二进制（Intel + Apple Silicon，静态链接 OpenSSL 自包含）、Linux x64 |
+| `build` | PR / push / tag / 定时 / 手动 auto、build、release | **四目标构建矩阵 + 产物功能测试**：Windows x64、macOS x64 / arm64（单架构包，静态链接 OpenSSL + strip/LTO 裁剪）、Linux x64；`fail-fast` 关闭，单平台失败不取消其余平台 |
 | `json-quality` | PR / push / tag / 定时 / 手动 auto、security、release | `localization.json` 质量门：正则合法性、结构完整性、占位符检查、`std::regex` 不兼容语法黑名单、ReDoS 启发式、译文问句全角风格 |
 | `tools-test` | PR / push / tag / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 |
-| `codeql` | PR（main）/ push main / 手动 auto、security | C/C++ 安全扫描 |
-| `auto-maintain` | push main / 每日定时 / 手动 auto、maintain | 失效检测 + 候选提取，自动创建/关闭带 `auto-maintain` 标签的 Issue（详见[自动维护工具](自动维护工具.md#ci-自动维护)） |
+| `codeql` | PR（仅同仓分支，fork PR 不跑——其令牌无 security-events 写权限，上传必失败）/ push main / 手动 auto、security、release | C/C++ 安全扫描（不含定时，节省资源；运行于 Windows runner） |
+| `auto-maintain` | push main / 每日定时 / 手动 auto、maintain、release | 失效检测 + 候选提取，自动创建/关闭带 `auto-maintain` 标签的 Issue（详见[自动维护工具](自动维护工具.md#ci-自动维护)） |
 | `release` | push main（有变更）/ tag `v*` / 定时（有变更）/ 手动 auto（main，有变更）、release（main） | 发布，见下节 |
 
 ## 发布规则
@@ -54,20 +56,22 @@
 
 **发布内容**：
 
-- 多平台产物：`GitHubDesktop2Chinese.exe`（Windows x64）、macOS 通用二进制、Linux x64；
+- 多平台产物：`GitHubDesktop2Chinese.exe`（Windows x64）、`GitHubDesktop2Chinese-macos-x64`、`GitHubDesktop2Chinese-macos-arm64`、`GitHubDesktop2Chinese-linux-x64`；
 - `localization.json`（用户可单独下载映射）；
 - 每个产物的**构建溯源证明**（SLSA provenance），可用 `gh attestation verify <文件> --repo Tupig/GitHubDesktop2Chinese` 校验；
 - Release 说明：从 [`docs/ReleaseBody.md`](../ReleaseBody.md) 提取**行尾含全角版本标记**（如 `（v1.2.25）`）的变更行拼接，再附静态的「### 程序说明」段落。未标注或版本号未命中的行不会出现（显示「未找到变更记录」提示），也**不阻断**发布。
 
-**发布前置门禁**：`release` job 强制依赖 json-quality 与 tools-test 通过——质量门挂了就不会发版；Release 创建失败有自动自愈重试。
+**发布前置门禁**：`release` job 强制依赖 json-quality 与 tools-test 通过——质量门挂了就不会发版；CodeQL 与失效检测在手动 release 时为**旁路执行**（发现问题时告警/开 Issue，不阻塞发布）；Release 创建失败有自动自愈重试。
+
+**发布边界**：发布类（`auto` / `release`）仅限 `main` 分支触发，防止特性分支误发布；其他分支可跑 build / security / maintain 做排查。
 
 ## 质量门明细（json-quality）
 
-PR 与发布前对 `localization.json` 做静态校验（脚本：`.github/scripts/check-localization.py`）：
+PR 与发布前对 `localization.json` 做静态校验（脚本：`tools/ci/check-localization.py`）：
 
 1. **结构与类型**：顶层对象、必需键、数组元素类型逐项校验；
 2. **正则合法性**：每条查找正则必须可编译；
-3. **`std::regex` 兼容黑名单**：后行断言、命名捕获组、`\p{…}`、内联 flag 等 JS 合法但 C++ 运行时抛错的语法直接报错；
+3. **`std::regex` 兼容黑名单**：后行断言、命名捕获组、`\p{…}`、内联 flag 等 JS 合法但 C++ 运行时抛错的语法直接报错；黑名单维护在 [`tools/auto-maintain/regex-blacklist.json`](../../tools/auto-maintain/regex-blacklist.json)，CI 脚本与自动维护工具共用这一份单一事实来源；
 4. **ReDoS 启发式**：灾难性回溯模式拦截；
 5. **占位符检查**：`#{n}` 与捕获组 `$n` 使用合法性；
 6. **译文风格**：问句全角 `？`、译文末尾空格；

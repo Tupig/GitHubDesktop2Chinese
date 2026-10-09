@@ -26,7 +26,7 @@ for key in ["main", "renderer", "main_dev", "renderer_dev"]:
         errors.append(f"{key} 应为数组, 实际为 {type(data[key]).__name__}")
 
 # std::regex 不兼容语法黑名单: 与 tools/auto-maintain 共用单一事实来源
-# 路径按脚本位置推导(.github/scripts -> 仓库根), 不依赖当前工作目录
+# 路径按脚本位置推导(tools/ci -> 仓库根), 不依赖当前工作目录
 BLACKLIST_PATH = Path(__file__).resolve().parents[2] / "tools" / "auto-maintain" / "regex-blacklist.json"
 try:
     with open(BLACKLIST_PATH, encoding="utf-8") as f:

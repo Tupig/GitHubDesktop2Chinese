@@ -3,6 +3,8 @@
 感谢参与 GitHubDesktop2Chinese 的汉化贡献！补充或修改翻译（`json/localization.json`）前，请先阅读以下注意事项。
 
 > 程序使用**正则表达式**进行匹配替换，理解以下规则可以避免「匹配不到」或「替换后程序打不开」的问题。
+>
+> 本页为速览版规则。完整的替换原理、映射字段说明与正则教程见 [wiki 贡献指南](wiki/贡献指南.md)、[wiki 映射文件格式](wiki/映射文件格式.md)与[wiki 正则表达式指南](wiki/正则表达式指南.md)。
 
 ## 核心规则
 
@@ -66,7 +68,7 @@
    ```
 
    > `--nopause` 为程序级参数，必须写在 `dev` 子命令之前；输出会逐个报告匹配失败 / 正则非法的条目。
-4. 也可用自动维护工具离线检测与提取候选：`cd tools/auto-maintain && npm run all`，详见[工具说明](../tools/auto-maintain/README.md)。
+4. 也可用自动维护工具离线检测与提取候选：`cd tools/auto-maintain && npm run all`，详见[工具说明](../tools/auto-maintain/README.md)（参数与报告格式另见 [wiki 自动维护工具](wiki/自动维护工具.md)）。
 
 ## 发布说明（docs/ReleaseBody.md）
 

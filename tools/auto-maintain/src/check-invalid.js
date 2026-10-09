@@ -18,7 +18,7 @@ export function loadLocalization(jsonPath) {
 
 /**
  * std::regex(ECMAScript 语法子集) 不兼容语法黑名单。
- * 规则从 regex-blacklist.json 读取（与 CI 的 .github/scripts/check-localization.py 共用单一事实来源）:
+ * 规则从 regex-blacklist.json 读取（与 CI 的 tools/ci/check-localization.py 共用单一事实来源）:
  * JS new RegExp 接受但 C++ std::regex 会抛 regex_error 的写法必须显式拦截，
  * 否则实际运行时 C++ 侧 regex_error 中断汉化。
  */

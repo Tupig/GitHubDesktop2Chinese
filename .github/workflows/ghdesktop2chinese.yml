@@ -55,7 +55,7 @@
 #   - macOS 拆分 macos-x64 / macos-arm64 单架构包, 均在 macos-15-intel 交叉编译(不依赖容量紧张的 arm64 runner),
 #     静态 OpenSSL + strip/LTO 裁剪体积; OpenSSL 双架构静态库、GitHub Desktop 安装包与提取结果均走 actions/cache
 #   - 第三方 actions 全部按 commit SHA 固定（版本升级手动执行；漏洞告警由 Dependabot 提示）
-#   - 数据质量校验/工具自检/维护报告等大型脚本外置于 .github/scripts（YAML 仅保留调用）
+#   - 数据质量校验/工具自检/维护报告等大型脚本外置于 tools/ci（YAML 仅保留调用）
 #   - 发布产物生成构建溯源证明（SLSA provenance attestation），可用 gh attestation verify 校验来源
 
 name: GitHubDesktop2Chinese
@@ -212,7 +212,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 深度校验 localization.json
-        run: python .github/scripts/check-localization.py
+        run: python tools/ci/check-localization.py
 
   # ═════════════════════════════════════════════════
   # 2. 自动维护工具自检门（语法 + 单元测试）
@@ -241,7 +241,7 @@ jobs:
           echo "所有源文件语法检查通过"
 
       - name: 单元测试（提取过滤 + 草稿生成逻辑）
-        run: node .github/scripts/tools-self-test.mjs
+        run: node tools/ci/tools-self-test.mjs
 
   # ═════════════════════════════════════════════════
   # 3. CodeQL 安全扫描门（PR / push main / 手动 auto|security|release；不含定时以节省资源）
@@ -647,7 +647,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
-            const run = require('./.github/scripts/report-issue.js');
+            const run = require('./tools/ci/report-issue.js');
             await run({ github, context, core });
 
   # ═════════════════════════════════════════════════

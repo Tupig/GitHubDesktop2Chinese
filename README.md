@@ -106,7 +106,7 @@ GitHubDesktop2Chinese.exe --rollback
 
 ## 🏗 怎么编译源代码
 
-> 项目基于 CMake，支持 **MSVC（Windows）/ AppleClang（macOS）/ GCC（Linux）** 三套工具链，仅支持 64 位（x64 / arm64）构建，其他架构会在 CMake 阶段直接报错；**所有发布产物均为 64 位**。
+> 项目基于 CMake，支持 **MSVC（Windows）/ AppleClang（macOS）/ GCC（Linux）** 三套工具链，仅支持 64 位（x64 / arm64）构建，其他架构会在 CMake 阶段直接报错；**所有发布产物均为 64 位**。各平台环境准备与常见构建错误见 [📖 Wiki：编译指南](docs/wiki/编译指南.md)。
 
 1. 克隆仓库
 2. 使用 **VS2022** 直接打开项目文件夹（通过 CMake 打开）
@@ -124,7 +124,7 @@ cmake --build build --config Release
 
 ## 👕 怎么贡献汉化
 
-1. 克隆仓库，阅读 [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)
+1. 克隆仓库，阅读 [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)（更详细的流程见 [📖 Wiki：贡献指南](docs/wiki/贡献指南.md)，正则写法见 [📖 Wiki：正则表达式指南](docs/wiki/正则表达式指南.md)）
 2. 在 [`json/localization.json`](json/localization.json) 中参照已有格式补充翻译条目
 3. 提交 PR
 
@@ -132,7 +132,7 @@ cmake --build build --config Release
 
 ## 🍬 映射文件 localization.json
 
-存储 GitHub Desktop 英文文本到中文文本的映射，通过正则匹配完成替换。项目日常更新主要维护此文件。
+存储 GitHub Desktop 英文文本到中文文本的映射，通过正则匹配完成替换。项目日常更新主要维护此文件（字段与条目规则详见 [📖 Wiki：映射文件格式](docs/wiki/映射文件格式.md)，正则写法见 [📖 Wiki：正则表达式指南](docs/wiki/正则表达式指南.md)）。
 
 - 路径：`json/localization.json`
 
@@ -158,7 +158,7 @@ cmake --build build --config Release
 
 ## 🧪 CI / 自动维护
 
-本仓库使用统一工作流 [`ghdesktop2chinese.yml`](.github/workflows/ghdesktop2chinese.yml)：
+本仓库使用统一工作流 [`ghdesktop2chinese.yml`](.github/workflows/ghdesktop2chinese.yml)（job 矩阵、发布规则与质量门明细见 [📖 Wiki：CI/CD](docs/wiki/CI-CD.md)）：
 
 | 功能 | 触发方式 | 说明 |
 | --- | --- | --- |
@@ -189,7 +189,7 @@ npm run all        # 失效检测 + 未翻译候选提取, 报告写入系统临
 
 ## 📁 项目结构
 
-架构概览：一个 C++ 主程序（`src/`，加载器 + 汉化器，产物为单文件 exe）、一份汉化映射数据（`json/localization.json`，运行时从本地或远程加载）、一个 Node.js 自动维护工具（`tools/auto-maintain`）以及统一 CI 工作流（`.github/workflows`，辅助脚本位于 `.github/scripts`）。
+架构概览：一个 C++ 主程序（`src/`，加载器 + 汉化器，产物为单文件 exe）、一份汉化映射数据（`json/localization.json`，运行时从本地或远程加载）、一个 Node.js 自动维护工具（`tools/auto-maintain`）以及统一 CI 工作流（`.github/workflows`，CI 脚本位于 `tools/ci`）。
 
 ```text
 .
@@ -209,13 +209,16 @@ npm run all        # 失效检测 + 未翻译候选提取, 报告写入系统临
 │   └── openssl/                  # OpenSSL 头文件与预编译库
 ├── json/
 │   └── localization.json         # 汉化映射（核心数据；路径为已发布程序的公共契约，不可移动）
-├── tools/auto-maintain/          # localization.json 自动维护工具（失效检测 / 候选提取）
+├── tools/
+│   ├── auto-maintain/            # localization.json 自动维护工具（失效检测 / 候选提取）
+│   └── ci/                       # CI 脚本（数据质量校验 / 工具自检 / 维护报告）
 ├── docs/                         # 文档
+│   ├── README.md                 # 文档索引与归类说明
 │   ├── CONTRIBUTING.md           # 汉化贡献指南（GitHub 自动识别）
-│   └── ReleaseBody.md            # Release 说明模板（CI 拼接进发布说明）
+│   ├── ReleaseBody.md            # Release 说明模板（CI 拼接进发布说明）
+│   └── wiki/                     # 详细 wiki 文档（使用 / 原理 / 贡献 / 开发）
 ├── .github/
-│   ├── workflows/                # 统一 CI/CD 工作流（仓库唯一工作流）
-│   └── scripts/                  # 工作流外置脚本（数据质量校验 / 工具自检 / 维护报告）
+│   └── workflows/                # 统一 CI/CD 工作流（仓库唯一工作流）
 ├── SECURITY.md                   # 安全政策（私密漏洞报告 / 供应链说明）
 ├── CMakeLists.txt
 └── CMakePresets.json
@@ -258,6 +261,8 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 > **是否支持 macOS / Linux？**：提供 macOS 分架构二进制（Intel 下载 `macos-x64`、Apple Silicon 下载 `macos-arm64`）与 Linux x64 版本（Release 页下载）。汉化映射针对 **Windows 版** GitHub Desktop 的界面文案（含 `&` 访问键等 Windows 专属内容），其他平台个别条目可能不匹配。
 >
 > **脚本 / 自动化运行**：加 `--nopause` 免交互；注意它是程序级参数，须写在 `dev` 等子命令之前。
+>
+> 更多问题（代理不生效、`#{n}` 占位符、断点续传、`--invalidcheck` 等）见 [📖 Wiki：常见问题](docs/wiki/常见问题.md)。
 
 有任何建议欢迎提 [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues)。
 
