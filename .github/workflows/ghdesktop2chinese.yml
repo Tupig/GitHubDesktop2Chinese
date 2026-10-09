@@ -11,7 +11,7 @@
 #   手动 security          -    ✓         ✓      -     -
 #   手动 maintain          -    ✓(仅自检) -      ✓     -
 #   手动 auto              ✓    ✓         ✓      ✓     ✓（仅 main 且变更时）
-#   手动 release           ✓    ✓         -      -     ✓（仅 main, 始终发布）
+#   手动 release           ✓    ✓         ✓      ✓     ✓（仅 main, 始终发布）
 #   注1: tag 提交已在 push main 扫描过, 不重复跑 CodeQL
 #   注2: 定时不含 CodeQL（节省资源, 由 PR / push main 覆盖）
 #   防重复: push 仅绑定 main 与 tag → PR 分支的推送不会二次触发(PR 由 pull_request 单路径负责);
@@ -243,14 +243,14 @@ jobs:
         run: node .github/scripts/tools-self-test.mjs
 
   # ═════════════════════════════════════════════════
-  # 3. CodeQL 安全扫描门（PR / push main / 手动 auto|security；不含定时以节省资源）
+  # 3. CodeQL 安全扫描门（PR / push main / 手动 auto|security|release；不含定时以节省资源）
   # ═════════════════════════════════════════════════
   codeql:
     name: CodeQL 安全扫描
     if: |
       github.event_name == 'pull_request' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'security'))
+      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'security' || inputs.type == 'release'))
     runs-on: windows-2025
     timeout-minutes: 30
     env:
@@ -571,15 +571,15 @@ jobs:
 
   # ═════════════════════════════════════════════════
   # 5. 自动维护（失效检测 + 候选提取 → 创建/更新 Issue）
-  #    触发：push main / 定时 / 手动(auto|maintain)
+  #    触发：push main / 定时 / 手动(auto|maintain|release)
   # ═════════════════════════════════════════════════
   auto-maintain:
     name: 失效检测 + 未翻译候选提取
-    # 触发: push main(每次提交巡检映射健康度) / 定时 / 手动 auto|maintain; tag 与 PR 不触发
+    # 触发: push main(每次提交巡检映射健康度) / 定时 / 手动 auto|maintain|release; tag 与 PR 不触发
     if: |
       github.event_name == 'schedule' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'maintain'))
+      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'maintain' || inputs.type == 'release'))
     runs-on: ubuntu-24.04
     # 检测步骤 2×20min 重试 + 版本查询最坏约 6.5min, 需覆盖完整重试设计(30min 会把第二次重试 cancel 掉)
     timeout-minutes: 50

@@ -162,8 +162,8 @@ cmake --build build --config Release
 | 构建 | push `main` / PR（目标 main）/ tag `v*` / 定时 / 手动 auto、build、release | 构建矩阵 + 产物功能测试：Windows x64、macOS x64 / arm64（单架构包）、Linux x64 |
 | JSON 质量校验 | PR（目标 main）/ push `main` / tag `v*` / 定时 / 手动 auto、security、release | 正则合法性、结构完整性、占位符检查、std::regex 不兼容语法黑名单、译文问句全角风格 |
 | 工具自检 | PR（目标 main）/ push `main` / tag `v*` / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 |
-| CodeQL 扫描 | PR（目标 main）/ push `main` / 手动 auto、security | C/C++ 安全扫描 |
-| 失效检测 + 候选提取 | push `main` / 定时（每日）/ 手动 auto、maintain | 检测失效映射、提取未翻译候选，自动创建/关闭 Issue |
+| CodeQL 扫描 | PR（目标 main）/ push `main` / 手动 auto、security、release | C/C++ 安全扫描 |
+| 失效检测 + 候选提取 | push `main` / 定时（每日）/ 手动 auto、maintain、release | 检测失效映射、提取未翻译候选，自动创建/关闭 Issue |
 | Release 发布 | push `main`（有变更时）/ tag `v*` / 定时（有变更时）/ 手动 auto（仅 main, 有变更）、release（仅 main） | 自动升级版本号，发布多平台产物 + localization.json |
 
 > 手动触发的 `type` 仅执行对应子集；`version` 为可选覆盖——**留空即自动升级补丁号**（如 `1.2.24 → 1.2.25`），填写时须为 `x.y.z` 纯数字，否则 CI 在版本号校验处直接失败。
