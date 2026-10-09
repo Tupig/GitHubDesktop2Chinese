@@ -28,7 +28,7 @@
 - **网络传输**：全部 HTTPS 并启用服务器证书校验（Windows 加载系统根证书存储；macOS 使用系统 `/etc/ssl/cert.pem`；Linux 探测系统 CA 包）
 - **自更新**：按发布资产声明的 SHA256 校验下载完整性；文件替换采用原子写入并保留备份
 - **供应链**
-  - 第三方 Actions 全部按 commit SHA 固定（由 Dependabot 维护更新）
+  - 第三方 Actions 全部按 commit SHA 固定（版本升级随上游手动执行；依赖漏洞由 Dependabot 告警提示）
   - Windows 的 OpenSSL 静态库由 CMake 从固定 URL 下载并校验 SHA256；macOS 静态库由 CI 基于上游 OpenSSL 3.x 源码构建
   - 发布产物附带构建溯源证明（SLSA provenance），可校验：
 
@@ -36,7 +36,7 @@
     gh attestation verify <下载的文件> --repo Tupig/GitHubDesktop2Chinese
     ```
 
-- **代码与数据扫描**：CodeQL（C/C++，PR 与 main 推送）；`localization.json` 质量门（非法/危险正则黑名单、ReDoS 启发式、结构与占位符校验）；仓库已启用 Secret Scanning 与 Push Protection、Dependabot 安全更新、私密漏洞报告
+- **代码与数据扫描**：CodeQL（C/C++，PR 与 main 推送）；`localization.json` 质量门（非法/危险正则黑名单、ReDoS 启发式、结构与占位符校验）；仓库已启用 Secret Scanning 与 Push Protection、Dependabot 漏洞告警与私密漏洞报告
 
 ## 范围说明
 

@@ -130,7 +130,7 @@ npm run all        # 失效检测 + 未翻译候选提取, 报告写入系统临
 
 ## 📁 项目结构
 
-架构概览：一个 C++ 主程序（`src/`，加载器 + 汉化器，产物为单文件 exe）、一份汉化映射数据（`json/localization.json`，运行时从本地或远程加载）、一个 Node.js 自动维护工具（`tools/auto-maintain`）以及统一 CI 工作流（`.github/workflows`）。
+架构概览：一个 C++ 主程序（`src/`，加载器 + 汉化器，产物为单文件 exe）、一份汉化映射数据（`json/localization.json`，运行时从本地或远程加载）、一个 Node.js 自动维护工具（`tools/auto-maintain`）以及统一 CI 工作流（`.github/workflows`，辅助脚本位于 `.github/scripts`）。
 
 ```text
 .
@@ -154,7 +154,10 @@ npm run all        # 失效检测 + 未翻译候选提取, 报告写入系统临
 ├── docs/                         # 文档
 │   ├── CONTRIBUTING.md           # 汉化贡献指南（GitHub 自动识别）
 │   └── ReleaseBody.md            # Release 说明模板（CI 拼接进发布说明）
-├── .github/workflows/            # CI/CD 工作流
+├── .github/
+│   ├── workflows/                # 统一 CI/CD 工作流（仓库唯一工作流）
+│   └── scripts/                  # 工作流外置脚本（数据质量校验 / 工具自检 / 维护报告）
+├── SECURITY.md                   # 安全政策（私密漏洞报告 / 供应链说明）
 ├── CMakeLists.txt
 └── CMakePresets.json
 ```

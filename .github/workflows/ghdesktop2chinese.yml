@@ -48,7 +48,8 @@
 #   - 网络/配置类关键步骤内置超时与自动重试
 #   - macOS 通用二进制在 macos-15-intel 上交叉编译 arm64, 不依赖容量紧张的 arm64 runner;
 #     OpenSSL 双架构静态库、GitHub Desktop 安装包与提取结果均走 actions/cache
-#   - 第三方 actions 全部按 commit SHA 固定（由 Dependabot 维护更新）
+#   - 第三方 actions 全部按 commit SHA 固定（版本升级手动执行；漏洞告警由 Dependabot 提示）
+#   - 数据质量校验/工具自检/维护报告等大型脚本外置于 .github/scripts（YAML 仅保留调用）
 #   - 发布产物生成构建溯源证明（SLSA provenance attestation），可用 gh attestation verify 校验来源
 
 name: GitHubDesktop2Chinese
@@ -198,118 +199,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 深度校验 localization.json
-        run: |
-          python - <<'PY'
-          import json, re, sys
-
-          sys.stdout.reconfigure(encoding="utf-8")
-
-          path = "json/localization.json"
-          raw = open(path, encoding="utf-8").read()
-          data = json.loads(raw)
-
-          errors = []
-          warnings = []
-
-          if "【待翻译】" in raw:
-              errors.append("存在未替换的草稿占位符【待翻译】，请补全译文后再提交")
-
-          for key in ["version", "minversion"]:
-              if key not in data:
-                  errors.append(f"缺少节点: {key}")
-
-          for key in ["main", "renderer", "main_dev", "renderer_dev"]:
-              if key not in data:
-                  errors.append(f"缺少节点: {key}")
-              elif not isinstance(data[key], list):
-                  errors.append(f"{key} 应为数组, 实际为 {type(data[key]).__name__}")
-
-          def check_array(name, arr):
-              seen = {}
-              # std::regex 不兼容语法黑名单(JS 认但 C++ 会抛 regex_error, 失效检测无法覆盖)
-              blacklist = [
-                  (r"\(\?<=", "后行断言 (?<=)"),
-                  (r"\(\?<!", "负后行断言 (?<!)"),
-                  (r"\(\?<[A-Za-z_]", "命名分组 (?<name>)"),
-                  (r"\(\?P[<a-zA-Z]", "Python 命名分组 (?P<name>)"),
-                  (r"\\p\{", r"Unicode 属性转义 \p{...}"),
-                  (r"\(\?[a-zA-Z]+[):]", "内联 flag (?i:...)"),
-              ]
-              for i, item in enumerate(arr):
-                  if not isinstance(item, list):
-                      errors.append(f"{name}[{i}] 不是数组")
-                      continue
-                  if len(item) < 2 or len(item) > 3:
-                      errors.append(f"{name}[{i}] 长度应为 2 或 3，实际 {len(item)}")
-                      continue
-                  if not all(isinstance(x, str) for x in item):
-                      errors.append(f"{name}[{i}] 含非字符串元素")
-                      continue
-                  pat = item[0]
-                  if not pat or pat == '""':
-                      continue  # 空串与 "" 占位(应用侧视为跳过)不参与校验
-                  for rx, why in blacklist:
-                      if re.search(rx, pat):
-                          errors.append(f"{name}[{i}] std::regex 不兼容语法({why}): {pat!r}")
-                  try:
-                      re.compile(pat)
-                  except re.error as e:
-                      errors.append(f"{name}[{i}] 非法正则: {pat!r} -> {e}")
-                  if pat in seen:
-                      warnings.append(f"{name} 重复查找项: {pat!r} (index {seen[pat]} 与 {i})")
-                  else:
-                      seen[pat] = i
-                  # ReDoS 启发式(仅告警不阻断): 嵌套量词(如 (a+)+ 、 (.*x)* )在长文本上可能灾难性回溯卡死加载器
-                  if re.search(r"\([^()]*[+*][^()]*\)\s*[+*{]", pat):
-                      warnings.append(f"{name}[{i}] 疑似灾难性回溯(嵌套量词), 请改写该正则: {pat!r}")
-                  # 译文问句风格: 去掉尾部引号后以 半角? 收尾且 ? 前为汉字 → 建议全角？
-                  # (JS 三元/正则语法的 ? 不满足"以 ? 收尾"或 ? 前非汉字, 不会误报)
-                  t = item[1].rstrip("\"'")
-                  if t.endswith("?") and re.search(r"[一-鿿]\?$", t):
-                      warnings.append(f"{name}[{i}] 译文以半角 ? 结尾, 建议改全角？: {item[1]!r}")
-
-          for key in ["main", "renderer", "main_dev", "renderer_dev"]:
-              if isinstance(data.get(key), list):
-                  check_array(key, data[key])
-
-          selects = data.get("select", [])
-          if not isinstance(selects, list):
-              errors.append(f"select 应为数组, 实际为 {type(selects).__name__}")
-          else:
-              for si, sel in enumerate(selects):
-                  if not isinstance(sel, dict):
-                      errors.append(f"select[{si}] 应为对象")
-                      continue
-                  if "replaceFile" not in sel:
-                      errors.append(f"select[{si}] 缺少 replaceFile")
-                  if "tooltip" not in sel:
-                      errors.append(f"select[{si}] 缺少 tooltip")
-                  if "enable" not in sel:
-                      errors.append(f"select[{si}] 缺少 enable")
-                  if "replaceFile" in sel and not isinstance(sel["replaceFile"], str):
-                      errors.append(f"select[{si}] replaceFile 应为字符串")
-                  if "tooltip" in sel and not isinstance(sel["tooltip"], str):
-                      errors.append(f"select[{si}] tooltip 应为字符串")
-                  if "enable" in sel and not isinstance(sel["enable"], bool):
-                      errors.append(f"select[{si}] enable 应为布尔")
-                  # 应用侧按字面量精确匹配这两个取值, 其它值整条 select 不生效(静默跳过)
-                  if isinstance(sel.get("replaceFile"), str) and sel["replaceFile"] not in ("main.js", "renderer.js"):
-                      errors.append(f"select[{si}] replaceFile 取值非法: {sel['replaceFile']!r}（仅允许 'main.js' / 'renderer.js'）")
-                  if not isinstance(sel.get("replace"), list):
-                      errors.append(f"select[{si}] replace 应为数组")
-
-          print(f"映射项统计: main={len(data.get('main', []))} renderer={len(data.get('renderer', []))}")
-          if warnings:
-              print(f"\n⚠️  {len(warnings)} 个警告:")
-              for w in warnings[:20]:
-                  print(f"  - {w}")
-          if errors:
-              print(f"\n❌ {len(errors)} 个错误:")
-              for e in errors[:30]:
-                  print(f"  - {e}")
-              sys.exit(1)
-          print("\n✅ localization.json 质量校验通过")
-          PY
+        run: python .github/scripts/check-localization.py
 
   # ═════════════════════════════════════════════════
   # 2. 自动维护工具自检门（语法 + 单元测试）
@@ -338,46 +228,7 @@ jobs:
           echo "所有源文件语法检查通过"
 
       - name: 单元测试（提取过滤 + 草稿生成逻辑）
-        working-directory: tools/auto-maintain
-        run: |
-          node --input-type=module -e "
-          import { isLikelyUiText, buildDraftLine } from './src/extract-new.js';
-          import { renderMarkdown } from './src/report.js';
-          const cases = [
-            ['Do not show this message again', true],
-            ['into ', false],
-            ['  leading space', false],
-            ['h:mm aaa', false],
-            ['[object Object]', false],
-            ['rgba(255, 255, 255, 0.3)', false],
-            ['GitHub Desktop', true],
-          ];
-          let pass = 0;
-          for (const [s, exp] of cases) {
-            const got = isLikelyUiText(s);
-            if (got !== exp) { console.error('FAIL:', JSON.stringify(s), 'got', got, 'exp', exp); process.exit(1); }
-            pass++;
-          }
-          // 草稿行必须是合法 JSON，且查找项按字面量匹配
-          for (const text of ['GitHub Desktop', 'Checkout commit?', 'No usage limit']) {
-            const outer = JSON.parse('[' + buildDraftLine(text) + ']');
-            const entry = outer[0];
-            if (!Array.isArray(entry) || entry.length !== 2 || !entry.every(x => typeof x === 'string')) {
-              console.error('FAIL: draft 非法', text); process.exit(1);
-            }
-            if (!new RegExp(entry[0]).test('\"' + text + '\"')) {
-              console.error('FAIL: draft 模式匹配不到字面量', text); process.exit(1);
-            }
-            pass++;
-          }
-          // 报告体积防护: 大表应截断且总长不超 Issue 上限
-          const fakeFailed = Array.from({ length: 1000 }, (_, i) => ({ array: 'renderer', index: i, item: [], errors: [{ reason: 'not-found', pattern: 'pattern-' + i }] }));
-          const big = renderMarkdown({ version: 't', generatedAt: 't', checks: { total: 1000, ok: 0, failedCount: 1000, failed: fakeFailed }, candidates: { candidates: [], patternsCount: 0 } });
-          if (!big.includes('其余 850 条失效项未展示')) { console.error('FAIL: 失效表截断说明缺失'); process.exit(1); }
-          if (big.length >= 65536) { console.error('FAIL: 报告超出体积上限', big.length); process.exit(1); }
-          pass++;
-          console.log('单元测试通过:', pass, '项');
-          "
+        run: node .github/scripts/tools-self-test.mjs
 
   # ═════════════════════════════════════════════════
   # 3. CodeQL 安全扫描门（PR / push main / 手动 auto|security；不含定时以节省资源）
@@ -764,90 +615,8 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
-            try {
-              const fs = require('fs');
-              const path = require('path');
-              const reportPath = path.join(process.env.RUNNER_TEMP, 'ghdesktop-auto-maintain', 'report.md');
-              const report = fs.readFileSync(reportPath, 'utf8');
-
-              const failedMatch = report.match(/总映射项\s+(\d+)，有效\s+(\d+)，失效\s+(\d+)。/);
-              if (!failedMatch) {
-                // 报告文案与本正则强耦合: 解析失败时若静默降级, 自动关单/标题计数会永久失效且无告警
-                core.warning('report.md 中未找到失效统计行(总映射项 x，有效 x，失效 x。), 失效数按 ? 处理, 请检查 report.js 文案是否变更');
-              }
-              const failed = failedMatch ? failedMatch[3] : '?';
-              const noFailures = Number(failed) === 0;
-
-              const title = `[自动维护] 汉化映射失效 ${failed} 项 / 未翻译候选 (GitHub Desktop 报告)`;
-              const today = new Date().toISOString().slice(0, 10);
-              const body = [
-                `## 自动维护报告（${today}）`,
-                '',
-                '本 Issue 由自动维护工作流生成，用于提醒维护者关注汉化映射的健康度。',
-                '',
-                '> ⚠️ 此报告不直接修改 `localization.json`，请人工确认后处理。',
-                '',
-                '---',
-                '',
-                report,
-                '',
-                '---',
-                `_由 [GitHubDesktop2Chinese](https://github.com/${{ github.repository }}/actions/workflows/ghdesktop2chinese.yml) 自动生成_`,
-              ].join('\n');
-
-              // 正文超长防护: GitHub Issue body 上限 65536 字符, 超限会导致创建/更新失败(恰在最需要报告时丢失)
-              const MAX_BODY = 60000;
-              const finalBody = body.length > MAX_BODY
-                ? body.slice(0, MAX_BODY) + '\n\n> ⚠️ 报告过长，已截断；完整内容见工作流日志。\n'
-                : body;
-
-              const { data: issues } = await github.rest.issues.listForRepo({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                state: 'open',
-                labels: ['auto-maintain'],
-              });
-
-              const existing = issues.find(i => i.title.startsWith('[自动维护]'));
-
-              if (noFailures) {
-                if (existing) {
-                  await github.rest.issues.update({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: existing.number,
-                    state: 'closed',
-                    body: finalBody,
-                  });
-                  console.log(`已关闭 Issue #${existing.number}（无失效项）`);
-                } else {
-                  console.log('无失效项且无历史 Issue，无需操作');
-                }
-                return;
-              }
-
-              if (existing) {
-                await github.rest.issues.update({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: existing.number,
-                  title: title,
-                  body: finalBody,
-                });
-                console.log(`已更新 Issue #${existing.number}`);
-              } else {
-                const created = await github.rest.issues.create({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  title: title,
-                  body: finalBody,
-                  labels: ['auto-maintain'],
-                });
-                console.log(`已创建 Issue #${created.data.number}`);
-              }
-            } catch (err) {
-              core.setFailed(`创建或更新自动维护 Issue 失败: ${err.message}`);
-            }
+            const run = require('./.github/scripts/report-issue.js');
+            await run({ github, context, core });
 
   # ═════════════════════════════════════════════════
   # 6. 发布 Release（tag v* / 手动 auto|release / 定时且有变更）
