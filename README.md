@@ -197,6 +197,8 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 
 有任何建议欢迎提 [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues)。
 
+安全漏洞请按 [`SECURITY.md`](SECURITY.md) 私密报告；发布产物可用 `gh attestation verify <文件> --repo Tupig/GitHubDesktop2Chinese` 校验构建来源。
+
 ## 🎋 功能特性
 
 - [x] JSON 格式标识文件版本与最低加载器版本
