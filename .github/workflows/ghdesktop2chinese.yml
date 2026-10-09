@@ -23,7 +23,7 @@
 #   1. json-quality   localization.json 数据质量门
 #   2. tools-test     自动维护工具自检门（语法 + 单元测试）
 #   3. codeql         C/C++ 安全扫描门
-#   4. build          三平台构建矩阵 + 产物功能测试
+#   4. build          构建矩阵(三平台四目标) + 产物功能测试
 #   5. auto-maintain  失效检测 + 未翻译候选提取（定时 / 手动）
 #   6. release        汇总产物并发布
 #
@@ -36,7 +36,8 @@
 #             Linux: build/GitHubDesktop2Chinese（单配置生成器）
 #   Artifact  GitHubDesktop2Chinese-<平台>-<版本号|SHA>
 #   发布资产  GitHubDesktop2Chinese.exe        — Windows x64（保留历史文件名，向后兼容）
-#             GitHubDesktop2Chinese-macos-universal — macOS 通用二进制（Intel + Apple Silicon）
+#             GitHubDesktop2Chinese-macos-x64   — macOS Intel（x64）
+#             GitHubDesktop2Chinese-macos-arm64 — macOS Apple Silicon（M 系列）
 #             GitHubDesktop2Chinese-linux-x64  — Linux x86_64
 #             localization.json                — 汉化映射（最新）
 #
@@ -50,8 +51,8 @@
 #   - runner 固定版本（ubuntu-24.04 / windows-2025 / macos-15-intel），CodeQL v4
 #   - 所有 job 均设 timeout-minutes 上限
 #   - 网络/配置类关键步骤内置超时与自动重试
-#   - macOS 通用二进制在 macos-15-intel 上交叉编译 arm64, 不依赖容量紧张的 arm64 runner;
-#     OpenSSL 双架构静态库、GitHub Desktop 安装包与提取结果均走 actions/cache
+#   - macOS 拆分 macos-x64 / macos-arm64 单架构包, 均在 macos-15-intel 交叉编译(不依赖容量紧张的 arm64 runner),
+#     静态 OpenSSL + strip/LTO 裁剪体积; OpenSSL 双架构静态库、GitHub Desktop 安装包与提取结果均走 actions/cache
 #   - 第三方 actions 全部按 commit SHA 固定（版本升级手动执行；漏洞告警由 Dependabot 提示）
 #   - 数据质量校验/工具自检/维护报告等大型脚本外置于 .github/scripts（YAML 仅保留调用）
 #   - 发布产物生成构建溯源证明（SLSA provenance attestation），可用 gh attestation verify 校验来源
@@ -282,9 +283,10 @@ jobs:
           category: "/language:c-cpp"
 
   # ═════════════════════════════════════════════════
-  # 4. 构建矩阵（windows-x64 / macos-universal / linux-x64）
+  # 4. 构建矩阵（windows-x64 / macos-x64 / macos-arm64 / linux-x64）
   #    每平台编译 + 产物功能测试（--help / 非法参数拒绝 / 中文路径完整流程）
-  #    macOS 为通用二进制：交叉编译 arm64 + 静态链接 OpenSSL，额外做架构/自包含断言
+  #    macOS 两个单架构包均在 macos-15-intel 交叉编译（不依赖 arm64 runner）:
+  #    静态链接 OpenSSL + strip/LTO 裁剪体积; arm64 由架构/自包含断言校验(无法原生执行)
   #    触发：push main|tag / PR / 定时 / 手动(auto|build|release)
   # ═════════════════════════════════════════════════
   build:
@@ -303,9 +305,14 @@ jobs:
           - name: windows-x64
             os: windows-2025
             artifact: GitHubDesktop2Chinese.exe
-          - name: macos-universal
+          - name: macos-x64
             os: macos-15-intel
-            artifact: GitHubDesktop2Chinese-macos-universal
+            arch: x64
+            artifact: GitHubDesktop2Chinese-macos-x64
+          - name: macos-arm64
+            os: macos-15-intel
+            arch: arm64
+            artifact: GitHubDesktop2Chinese-macos-arm64
           - name: linux-x64
             os: ubuntu-24.04
             artifact: GitHubDesktop2Chinese-linux-x64
@@ -322,7 +329,7 @@ jobs:
       # ── 检出 ──
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # ── 平台依赖：Linux 系统 libssl-dev / macOS 双架构静态 OpenSSL（带缓存）──
+      # ── 平台依赖：Linux 系统 libssl-dev / macOS 双架构静态 OpenSSL（带缓存, 两个单架构包共用）──
       - name: 安装 OpenSSL (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -392,21 +399,6 @@ jobs:
           path: *ossl_cache_paths
           key: *ossl_cache_key
 
-      - name: 组装 macOS 通用静态 OpenSSL
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          UNIV="$HOME/ossl-univ"
-          rm -rf "$UNIV"
-          mkdir -p "$UNIV/lib"
-          # 头文件两架构一致, 取 x64 一份
-          cp -R "$HOME/ossl-x64/include" "$UNIV/include"
-          for lib in libssl libcrypto; do
-            lipo -create "$HOME/ossl-x64/lib/$lib.a" "$HOME/ossl-arm64/lib/$lib.a" -output "$UNIV/lib/$lib.a"
-            lipo -info "$UNIV/lib/$lib.a"
-          done
-
       # ── 配置：CMake 生成（失败自动重试 3 次）──
       - name: 配置 CMake（Windows x64）
         if: runner.os == 'Windows'
@@ -432,12 +424,16 @@ jobs:
           VER="${VER:-ci-${GITHUB_SHA}}"
           EXTRA=()
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            # 通用二进制(Intel + Apple Silicon): 交叉编译 arm64 + 静态链接通用 OpenSSL, 产物自包含不依赖 brew;
-            # 部署目标 11.0 为 arm64 产物下限, 双架构一致
-            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64")
+            # 单架构包(x64/arm64 由矩阵 arch 指定): 交叉编译 + 静态链接对应架构 OpenSSL, 产物自包含不依赖 brew;
+            # 部署目标 11.0 为 arm64 产物下限; LTO 与打包后 strip 进一步压缩体积
+            ARCH="${{ matrix.arch }}"
+            CMAKE_ARCH="$ARCH"
+            if [[ "$ARCH" == "x64" ]]; then CMAKE_ARCH="x86_64"; fi
+            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=$CMAKE_ARCH")
             EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0")
-            EXTRA+=("-DOPENSSL_ROOT_DIR=$HOME/ossl-univ")
+            EXTRA+=("-DOPENSSL_ROOT_DIR=$HOME/ossl-$ARCH")
             EXTRA+=("-DOPENSSL_USE_STATIC_LIBS=TRUE")
+            EXTRA+=("-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=TRUE")
           fi
           for attempt in 1 2 3; do
             if cmake -B build -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DGitHubActions=1 "-DFILE_VERSION=$VER" ${EXTRA[@]+"${EXTRA[@]}"}; then
@@ -460,16 +456,19 @@ jobs:
             cmake --build build --config "$BUILD_TYPE" -j "$JOBS"
           fi
 
-      # ── 产物验证：功能冒烟（三平台）+ macOS 架构/自包含断言 ──
+      # ── 产物验证：功能冒烟（x64 原生执行）+ macOS 架构/自包含断言 ──
       - name: 产物功能测试
         shell: bash
         run: |
           set -euo pipefail
+          # macOS arm64 产物无法在 Intel runner 原生执行, 由后续架构/自包含断言覆盖(同一 SDK/clang 交叉编译)
+          if [[ "$RUNNER_OS" == "macOS" && "${{ matrix.arch }}" == "arm64" ]]; then
+            echo "跳过: arm64 交叉产物无法在本 runner 原生运行"
+            exit 0
+          fi
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             BIN="build/Release/${EXE_NAME}"
           else
-            # macOS 通用二进制在本 Intel runner 上以 x86_64 切片原生跑功能测试;
-            # arm64 切片由后续架构/自包含断言校验(同一 SDK/clang 交叉编译)
             BIN="build/GitHubDesktop2Chinese"
           fi
           [[ -f "$BIN" ]] || { echo "::error::未找到构建产物 $BIN"; exit 1; }
@@ -504,27 +503,7 @@ jobs:
           grep -q "renderer.js 文件汉化结束" <<< "$OUT" || { echo "$OUT"; echo "::error::流程未到达 renderer 汉化完成"; exit 1; }
           echo "OK"
 
-      - name: macOS 架构与自包含断言
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          BIN="build/GitHubDesktop2Chinese"
-          echo "== 架构检查(lipo) =="
-          INFO="$(lipo -info "$BIN")"
-          echo "$INFO"
-          grep -q "x86_64" <<< "$INFO" || { echo "::error::产物缺少 x86_64 架构"; exit 1; }
-          grep -q "arm64" <<< "$INFO" || { echo "::error::产物缺少 arm64 架构"; exit 1; }
-          echo "== 自包含检查(不得依赖非系统动态库) =="
-          otool -L "$BIN"
-          # universal 二进制的 otool 输出含 "(architecture xxx):" 头行, 只检查 tab/空格缩进的依赖条目行
-          if otool -L "$BIN" | grep '^[[:space:]]' | grep -Ev '(/usr/lib/|/System/)'; then
-            echo "::error::产物仍依赖非系统动态库(如 brew 路径), 自包含校验失败"
-            exit 1
-          fi
-          echo "OK"
-
-      # ── 打包与归档 ──
+      # ── 打包与归档：命名 → strip → 架构/自包含断言 → attestation → 上传 ──
       - name: 准备发布文件名
         shell: bash
         run: |
@@ -537,6 +516,44 @@ jobs:
             chmod +x "dist/${{ matrix.artifact }}"
           fi
           ls -l dist/
+
+      - name: macOS 裁剪符号 (strip)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="dist/${{ matrix.artifact }}"
+          BEFORE="$(stat -f%z "$BIN")"
+          strip -x "$BIN"
+          AFTER="$(stat -f%z "$BIN")"
+          ls -l "$BIN"
+          echo "strip 体积: $BEFORE -> $AFTER bytes"
+
+      - name: macOS 架构与自包含断言
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="dist/${{ matrix.artifact }}"
+          EXPECT="${{ matrix.arch }}"
+          if [[ "$EXPECT" == "x64" ]]; then EXPECT="x86_64"; fi
+          OPPOSITE="arm64"
+          if [[ "$EXPECT" == "arm64" ]]; then OPPOSITE="x86_64"; fi
+          echo "== 架构检查(应为单架构 $EXPECT) =="
+          INFO="$(lipo -info "$BIN")"
+          echo "$INFO"
+          grep -q "$EXPECT" <<< "$INFO" || { echo "::error::产物缺少 $EXPECT 架构"; exit 1; }
+          if grep -q "$OPPOSITE" <<< "$INFO"; then
+            echo "::error::产物存在多余架构 $OPPOSITE(应为单架构包)"
+            exit 1
+          fi
+          echo "== 自包含检查(不得依赖非系统动态库) =="
+          otool -L "$BIN"
+          if otool -L "$BIN" | grep '^[[:space:]]' | grep -Ev '(/usr/lib/|/System/)'; then
+            echo "::error::产物仍依赖非系统动态库(如 brew 路径), 自包含校验失败"
+            exit 1
+          fi
+          echo "OK"
 
       - name: 生成产物溯源证明（attestation）
         # PR 事件不执行：PR 的 id-token(OIDC) 权限受限（尤其 fork PR），且 PR 产物无需发布级溯源
@@ -694,7 +711,8 @@ jobs:
             echo ""
             echo "自动构建产物："
             echo "- \`GitHubDesktop2Chinese.exe\` — Windows x64（64 位 Windows）"
-            echo "- \`GitHubDesktop2Chinese-macos-universal\` — macOS 通用二进制（Intel 与 Apple Silicon 通用）"
+            echo "- \`GitHubDesktop2Chinese-macos-x64\` — macOS Intel（x64）"
+            echo "- \`GitHubDesktop2Chinese-macos-arm64\` — macOS Apple Silicon（M 系列）"
             echo "- \`GitHubDesktop2Chinese-linux-x64\` — Linux x86_64"
             echo "- \`localization.json\` — 汉化映射（最新）"
             echo ""

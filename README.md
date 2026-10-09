@@ -42,7 +42,7 @@
 **方式二**：下载 `GitHubDesktop2Chinese.exe` 与 `localization.json`，放在同一文件夹后运行。
 
 > [!IMPORTANT]
-> - 本程序提供 **64 位 Windows / macOS（Intel 与 Apple Silicon 通用二进制）/ Linux（x64）** 多平台版本，从 [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) 页选择对应产物下载。
+> - 本程序提供 **64 位 Windows / macOS（按架构分 x64 与 arm64 两个包）/ Linux（x64）** 多平台版本，从 [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) 页选择对应产物下载。
 > - 汉化映射以 **Windows 版** GitHub Desktop 文案为准，其他平台文案基本一致，个别条目可能不匹配。
 > - GitHub Desktop 每次版本更新后，都需要重新运行一次本程序才能完成汉化。
 
@@ -117,7 +117,7 @@ cmake --build build --config Release
 ```
 
 > [!NOTE]
-> OpenSSL 依赖：Windows 使用 CMake 内置下载（无需预装）；Linux 安装 `libssl-dev`、macOS 执行 `brew install openssl` 后由 `find_package(OpenSSL)` 自动发现（本机开发可行）。CI 发布的 **macOS 产物为 Intel + Apple Silicon 通用二进制并静态链接 OpenSSL**，自包含无额外依赖。
+> OpenSSL 依赖：Windows 使用 CMake 内置下载（无需预装）；Linux 安装 `libssl-dev`、macOS 执行 `brew install openssl` 后由 `find_package(OpenSSL)` 自动发现（本机开发可行）。CI 发布的 **macOS 产物按架构拆分（`macos-x64` / `macos-arm64`）、静态链接 OpenSSL 并 strip/LTO 裁剪**，自包含无额外依赖。
 
 ## 👕 怎么贡献汉化
 
@@ -159,7 +159,7 @@ cmake --build build --config Release
 
 | 功能 | 触发方式 | 说明 |
 | --- | --- | --- |
-| 构建 | push `main` / PR（目标 main）/ tag `v*` / 定时 / 手动 auto、build、release | 三目标构建 + 产物功能测试：Windows x64、macOS 通用二进制（Intel + Apple Silicon）、Linux x64 |
+| 构建 | push `main` / PR（目标 main）/ tag `v*` / 定时 / 手动 auto、build、release | 构建矩阵 + 产物功能测试：Windows x64、macOS x64 / arm64（单架构包）、Linux x64 |
 | JSON 质量校验 | PR（目标 main）/ push `main` / tag `v*` / 定时 / 手动 auto、security、release | 正则合法性、结构完整性、占位符检查、std::regex 不兼容语法黑名单、译文问句全角风格 |
 | 工具自检 | PR（目标 main）/ push `main` / tag `v*` / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 |
 | CodeQL 扫描 | PR（目标 main）/ push `main` / 手动 auto、security | C/C++ 安全扫描 |
@@ -252,7 +252,7 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 >
 > **想撤销汉化、还原为汉化前状态**：执行 `GitHubDesktop2Chinese.exe --rollback`（从 `main.js.bak` / `renderer.js.bak` 还原）。
 >
-> **是否支持 macOS / Linux？**：提供 macOS 通用二进制（Intel / Apple Silicon 通用）与 Linux x64 版本（Release 页下载）。汉化映射针对 **Windows 版** GitHub Desktop 的界面文案（含 `&` 访问键等 Windows 专属内容），其他平台个别条目可能不匹配。
+> **是否支持 macOS / Linux？**：提供 macOS 分架构二进制（Intel 下载 `macos-x64`、Apple Silicon 下载 `macos-arm64`）与 Linux x64 版本（Release 页下载）。汉化映射针对 **Windows 版** GitHub Desktop 的界面文案（含 `&` 访问键等 Windows 专属内容），其他平台个别条目可能不匹配。
 >
 > **脚本 / 自动化运行**：加 `--nopause` 免交互；注意它是程序级参数，须写在 `dev` 等子命令之前。
 

@@ -32,6 +32,7 @@
 - 内部整理: 六维度精读收尾(GHD 远程版本解析守卫、select 字段类型校验、死注释清理、退出码钳制)（v1.2.22）
 - 修复 构建与发布链路: x64 预设一键构建可用、x64 守卫对 VS/Ninja 两路径生效、Release 构建标志不再被遮蔽; CI 发布前强制过质量门与工具自检、版本号 x.y.z 校验、Release 创建失败自动自愈; 维护工具按资产尺寸校验下载、select replaceFile 取值域校验; README 标题/锚点修复（v1.2.23）
 - 跨平台与CI: CMake 支持 MSVC/AppleClang/GCC 三工具链与 OpenSSL 自动发现, CI 新增 push main 自动触发与三目标构建+产物功能测试(Windows x64 / macOS 通用二进制(Intel+Apple Silicon, 静态链接 OpenSSL 自包含) / Linux x64), Release 发布多平台产物并附构建溯源证明; 汉化数据修正(9 条条目顺序、6 条问句全角、1 条译文尾空格)与质量校验加固(std::regex 不兼容语法黑名单、译文问句风格、报告 Markdown 转义); 工作流治理(大型脚本外置 .github/scripts、触发矩阵与「发布仅 main」边界、仓库仅保留单一工作流)与文档全面更新(新增命令行参数表与可运行示例); 发布触发增强(push main 有构建相关变更时自动补丁发版)（v1.2.24）
+- 优化 macOS 产物体积: 拆分 macos-x64 / macos-arm64 单架构包(替代 13.8MB 通用二进制)并 strip 裁剪 + LTO, 单包体积约减半; 静态链接自包含与安全校验(attestation/单架构断言)保持不变（v1.2.25）
 
 <!--
 #### 修复BUG:
@@ -47,5 +48,5 @@
 1. 可以仅下载二进制程序,双击运行后自动汉化  
 2. 如果运行提示出错,可重试或下载[此JSON文件](https://github.com/Tupig/GitHubDesktop2Chinese/blob/main/json/localization.json)后放在同目录后运行二进制程序  
 3. **若使用GitHub 仓库作为json文件源，请升级加载器到最新版本**
-4. `GitHubDesktop2Chinese.exe` 为 64 位 Windows 程序，不再提供 32 位版本；Release 页同时提供 macOS 通用二进制（Intel / Apple Silicon 通用）与 Linux x64 版本
+4. `GitHubDesktop2Chinese.exe` 为 64 位 Windows 程序，不再提供 32 位版本；Release 页同时提供 macOS 分架构二进制（`macos-x64` / `macos-arm64`）与 Linux x64 版本
 5. 如果汉化后主程序无法打开，请更新加载器后执行参数 `GitHubDesktop2Chinese.exe dev --translationfrombak`
