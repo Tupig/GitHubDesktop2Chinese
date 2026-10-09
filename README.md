@@ -103,11 +103,11 @@ GitHubDesktop2Chinese.exe --rollback
 
 ## 🏗 怎么编译源代码
 
-> 项目基于 CMake，支持 **MSVC（Windows）/ AppleClang（macOS）/ GCC（Linux）** 三套工具链，仅支持 64 位（x64 / arm64）构建，其他架构会在 CMake 阶段直接报错。
+> 项目基于 CMake，支持 **MSVC（Windows）/ AppleClang（macOS）/ GCC（Linux）** 三套工具链，仅支持 64 位（x64 / arm64）构建，其他架构会在 CMake 阶段直接报错；**所有发布产物均为 64 位**。
 
 1. 克隆仓库
 2. 使用 **VS2022** 直接打开项目文件夹（通过 CMake 打开）
-3. 选择 `x64-debug` / `x64-release` 预设进行构建
+3. 选择 `x64-debug` / `x64-release` 预设进行构建（预设面向 Windows MSVC/Ninja；macOS/Linux 用下方命令行）
 
 命令行构建（Windows / macOS / Linux 通用）：
 

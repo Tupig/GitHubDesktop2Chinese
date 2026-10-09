@@ -1,3 +1,4 @@
+// 自动维护工具单元测试(提取过滤 + 草稿生成 + 报告体积防护; 工作流 tools-test job 调用)
 import { isLikelyUiText, buildDraftLine } from '../../tools/auto-maintain/src/extract-new.js';
 import { renderMarkdown } from '../../tools/auto-maintain/src/report.js';
 const cases = [

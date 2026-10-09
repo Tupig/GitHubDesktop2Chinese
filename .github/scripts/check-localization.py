@@ -1,3 +1,5 @@
+# localization.json 数据质量校验(工作流 json-quality job 调用; 自 YAML 外置, 行为不变)
+# 检查项: 草稿占位符/节点结构/正则合法性/std::regex 不兼容黑名单/ReDoS 启发式/译文问句风格
 import json, re, sys
 
 sys.stdout.reconfigure(encoding="utf-8")

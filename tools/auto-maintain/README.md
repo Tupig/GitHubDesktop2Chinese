@@ -82,7 +82,7 @@ node src/index.js check extract --keep-js
 
 工作流位于 `../../.github/workflows/ghdesktop2chinese.yml`（仓库根目录）：
 
-- **触发**：每日定时（北京时间 10:00）+ 手动 `workflow_dispatch` 选择 `type=auto` 或 `type=maintain`
+- **触发**：push `main` + 每日定时（北京时间 10:00）+ 手动 `workflow_dispatch` 选择 `type=auto` 或 `type=maintain`
 - **流程**：查询最新版本 → 恢复缓存（安装包 + 提取结果）→ 跑 `check extract` → 生成报告 → 创建/更新 `auto-maintain` 标签的 Issue
 - **自动关 Issue**：当失效项降为 0 时，自动关闭历史维护 Issue
 - **不自动合并**：所有映射改动仍需人工确认，避免破坏 GitHub Desktop
