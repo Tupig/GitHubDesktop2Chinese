@@ -1,6 +1,7 @@
 # localization.json 数据质量校验(工作流 json-quality job 调用; 自 YAML 外置, 行为不变)
 # 检查项: 草稿占位符/节点结构/正则合法性/std::regex 不兼容黑名单/ReDoS 启发式/译文问句风格
 import json, re, sys
+from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -25,11 +26,13 @@ for key in ["main", "renderer", "main_dev", "renderer_dev"]:
         errors.append(f"{key} 应为数组, 实际为 {type(data[key]).__name__}")
 
 # std::regex 不兼容语法黑名单: 与 tools/auto-maintain 共用单一事实来源
+# 路径按脚本位置推导(.github/scripts -> 仓库根), 不依赖当前工作目录
+BLACKLIST_PATH = Path(__file__).resolve().parents[2] / "tools" / "auto-maintain" / "regex-blacklist.json"
 try:
-    with open("tools/auto-maintain/regex-blacklist.json", encoding="utf-8") as f:
+    with open(BLACKLIST_PATH, encoding="utf-8") as f:
         blacklist = [(r["regex"], r["why"]) for r in json.load(f)["rules"]]
 except (OSError, ValueError, KeyError, TypeError) as e:
-    errors.append(f"无法加载黑名单规则 tools/auto-maintain/regex-blacklist.json: {e}")
+    errors.append(f"无法加载黑名单规则 {BLACKLIST_PATH}: {e}")
     blacklist = []
 
 def check_array(name, arr):

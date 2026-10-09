@@ -137,6 +137,125 @@ BOOL WINAPI ConsoleHandler(DWORD dwCtrlType) {
 #endif // _WIN32
 
 
+// ── ProcessJsFile 辅助(N2 拆分): 占位符回填 / select 段处理 ──
+enum PlaceholderFillResult {
+    kPlaceholderPatternMiss = 0, // 第三参数在全文未命中 → 调用方跳过该条
+    kPlaceholderLeftover = 1,    // 回填后仍残留 #{n} → 调用方跳过该条
+    kPlaceholderFilled = 2,      // 回填成功
+};
+
+// 在全文查找第三参数(pattern3)首个匹配, 用捕获组逐字面回填 translation 中的 #{%d}; 返回回填状态
+static int FillPlaceholders(const std::string& js_str, const std::string& pattern3_str, std::string& translation) {
+    std::regex pattern3(pattern3_str, std::regex::optimize);
+    std::sregex_iterator it = std::sregex_iterator(js_str.begin(), js_str.end(), pattern3);
+    if(it == std::sregex_iterator()) {
+        return kPlaceholderPatternMiss;
+    }
+    const std::smatch& match = *it;
+    for(size_t i = 1; i < match.size(); i++) {
+        if(!match[i].matched) continue;
+        // 逐字面查找 #{i} 并回填; 捕获文本先转义 $, 防止其作为 format 串时 $&/$n 被展开
+        const std::string ph = "#{" + std::to_string(i) + "}";
+        const std::string val = EscapeDollar(match[i].str());
+        size_t pos = 0;
+        while((pos = translation.find(ph, pos)) != std::string::npos) {
+            translation.replace(pos, ph.size(), val);
+            pos += val.size();
+        }
+    }
+    // 捕获组数不足导致的残留占位符若写入 JS 会造成语法破坏, 调用方必须跳过该条
+    static const std::regex leftover_ph(R"(#\{\d+\})", std::regex::optimize);
+    if(std::regex_search(translation, leftover_ph)) {
+        return kPlaceholderLeftover;
+    }
+    return kPlaceholderFilled;
+}
+
+// select 段处理(ProcessJsFile 辅助): 解析 replace 行并按模式执行失效检测/交互替换
+// fileTag 由调用方按 replaceFile 精确匹配后传入; 无效行跳过并告警
+static void ApplySelectForFile(const char* logTag, const json& sel, const std::string& selKey,
+                               std::string& js_str, int& invalid_count) {
+    // 拿到替换项，双层容器 (手动解析: 跳过缺列/非字符串的坏行, 防止 get 抛异常中断整个 select 段)
+    std::vector<std::vector<std::string>> replaces;
+    if(sel.contains("replace") && sel.at("replace").is_array()) {
+        for(const auto& row : sel.at("replace")) {
+            std::vector<std::string> vrow;
+            bool bad = !row.is_array() || row.size() < 2;
+            if(!bad) {
+                for(const auto& e : row) {
+                    if(!e.is_string()) { bad = true; break; }
+                    vrow.push_back(e.get<std::string>());
+                }
+            }
+            if(bad || vrow.size() < 2) {
+                spdlog::warn("[select {}] 跳过格式无效的替换行: {}", logTag, selKey);
+                continue;
+            }
+            replaces.push_back(std::move(vrow));
+        }
+    }
+    if(_debug_invalid_check_mode) { // 开启了失效项检测
+        // 遍历循环外层替换项
+        for(auto& v_item : replaces) {
+            if(v_item.size() < 2) continue; // F2 防御: 解析已过滤, 此处兜底防越界
+            // 如果此替换字符串第一个是空字符串，如果是空 则跳出此次循环
+            std::string rege = v_item[0];
+            if(rege.empty() || rege == "\"\"") {
+                continue;
+            }
+            std::regex pattern(rege, std::regex::optimize);
+            // 搜索第一项 是否存在
+            if(!std::regex_search(js_str, pattern)) {
+                spdlog::warn("[select {}] 检测到失效项: {}", logTag, rege.c_str());
+                invalid_count++;
+            }
+            //如果二层数组字符串有三项
+            if(v_item.size() >= 3) {
+                std::regex pattern3(v_item[2], std::regex::optimize);
+                // 搜索第三项是否存在
+                if(!std::regex_search(js_str, pattern3)) {
+                    spdlog::warn("[select {} 3] 检测到失效项: {}", logTag, v_item[2].c_str());
+                    invalid_count++;
+                }
+            }
+        }
+    }
+    else {  // 正常替换
+        // 询问提示 输出json中的输出提示字符串
+        spdlog::info(">>>>>> {}", sel.value("tooltip", std::string()));
+        // 读取用户输入
+        if(utils::ReadUserInput_bool({ "n","y" }, 1)) {
+            // 循环两层数组的外层数组
+            for(auto& v_item : replaces) {
+                if(v_item.size() < 2) continue; // F2 防御: 解析已过滤, 此处兜底防越界
+                // 如果此替换字符串第一个是空字符串，如果是空 则跳出此次循环
+                std::string rege = v_item[0];
+                if(rege.empty() || rege == "\"\"") {
+                    continue;
+                }
+                std::regex pattern(rege, std::regex::optimize);
+                // 如果有第三个字符串
+                if(v_item.size() >= 3) {
+                    // 预备用第三个字符串查找关键字 用来替换第二个字符串
+                    std::string translation = v_item[1];
+                    const int fill = FillPlaceholders(js_str, v_item[2], translation);
+                    if(fill == kPlaceholderPatternMiss) {
+                        spdlog::warn("[select {} 3] 出现一处失效项,此项将跳过: {}", logTag, v_item[2].c_str());
+                        continue;
+                    }
+                    if(fill == kPlaceholderLeftover) {
+                        spdlog::warn("[select {}] 替换文本存在未回填的占位符, 此项将跳过: {}", logTag, v_item[2]);
+                        continue;
+                    }
+                    v_item[1] = std::move(translation);
+                }
+                // 最终替换
+                js_str = std::regex_replace(js_str, pattern, v_item[1]);
+            }
+        }
+    }
+}
+
 // ── 单文件处理(汉化替换 / 失效检测): main.js 与 renderer.js 共用的唯一实现(2026-10 审计 M2 去重) ──
 // 返回 0 成功; 返回 1 中止(错误已记录, 异常路径已从备份恢复, 调用方负责 PAUSE 与退出码)
 // invalid_count: 失效检测计数累计(用于 --invalidcheck 退出码)
@@ -196,37 +315,20 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
                 continue;
             }
             if(item.value().size() >= 3) {
-                // 在全文中查找数组第三项(pattern3), 用首个匹配的捕获组回填替换文本中的 #{} 占位符
+                // 第三参数(条件门) + #{} 占位符回填; 未命中/占位符残留均跳过该条(消息与拆分前一致)
                 std::string regex_str = item.value()[2].is_string() ? item.value()[2].get<std::string>() : std::string();
-                std::regex pattern3(regex_str, std::regex::optimize);
-                std::sregex_iterator it = std::sregex_iterator(js_str.begin(), js_str.end(), pattern3);
-                if(it != std::sregex_iterator()) {
-                    const std::smatch& match = *it;
-                    for(size_t i = 1; i < match.size(); i++) {
-                        if(!match[i].matched) continue;
-                        // 逐字面查找 #{i} 并回填; 捕获文本先转义 $, 防止其作为 format 串时 $&/$n 被展开
-                        const std::string ph = "#{" + std::to_string(i) + "}";
-                        const std::string val = EscapeDollar(match[i].str());
-                        std::string text = item.value()[1].get<std::string>();
-                        size_t pos = 0;
-                        while((pos = text.find(ph, pos)) != std::string::npos) {
-                            text.replace(pos, ph.size(), val);
-                            pos += val.size();
-                        }
-                        item.value()[1] = text;
+                std::string translation = item.value()[1].get<std::string>();
+                const int fill = FillPlaceholders(js_str, regex_str, translation);
+                if(fill != kPlaceholderFilled) {
+                    if(fill == kPlaceholderPatternMiss) {
+                        spdlog::warn("[{}] 出现一处失效项,此项将跳过: {}", logTag, regex_str);
                     }
-                    // 捕获组数不足导致的残留占位符若写入 JS 会造成语法破坏, 必须跳过该条
-                    static const std::regex leftover_ph(R"(#\{\d+\})", std::regex::optimize);
-                    if(std::regex_search(item.value()[1].get<std::string>(), leftover_ph)) {
+                    else {
                         spdlog::warn("[{}] 替换文本存在未回填的占位符, 此项将跳过: {}", logTag, regex_str);
-                        continue;
                     }
-                }
-                else {
-                    // 如果没有找到，则应该进行提示并跳过此项，以免进行错误的字符插入，造成程序无法打开
-                    spdlog::warn("[{}] 出现一处失效项,此项将跳过: {}", logTag, regex_str);
                     continue;
                 }
+                item.value()[1] = std::move(translation);
             }
 
             // 替换
@@ -257,100 +359,7 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
                 if(!item_select.value().is_object()) continue;
                 const auto& sel = item_select.value();
                 if(sel.value("replaceFile", std::string()) == fileTag && sel.value("enable", false)) {
-                    // 拿到替换项，双层容器 (手动解析: 跳过缺列/非字符串的坏行, 防止 get 抛异常中断整个 select 段)
-                    std::vector<std::vector<std::string>> replaces;
-                    if(sel.contains("replace") && sel.at("replace").is_array()) {
-                        for(const auto& row : sel.at("replace")) {
-                            std::vector<std::string> vrow;
-                            bool bad = !row.is_array() || row.size() < 2;
-                            if(!bad) {
-                                for(const auto& e : row) {
-                                    if(!e.is_string()) { bad = true; break; }
-                                    vrow.push_back(e.get<std::string>());
-                                }
-                            }
-                            if(bad || vrow.size() < 2) {
-                                spdlog::warn("[select {}] 跳过格式无效的替换行: {}", logTag, item_select.key());
-                                continue;
-                            }
-                            replaces.push_back(std::move(vrow));
-                        }
-                    }
-                    if(_debug_invalid_check_mode) { // 开启了失效项检测
-                        // 遍历循环外层替换项
-                        for(auto& v_item : replaces) {
-                            if(v_item.size() < 2) continue; // F2 防御: 解析已过滤, 此处兜底防越界
-                            // 如果此替换字符串第一个是空字符串，如果是空 则跳出此次循环
-                            std::string rege = v_item[0];
-                            if(rege.empty() || rege == "\"\"") {
-                                continue;
-                            }
-                            std::regex pattern(rege, std::regex::optimize);
-                            // 搜索第一项 是否存在
-                            if(!std::regex_search(js_str, pattern)) {
-                                spdlog::warn("[select {}] 检测到失效项: {}", logTag, rege.c_str());
-                                invalid_count++;
-                            }
-                            //如果二层数组字符串有三项
-                            if(v_item.size() >= 3) {
-                                std::regex pattern3(v_item[2], std::regex::optimize);
-                                // 搜索第三项是否存在
-                                if(!std::regex_search(js_str, pattern3)) {
-                                    spdlog::warn("[select {} 3] 检测到失效项: {}", logTag, v_item[2].c_str());
-                                    invalid_count++;
-                                }
-                            }
-                        }
-                    }
-                    else {  // 正常替换
-                        // 询问提示 输出json中的输出提示字符串
-                        spdlog::info(">>>>>> {}", sel.value("tooltip", std::string()));
-                        // 读取用户输入
-                        if(utils::ReadUserInput_bool({ "n","y" }, 1)) {
-                            // 循环两层数组的外层数组
-                            for(auto& v_item : replaces) {
-                                if(v_item.size() < 2) continue; // F2 防御: 解析已过滤, 此处兜底防越界
-                                // 如果此替换字符串第一个是空字符串，如果是空 则跳出此次循环
-                                std::string rege = v_item[0];
-                                if(rege.empty() || rege == "\"\"") {
-                                    continue;
-                                }
-                                std::regex pattern(rege, std::regex::optimize);
-                                // 如果有第三个字符串
-                                if(v_item.size() >= 3) {
-                                    // 预备用第三个字符串查找关键字 用来替换第二个字符串
-                                    std::regex pattern3(v_item[2], std::regex::optimize);
-                                    std::sregex_iterator it = std::sregex_iterator(js_str.begin(), js_str.end(), pattern3);
-                                    if(it != std::sregex_iterator()) {
-                                        const std::smatch& match = *it;
-                                        for(size_t i = 1; i < match.size(); i++) {
-                                            if(!match[i].matched) continue;
-                                            // 逐字面回填; 捕获文本转义 $ 防止 format 特殊序列展开
-                                            const std::string ph = "#{" + std::to_string(i) + "}";
-                                            const std::string val = EscapeDollar(match[i].str());
-                                            size_t pos = 0;
-                                            while((pos = v_item[1].find(ph, pos)) != std::string::npos) {
-                                                v_item[1].replace(pos, ph.size(), val);
-                                                pos += val.size();
-                                            }
-                                        }
-                                        static const std::regex leftover_ph(R"(#\{\d+\})", std::regex::optimize);
-                                        if(std::regex_search(v_item[1], leftover_ph)) {
-                                            spdlog::warn("[select {}] 替换文本存在未回填的占位符, 此项将跳过: {}", logTag, v_item[2]);
-                                            continue;
-                                        }
-                                    }
-                                    else {
-                                        // 如果没有找到，则应该进行提示并跳过此项，以免进行错误的字符插入，造成程序无法打开
-                                        spdlog::warn("[select {} 3] 出现一处失效项,此项将跳过: {}", logTag, v_item[2].c_str());
-                                        continue;
-                                    }
-                                }
-                                // 最终替换
-                                js_str = std::regex_replace(js_str, pattern, v_item[1]);
-                            }
-                        }
-                    }
+                    ApplySelectForFile(logTag, sel, item_select.key(), js_str, invalid_count);
                 }
             }
         }

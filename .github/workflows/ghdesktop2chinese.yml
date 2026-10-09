@@ -688,6 +688,18 @@ jobs:
             exit 1
           fi
           echo "发布版本: v$VER"
+          # 版本漂移检查: 并发排队时 version 在排队前计算, 发布时最新 tag 可能已前进;
+          # 正常情况下最新 tag 应为 v<x.y.(z-1)>, 不一致仅告警不阻断(记录实际对应关系)
+          LATEST_TAG="$(git ls-remote --tags --refs origin 'v*' | sed 's#.*refs/tags/##' | sort -V | tail -n1 || true)"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VER"
+          if [[ -n "$LATEST_TAG" && "$PATCH" -gt 0 ]]; then
+            EXPECT_PREV="v${MAJOR}.${MINOR}.$((PATCH-1))"
+            if [[ "$LATEST_TAG" != "$EXPECT_PREV" ]]; then
+              echo "::warning::版本漂移: 当前最新 tag 为 ${LATEST_TAG}, 预期 ${EXPECT_PREV}; 本次实际发布 v${VER}"
+            else
+              echo "版本链正常: 最新 tag ${LATEST_TAG} -> v${VER}"
+            fi
+          fi
 
       - name: 下载全部构建产物
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8

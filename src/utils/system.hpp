@@ -7,6 +7,7 @@
 #include <string>
 #include <optional>
 #include <utility>
+#include <algorithm>
 #include <iostream>
 #include <cstdlib>
 #include "utils/encoding.hpp"
@@ -53,6 +54,11 @@ namespace utils {
         const size_t slashPos = raw.find('/');
         if(slashPos != std::string::npos) {
             raw = raw.substr(0, slashPos);
+        }
+        // 未加方括号的裸 IPv6(含两个及以上 ':')无法与 host:port 区分, 直接判无效,
+        // 强制使用 [addr]:port 形式(否则 "::1" 会被误解析为 host:"::" port:1)
+        if(!raw.empty() && raw.front() != '[' && std::count(raw.begin(), raw.end(), ':') >= 2) {
+            return {};
         }
         std::string host;
         std::string portStr;
