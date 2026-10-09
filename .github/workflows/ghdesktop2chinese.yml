@@ -16,17 +16,17 @@
 #
 # ── job 依赖关系 ─────────────────────────────────────────────
 #   version（版本解析，无依赖）
-#       ├── build（需 version，矩阵：windows-x64 / macos-x64 / macos-arm64 / linux-x64）
+#       ├── build（需 version，矩阵：windows-x64 / macos-universal / linux-x64）
 #       └── release（需 version + build 全平台产物）
 #   json-quality / tools-test / codeql / auto-maintain 相互独立、与上述并行
 #
 # ── 构建产物约定 ─────────────────────────────────────────────
 #   编译输出  Windows: build/Release/GitHubDesktop2Chinese.exe（MSVC 多配置生成器）
-#             macOS/Linux: build/GitHubDesktop2Chinese（单配置生成器）
+#             macOS: build/GitHubDesktop2Chinese（通用二进制: x86_64 + arm64, 静态链接 OpenSSL）
+#             Linux: build/GitHubDesktop2Chinese（单配置生成器）
 #   Artifact  GitHubDesktop2Chinese-<平台>-<版本号|SHA>
 #   发布资产  GitHubDesktop2Chinese.exe        — Windows x64（保留历史文件名，向后兼容）
-#             GitHubDesktop2Chinese-macos-x64  — macOS Intel
-#             GitHubDesktop2Chinese-macos-arm64 — macOS Apple Silicon (M 系列)
+#             GitHubDesktop2Chinese-macos-universal — macOS 通用二进制（Intel + Apple Silicon）
 #             GitHubDesktop2Chinese-linux-x64  — Linux x86_64
 #             localization.json                — 汉化映射（最新）
 #
@@ -37,10 +37,11 @@
 #   push main     不发布，版本留空（产物名回退为 commit SHA）
 #
 # ── 稳定性设计 ───────────────────────────────────────────────
-#   - runner 固定版本（ubuntu-24.04 / windows-2025 / macos-15 / macos-15-intel），CodeQL v4
+#   - runner 固定版本（ubuntu-24.04 / windows-2025 / macos-15-intel），CodeQL v4
 #   - 所有 job 均设 timeout-minutes 上限
 #   - 网络/配置类关键步骤内置超时与自动重试
-#   - OpenSSL 静态库、GitHub Desktop 安装包与提取结果均走 actions/cache
+#   - macOS 通用二进制在 macos-15-intel 上交叉编译 arm64, 不依赖容量紧张的 arm64 runner;
+#     OpenSSL 双架构静态库、GitHub Desktop 安装包与提取结果均走 actions/cache
 
 name: GitHubDesktop2Chinese
 
@@ -191,12 +192,9 @@ jobs:
           - name: windows-x64
             os: windows-2025
             artifact: GitHubDesktop2Chinese.exe
-          - name: macos-x64
+          - name: macos-universal
             os: macos-15-intel
-            artifact: GitHubDesktop2Chinese-macos-x64
-          - name: macos-arm64
-            os: macos-15
-            artifact: GitHubDesktop2Chinese-macos-arm64
+            artifact: GitHubDesktop2Chinese-macos-universal
           - name: linux-x64
             os: ubuntu-24.04
             artifact: GitHubDesktop2Chinese-linux-x64
@@ -212,11 +210,73 @@ jobs:
         run: |
           dpkg -s libssl-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libssl-dev; }
 
-      - name: 安装 OpenSSL (macOS)
+      - name: 读取 OpenSSL 版本 (macOS)
         if: runner.os == 'macOS'
-        # brew 的 openssl 为 keg-only, 已安装时 list 成功; 否则安装
+        id: osslver
+        shell: bash
         run: |
-          brew list openssl@3 >/dev/null 2>&1 || brew list openssl >/dev/null 2>&1 || brew install openssl@3
+          set -euo pipefail
+          VER="$(brew info --json=v2 openssl@3 | jq -r '.formulae[0].versions.stable')"
+          [[ "$VER" =~ ^3\.[0-9]+\.[0-9]+$ ]] || { echo "::error::OpenSSL 版本号异常: $VER"; exit 1; }
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "静态库构建使用 OpenSSL $VER 源码"
+
+      - name: 缓存 macOS 静态 OpenSSL (x64 + arm64)
+        if: runner.os == 'macOS'
+        id: ossl-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/ossl-x64
+            ~/ossl-arm64
+          key: openssl-static-${{ steps.osslver.outputs.version }}-${{ runner.arch }}
+
+      - name: 构建 macOS 静态 OpenSSL (双架构, 缓存未命中时)
+        if: runner.os == 'macOS' && steps.ossl-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          OSSL_VER: ${{ steps.osslver.outputs.version }}
+        run: |
+          set -euo pipefail
+          URL="https://github.com/openssl/openssl/releases/download/openssl-${OSSL_VER}/openssl-${OSSL_VER}.tar.gz"
+          TMP="$(mktemp -d)"
+          echo "下载 $URL"
+          curl -fsSL --retry 3 --retry-delay 5 -o "$TMP/openssl.tar.gz" "$URL"
+          # arm64 产物最低支持 macOS 11; 双架构部署目标一致, 保证通用二进制最低版本统一
+          export MACOSX_DEPLOYMENT_TARGET=11.0
+          build_ossl() {
+            local arch="$1" target="$2"
+            local src="$TMP/openssl-${OSSL_VER}-$arch" prefix="$HOME/ossl-$arch"
+            mkdir -p "$src"
+            # 每个架构独立解压源码树, 避免异构配置产物互相污染(perlasm 生成的汇编按架构不同)
+            tar -xzf "$TMP/openssl.tar.gz" -C "$src" --strip-components=1
+            (
+              cd "$src"
+              # no-zlib: 静态链接后不引入 zlib 依赖(仅影响已废弃的 TLS 压缩, 不影响正常 HTTPS)
+              ./Configure "$target" no-shared no-tests no-apps no-zlib --prefix="$prefix" --openssldir="$prefix/ssl"
+              make -j"$(sysctl -n hw.ncpu)" build_libs
+              make install_dev
+            )
+            [[ -f "$prefix/lib/libssl.a" && -f "$prefix/lib/libcrypto.a" ]] || { echo "::error::OpenSSL $arch 静态库缺失"; exit 1; }
+            echo "OpenSSL $arch 完成: $prefix"
+          }
+          build_ossl x64 darwin64-x86_64-cc
+          build_ossl arm64 darwin64-arm64-cc
+
+      - name: 组装 macOS 通用静态 OpenSSL
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          UNIV="$HOME/ossl-univ"
+          rm -rf "$UNIV"
+          mkdir -p "$UNIV/lib"
+          # 头文件两架构一致, 取 x64 一份
+          cp -R "$HOME/ossl-x64/include" "$UNIV/include"
+          for lib in libssl libcrypto; do
+            lipo -create "$HOME/ossl-x64/lib/$lib.a" "$HOME/ossl-arm64/lib/$lib.a" -output "$UNIV/lib/$lib.a"
+            lipo -info "$UNIV/lib/$lib.a"
+          done
 
       - name: Configure CMake (Windows)
         if: runner.os == 'Windows'
@@ -242,9 +302,12 @@ jobs:
           VER="${VER:-ci-${GITHUB_SHA}}"
           EXTRA=()
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            # brew 的 openssl 为 keg-only, 不在默认搜索路径, 显式指定根目录
-            PREFIX="$(brew --prefix openssl@3 2>/dev/null || brew --prefix openssl 2>/dev/null || true)"
-            [[ -n "$PREFIX" ]] && EXTRA+=("-DOPENSSL_ROOT_DIR=$PREFIX")
+            # 通用二进制(Intel + Apple Silicon): 交叉编译 arm64 + 静态链接通用 OpenSSL, 产物自包含不依赖 brew;
+            # 部署目标 11.0 为 arm64 产物下限, 双架构一致
+            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64")
+            EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0")
+            EXTRA+=("-DOPENSSL_ROOT_DIR=$HOME/ossl-univ")
+            EXTRA+=("-DOPENSSL_USE_STATIC_LIBS=TRUE")
           fi
           for attempt in 1 2 3; do
             if cmake -B build -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DGitHubActions=1 "-DFILE_VERSION=$VER" ${EXTRA[@]+"${EXTRA[@]}"}; then
@@ -273,6 +336,8 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             BIN="build/Release/${EXE_NAME}"
           else
+            # macOS 通用二进制在本 Intel runner 上以 x86_64 切片原生跑功能测试;
+            # arm64 切片由后续架构/自包含断言校验(同一 SDK/clang 交叉编译)
             BIN="build/GitHubDesktop2Chinese"
           fi
           [[ -f "$BIN" ]] || { echo "::error::未找到构建产物 $BIN"; exit 1; }
@@ -305,6 +370,26 @@ jobs:
             exit 1
           fi
           grep -q "renderer.js 文件汉化结束" <<< "$OUT" || { echo "$OUT"; echo "::error::流程未到达 renderer 汉化完成"; exit 1; }
+          echo "OK"
+
+      - name: macOS 架构与自包含断言
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="build/GitHubDesktop2Chinese"
+          echo "== 架构检查(lipo) =="
+          INFO="$(lipo -info "$BIN")"
+          echo "$INFO"
+          grep -q "x86_64" <<< "$INFO" || { echo "::error::产物缺少 x86_64 架构"; exit 1; }
+          grep -q "arm64" <<< "$INFO" || { echo "::error::产物缺少 arm64 架构"; exit 1; }
+          echo "== 自包含检查(不得依赖非系统动态库) =="
+          otool -L "$BIN"
+          # universal 二进制的 otool 输出含 "(architecture xxx):" 头行, 只检查 tab/空格缩进的依赖条目行
+          if otool -L "$BIN" | grep '^[[:space:]]' | grep -Ev '(/usr/lib/|/System/)'; then
+            echo "::error::产物仍依赖非系统动态库(如 brew 路径), 自包含校验失败"
+            exit 1
+          fi
           echo "OK"
 
       - name: 准备发布文件名
@@ -764,7 +849,7 @@ jobs:
       - name: 下载全部构建产物
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          # GitHubDesktop2Chinese-<平台>-<版本|SHA>（windows-x64 / macos-x64 / macos-arm64 / linux-x64）
+          # GitHubDesktop2Chinese-<平台>-<版本|SHA>（windows-x64 / macos-universal / linux-x64）
           pattern: ${{ env.ARTIFACT_PREFIX }}-*-${{ needs.version.outputs.version || github.sha }}
           path: release/
           merge-multiple: true
@@ -787,8 +872,7 @@ jobs:
             echo ""
             echo "自动构建产物："
             echo "- \`GitHubDesktop2Chinese.exe\` — Windows x64（64 位 Windows）"
-            echo "- \`GitHubDesktop2Chinese-macos-x64\` — macOS Intel 芯片"
-            echo "- \`GitHubDesktop2Chinese-macos-arm64\` — macOS Apple 芯片（M 系列）"
+            echo "- \`GitHubDesktop2Chinese-macos-universal\` — macOS 通用二进制（Intel 与 Apple Silicon 通用）"
             echo "- \`GitHubDesktop2Chinese-linux-x64\` — Linux x86_64"
             echo "- \`localization.json\` — 汉化映射（最新）"
             echo ""
