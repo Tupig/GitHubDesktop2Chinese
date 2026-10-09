@@ -164,7 +164,7 @@ cmake --build build --config Release
 | 工具自检 | PR（目标 main）/ push `main` / tag `v*` / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 |
 | CodeQL 扫描 | PR（目标 main）/ push `main` / 手动 auto、security | C/C++ 安全扫描 |
 | 失效检测 + 候选提取 | push `main` / 定时（每日）/ 手动 auto、maintain | 检测失效映射、提取未翻译候选，自动创建/关闭 Issue |
-| Release 发布 | tag `v*` / 定时（有变更时）/ 手动 auto（仅 main, 有变更）、release（仅 main） | 自动升级版本号，发布多平台产物 + localization.json |
+| Release 发布 | push `main`（有变更时）/ tag `v*` / 定时（有变更时）/ 手动 auto（仅 main, 有变更）、release（仅 main） | 自动升级版本号，发布多平台产物 + localization.json |
 
 > 手动触发的 `type` 仅执行对应子集；`version` 为可选覆盖——**留空即自动升级补丁号**（如 `1.2.24 → 1.2.25`），填写时须为 `x.y.z` 纯数字，否则 CI 在版本号校验处直接失败。
 
@@ -182,7 +182,7 @@ npm run all        # 失效检测 + 未翻译候选提取, 报告写入系统临
 > **定时与发布规则**
 > - **定时调度**：每日北京时间 10:00（UTC 02:00）自动执行构建与自动维护。
 > - **变更检测**：以最新 `v*` tag 为基准，检测 `json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 的实际变更。
-> - **条件发布**：定时与手动 `auto` 仅在检测到上述变更时发布新版本（补丁号 +1）；无变更自动跳过，避免空版本。`type=release` 与推送 tag 始终发布。
+> - **条件发布**：push `main`、定时与手动 `auto` 仅在检测到上述变更时发布新版本（补丁号 +1）；无变更自动跳过，避免空版本。`type=release` 与推送 tag 始终发布。
 
 ## 📁 项目结构
 

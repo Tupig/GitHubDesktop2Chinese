@@ -3,7 +3,7 @@
 #
 # ── 触发矩阵（自动 + 手动；与各 job 的 if 条件逐项对应）──────
 #   触发场景               构建  质量/自检  CodeQL  维护  发布
-#   push main              ✓    ✓         ✓      ✓     -
+#   push main              ✓    ✓         ✓      ✓     ✓（仅构建相关变更, 补丁号+1）
 #   push tag v*            ✓    ✓         -(注1) -     ✓（版本=tag）
 #   PR（目标 main）         ✓    ✓         ✓      -     -
 #   定时 每日 UTC 02:00     ✓    ✓         -(注2) ✓     ✓（仅构建相关变更, 补丁号+1）
@@ -44,7 +44,7 @@
 #   tag 触发     取 tag 版本（v1.2.5 → 1.2.5）
 #   手动 version 使用输入值
 #   auto/release/定时 未输入时自动升级补丁号（最新 v* tag +1）
-#   push main     不发布，版本留空（产物名回退为 commit SHA）
+#   push main     有构建相关变更时自动补丁号+1 发布；无变更不发布（版本留空, 产物名回退 commit SHA）
 #
 # ── 稳定性设计 ───────────────────────────────────────────────
 #   - runner 固定版本（ubuntu-24.04 / windows-2025 / macos-15-intel），CodeQL v4
@@ -60,7 +60,7 @@ name: GitHubDesktop2Chinese
 
 # 触发配置（执行矩阵见文件头注释；各 job 的 if 条件与矩阵逐项对应）
 on:
-  # 推送 main（校验, 不发布）/ 推送 tag v*（构建并发布, 版本号取 tag）
+  # 推送 main（校验；有构建相关变更时自动补丁发版）/ 推送 tag v*（构建并发布, 版本号取 tag）
   push:
     branches:
       - main
@@ -150,19 +150,20 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "自 ${LATEST_TAG} 以来无构建相关变更，auto/定时模式将跳过发布"
+            echo "自 ${LATEST_TAG} 以来无构建相关变更，push main/auto/定时模式将跳过发布"
           fi
 
           if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == v* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
             echo "使用 tag 版本: $VERSION"
-          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" || "${GITHUB_EVENT_NAME}" == "schedule" ]]; then
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" || "${GITHUB_EVENT_NAME}" == "schedule" || "${GITHUB_EVENT_NAME}" == "push" ]]; then
             INPUT="$INPUT_VERSION"
             TYPE="$INPUT_TYPE"
             if [[ -n "$INPUT" ]]; then
               VERSION="${INPUT#v}"
               echo "使用手动输入版本: $VERSION"
-            elif [[ "$TYPE" == "auto" || "$TYPE" == "release" || "${GITHUB_EVENT_NAME}" == "schedule" ]]; then
+            # push main: 仅当存在构建相关变更时自动补丁发版(无变更不发布, 版本留空回退 SHA)
+            elif [[ "$TYPE" == "auto" || "$TYPE" == "release" || "${GITHUB_EVENT_NAME}" == "schedule" || ( "${GITHUB_EVENT_NAME}" == "push" && "$BUILD_CHANGES" -gt 0 ) ]]; then
               LATEST="$LATEST_TAG"
               if [[ -z "$LATEST" ]]; then
                 echo "本仓库暂无 v* tag，回落上游最新版本"
@@ -197,7 +198,7 @@ jobs:
   # ═════════════════════════════════════════════════
   json-quality:
     name: localization.json 质量校验
-    # push main/tag 分支: 发布(release needs 本任务)在推 tag 场景同样受本质量门约束; push main 仅验证不发布
+    # release needs 本任务: tag 推送与 push main 自动发版均受本质量门约束
     if: |
       github.event_name == 'pull_request' ||
       github.event_name == 'schedule' ||
@@ -216,7 +217,7 @@ jobs:
   # ═════════════════════════════════════════════════
   tools-test:
     name: 自动维护工具自检
-    # push main/tag 分支: 保证发布(release needs 本任务)前工具自检已通过; push main 仅验证不发布
+    # release needs 本任务: 保证 tag 推送与 push main 自动发版前工具自检已通过
     if: |
       github.event_name == 'pull_request' ||
       github.event_name == 'schedule' ||
@@ -631,7 +632,7 @@ jobs:
             await run({ github, context, core });
 
   # ═════════════════════════════════════════════════
-  # 6. 发布 Release（tag v* / 手动 auto|release / 定时且有变更）
+  # 6. 发布 Release（push main 有变更 / tag v* / 手动 auto|release / 定时且有变更）
   #    依赖 build 产物与 version 版本号
   # ═════════════════════════════════════════════════
   release:
@@ -639,9 +640,10 @@ jobs:
     # json-quality/tools-test 与 release 同属任务门: 发布前强制过质量门与工具自检
     # (二者 if 已覆盖 push tag / dispatch release / schedule 分支, 不会出现 needs 悬空)
     needs: [version, build, json-quality, tools-test]
-    # 发布边界: 手动 auto/release 仅限 main 触发（防从特性分支误发布）; tag 推送与定时不受此限
+    # 发布边界: push main 仅在存在构建相关变更时自动补丁发版; 手动 auto/release 仅限 main(防特性分支误发布)
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.version.outputs.changed == 'true') ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.type == 'release') ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.type == 'auto' && needs.version.outputs.changed == 'true') ||
       (github.event_name == 'schedule' && needs.version.outputs.changed == 'true')

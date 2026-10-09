@@ -70,7 +70,7 @@
 
 ## 发布说明（docs/ReleaseBody.md）
 
-`json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 任一变更都会在每日定时或手动 `auto` 时触发新版本发布（补丁号 +1）。CI 发布时从 `docs/ReleaseBody.md` 中提取**行尾含全角版本标记**（如 `（v1.2.23）`）的变更行拼进 Release 说明：
+`json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 任一变更都会在 push main / 每日定时 / 手动 `auto` 时自动触发新版本发布（补丁号 +1）。CI 发布时从 `docs/ReleaseBody.md` 中提取**行尾含全角版本标记**（如 `（v1.2.23）`）的变更行拼进 Release 说明：
 
 - 在「本次更新」区域追加一行变更描述，行尾标注**下一个发布版本**的全角括号标记（用 `git tag --sort=-v:refname | head -1` 查当前最新 tag，版本号 +1）。
 - 未标注或版本号未命中的行不会出现在任何 Release 中，也**不阻断**发布（说明里会显示「未找到变更记录」提示）。
