@@ -14,11 +14,17 @@
 #                     maintain 仅失效检测/候选提取
 #                     release  构建 + 发布（始终发布）
 #
-# ── job 依赖关系 ─────────────────────────────────────────────
-#   version（版本解析，无依赖）
-#       ├── build（需 version，矩阵：windows-x64 / macos-universal / linux-x64）
-#       └── release（需 version + build 全平台产物）
-#   json-quality / tools-test / codeql / auto-maintain 相互独立、与上述并行
+# ── jobs 总览与依赖 ─────────────────────────────────────────
+#   0. version        解析版本号与变更检测（构建/发布类任务的前置）
+#   1. json-quality   localization.json 数据质量门
+#   2. tools-test     自动维护工具自检门（语法 + 单元测试）
+#   3. codeql         C/C++ 安全扫描门
+#   4. build          三平台构建矩阵 + 产物功能测试
+#   5. auto-maintain  失效检测 + 未翻译候选提取（定时 / 手动）
+#   6. release        汇总产物并发布
+#
+#   job 依赖: build←version；release←version+build+json-quality+tools-test
+#             json-quality / tools-test / codeql / auto-maintain 相互独立，与 build 并行
 #
 # ── 构建产物约定 ─────────────────────────────────────────────
 #   编译输出  Windows: build/Release/GitHubDesktop2Chinese.exe（MSVC 多配置生成器）
@@ -78,11 +84,13 @@ concurrency:
   # PR 场景取消陈旧构建(同 PR 连续 push 只保留最新); main/tag/定时发布不取消
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# 默认最小权限：读代码；issues 供自动维护写报告；security-events 供 CodeQL 上传结果
 permissions:
   contents: read
   issues: write
   security-events: write
 
+# 全局变量：构建类型 / 可执行文件名 / 产物名前缀
 env:
   BUILD_TYPE: Release
   EXE_NAME: GitHubDesktop2Chinese.exe
@@ -172,260 +180,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   # ═════════════════════════════════════════════════
-  # 1. 构建矩阵（Windows x64 / macOS Intel / macOS Apple Silicon / Linux x64）
-  #    每平台编译 + 产物功能测试（--help / 非法参数拒绝 / 中文路径完整流程）
-  #    触发：push main / tag / PR / 定时 / 手动(auto/build/release)
-  # ═════════════════════════════════════════════════
-  build:
-    name: 构建 (${{ matrix.name }})
-    needs: version
-    if: |
-      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
-      github.event_name == 'pull_request' ||
-      github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'build' || inputs.type == 'release'))
-    strategy:
-      # 单平台失败不取消其余平台: 一次运行尽可能拿到全部平台结果
-      fail-fast: false
-      matrix:
-        include:
-          - name: windows-x64
-            os: windows-2025
-            artifact: GitHubDesktop2Chinese.exe
-          - name: macos-universal
-            os: macos-15-intel
-            artifact: GitHubDesktop2Chinese-macos-universal
-          - name: linux-x64
-            os: ubuntu-24.04
-            artifact: GitHubDesktop2Chinese-linux-x64
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
-    env:
-      RELEASE_VERSION: ${{ needs.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: 安装 OpenSSL (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          dpkg -s libssl-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libssl-dev; }
-
-      - name: 读取 OpenSSL 版本 (macOS)
-        if: runner.os == 'macOS'
-        id: osslver
-        shell: bash
-        run: |
-          set -euo pipefail
-          VER="$(brew info --json=v2 openssl@3 | jq -r '.formulae[0].versions.stable')"
-          [[ "$VER" =~ ^3\.[0-9]+\.[0-9]+$ ]] || { echo "::error::OpenSSL 版本号异常: $VER"; exit 1; }
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "静态库构建使用 OpenSSL $VER 源码"
-
-      - name: 还原 macOS 静态 OpenSSL 缓存 (x64 + arm64)
-        if: runner.os == 'macOS'
-        id: ossl-restore
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: |
-            ~/ossl-x64
-            ~/ossl-arm64
-          key: openssl-static-${{ steps.osslver.outputs.version }}-${{ runner.arch }}
-
-      - name: 构建 macOS 静态 OpenSSL (双架构, 缓存未命中时)
-        id: ossl-build
-        if: runner.os == 'macOS' && steps.ossl-restore.outputs.cache-hit != 'true'
-        shell: bash
-        env:
-          OSSL_VER: ${{ steps.osslver.outputs.version }}
-        run: |
-          set -euo pipefail
-          URL="https://github.com/openssl/openssl/releases/download/openssl-${OSSL_VER}/openssl-${OSSL_VER}.tar.gz"
-          TMP="$(mktemp -d)"
-          echo "下载 $URL"
-          curl -fsSL --retry 3 --retry-delay 5 -o "$TMP/openssl.tar.gz" "$URL"
-          # arm64 产物最低支持 macOS 11; 双架构部署目标一致, 保证通用二进制最低版本统一
-          export MACOSX_DEPLOYMENT_TARGET=11.0
-          build_ossl() {
-            local arch="$1" target="$2"
-            local src="$TMP/openssl-${OSSL_VER}-$arch" prefix="$HOME/ossl-$arch"
-            mkdir -p "$src"
-            # 每个架构独立解压源码树, 避免异构配置产物互相污染(perlasm 生成的汇编按架构不同)
-            tar -xzf "$TMP/openssl.tar.gz" -C "$src" --strip-components=1
-            (
-              cd "$src"
-              # no-zlib: 静态链接后不引入 zlib 依赖(仅影响已废弃的 TLS 压缩, 不影响正常 HTTPS)
-              ./Configure "$target" no-shared no-tests no-apps no-zlib --prefix="$prefix" --openssldir="$prefix/ssl"
-              make -j"$(sysctl -n hw.ncpu)" build_libs
-              make install_dev
-            )
-            [[ -f "$prefix/lib/libssl.a" && -f "$prefix/lib/libcrypto.a" ]] || { echo "::error::OpenSSL $arch 静态库缺失"; exit 1; }
-            echo "OpenSSL $arch 完成: $prefix"
-          }
-          build_ossl x64 darwin64-x86_64-cc
-          build_ossl arm64 darwin64-arm64-cc
-
-      - name: 保存 macOS 静态 OpenSSL 缓存
-        # always(): 后续步骤(功能测试等)失败时也保住已构建的静态库, 避免下次运行重复 8 分钟构建;
-        # 仅当本次确实执行且成功构建时保存(命中缓存或构建失败则不存)
-        if: always() && runner.os == 'macOS' && steps.ossl-build.outcome == 'success'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: |
-            ~/ossl-x64
-            ~/ossl-arm64
-          key: openssl-static-${{ steps.osslver.outputs.version }}-${{ runner.arch }}
-
-      - name: 组装 macOS 通用静态 OpenSSL
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          UNIV="$HOME/ossl-univ"
-          rm -rf "$UNIV"
-          mkdir -p "$UNIV/lib"
-          # 头文件两架构一致, 取 x64 一份
-          cp -R "$HOME/ossl-x64/include" "$UNIV/include"
-          for lib in libssl libcrypto; do
-            lipo -create "$HOME/ossl-x64/lib/$lib.a" "$HOME/ossl-arm64/lib/$lib.a" -output "$UNIV/lib/$lib.a"
-            lipo -info "$UNIV/lib/$lib.a"
-          done
-
-      - name: Configure CMake (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          chcp 65001 | Out-Null
-          $ver = if ($env:RELEASE_VERSION) { "v$env:RELEASE_VERSION" } else { "ci-${{ github.sha }}" }
-          # CMake 配置含第三方库下载，网络抖动时自动重试
-          for ($attempt = 1; $attempt -le 3; $attempt++) {
-            cmake -B build -A x64 -DGitHubActions=1 "-DFILE_VERSION=$ver"
-            if ($LASTEXITCODE -eq 0) { break }
-            if ($attempt -ge 3) { Write-Error "CMake 配置连续失败 3 次"; exit 1 }
-            Write-Warning "CMake 配置失败(第 $attempt 次)，15 秒后重试"
-            Start-Sleep -Seconds 15
-          }
-
-      - name: Configure CMake (macOS/Linux)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          VER="${RELEASE_VERSION:+v$RELEASE_VERSION}"
-          VER="${VER:-ci-${GITHUB_SHA}}"
-          EXTRA=()
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            # 通用二进制(Intel + Apple Silicon): 交叉编译 arm64 + 静态链接通用 OpenSSL, 产物自包含不依赖 brew;
-            # 部署目标 11.0 为 arm64 产物下限, 双架构一致
-            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64")
-            EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0")
-            EXTRA+=("-DOPENSSL_ROOT_DIR=$HOME/ossl-univ")
-            EXTRA+=("-DOPENSSL_USE_STATIC_LIBS=TRUE")
-          fi
-          for attempt in 1 2 3; do
-            if cmake -B build -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DGitHubActions=1 "-DFILE_VERSION=$VER" ${EXTRA[@]+"${EXTRA[@]}"}; then
-              break
-            fi
-            [[ $attempt -ge 3 ]] && { echo "::error::CMake 配置连续失败 3 次"; exit 1; }
-            echo "::warning::CMake 配置失败(第 $attempt 次)，15 秒后重试"
-            sleep 15
-          done
-
-      - name: Build
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cmake --build build --config "$BUILD_TYPE"
-          else
-            JOBS="$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
-            cmake --build build --config "$BUILD_TYPE" -j "$JOBS"
-          fi
-
-      - name: 产物功能测试
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            BIN="build/Release/${EXE_NAME}"
-          else
-            # macOS 通用二进制在本 Intel runner 上以 x86_64 切片原生跑功能测试;
-            # arm64 切片由后续架构/自包含断言校验(同一 SDK/clang 交叉编译)
-            BIN="build/GitHubDesktop2Chinese"
-          fi
-          [[ -f "$BIN" ]] || { echo "::error::未找到构建产物 $BIN"; exit 1; }
-
-          echo "== 测试1: --help 应 exit 0 =="
-          "$BIN" --help > /dev/null
-          echo "OK"
-
-          echo "== 测试2: 非法参数应被拒绝(exit!=0) =="
-          if "$BIN" thisargdoesnotexist > /dev/null 2>&1; then
-            echo "::error::非法参数未被拒绝"
-            exit 1
-          fi
-          echo "OK"
-
-          echo "== 测试3: 中文路径 + EOF 完整汉化流程应 exit 0 =="
-          FIXTURE="$RUNNER_TEMP/汉化测试目录"
-          rm -rf "$FIXTURE"
-          mkdir -p "$FIXTURE"
-          printf '<html></html>' > "$FIXTURE/index.html"
-          printf '// fixture main\n' > "$FIXTURE/main.js"
-          printf '// fixture renderer\n' > "$FIXTURE/renderer.js"
-          set +e
-          OUT="$(echo "" | "$BIN" -g "$FIXTURE" --nopause 2>&1)"
-          CODE=$?
-          set -e
-          if [[ $CODE -ne 0 ]]; then
-            echo "$OUT"
-            echo "::error::完整流程 exit=$CODE"
-            exit 1
-          fi
-          grep -q "renderer.js 文件汉化结束" <<< "$OUT" || { echo "$OUT"; echo "::error::流程未到达 renderer 汉化完成"; exit 1; }
-          echo "OK"
-
-      - name: macOS 架构与自包含断言
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          BIN="build/GitHubDesktop2Chinese"
-          echo "== 架构检查(lipo) =="
-          INFO="$(lipo -info "$BIN")"
-          echo "$INFO"
-          grep -q "x86_64" <<< "$INFO" || { echo "::error::产物缺少 x86_64 架构"; exit 1; }
-          grep -q "arm64" <<< "$INFO" || { echo "::error::产物缺少 arm64 架构"; exit 1; }
-          echo "== 自包含检查(不得依赖非系统动态库) =="
-          otool -L "$BIN"
-          # universal 二进制的 otool 输出含 "(architecture xxx):" 头行, 只检查 tab/空格缩进的依赖条目行
-          if otool -L "$BIN" | grep '^[[:space:]]' | grep -Ev '(/usr/lib/|/System/)'; then
-            echo "::error::产物仍依赖非系统动态库(如 brew 路径), 自包含校验失败"
-            exit 1
-          fi
-          echo "OK"
-
-      - name: 准备发布文件名
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cp "build/Release/${EXE_NAME}" "dist/${{ matrix.artifact }}"
-          else
-            cp build/GitHubDesktop2Chinese "dist/${{ matrix.artifact }}"
-            chmod +x "dist/${{ matrix.artifact }}"
-          fi
-          ls -l dist/
-
-      - name: 上传构建产物
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: ${{ env.ARTIFACT_PREFIX }}-${{ matrix.name }}-${{ needs.version.outputs.version || github.sha }}
-          if-no-files-found: error
-          path: dist/
-
-  # ═════════════════════════════════════════════════
-  # 2. localization.json 质量校验
+  # 1. localization.json 质量门（结构 / 正则安全 / 译文风格）
   # ═════════════════════════════════════════════════
   json-quality:
     name: localization.json 质量校验
@@ -555,7 +310,7 @@ jobs:
           PY
 
   # ═════════════════════════════════════════════════
-  # 3. 自动维护工具自检（语法 + 单元测试）
+  # 2. 自动维护工具自检门（语法 + 单元测试）
   # ═════════════════════════════════════════════════
   tools-test:
     name: 自动维护工具自检
@@ -623,7 +378,7 @@ jobs:
           "
 
   # ═════════════════════════════════════════════════
-  # 4. CodeQL 安全扫描（PR / push main / 手动 auto|security，不含定时以节省资源）
+  # 3. CodeQL 安全扫描门（PR / push main / 手动 auto|security；不含定时以节省资源）
   # ═════════════════════════════════════════════════
   codeql:
     name: CodeQL 安全扫描
@@ -661,6 +416,265 @@ jobs:
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           category: "/language:c-cpp"
+
+  # ═════════════════════════════════════════════════
+  # 4. 构建矩阵（windows-x64 / macos-universal / linux-x64）
+  #    每平台编译 + 产物功能测试（--help / 非法参数拒绝 / 中文路径完整流程）
+  #    macOS 为通用二进制：交叉编译 arm64 + 静态链接 OpenSSL，额外做架构/自包含断言
+  #    触发：push main|tag / PR / 定时 / 手动(auto|build|release)
+  # ═════════════════════════════════════════════════
+  build:
+    name: 构建 (${{ matrix.name }})
+    needs: version
+    if: |
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'build' || inputs.type == 'release'))
+    strategy:
+      # 单平台失败不取消其余平台: 一次运行尽可能拿到全部平台结果
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-2025
+            artifact: GitHubDesktop2Chinese.exe
+          - name: macos-universal
+            os: macos-15-intel
+            artifact: GitHubDesktop2Chinese-macos-universal
+          - name: linux-x64
+            os: ubuntu-24.04
+            artifact: GitHubDesktop2Chinese-linux-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      # ── 检出 ──
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # ── 平台依赖：Linux 系统 libssl-dev / macOS 双架构静态 OpenSSL（带缓存）──
+      - name: 安装 OpenSSL (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          dpkg -s libssl-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libssl-dev; }
+
+      - name: 读取 OpenSSL 版本 (macOS)
+        if: runner.os == 'macOS'
+        id: osslver
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="$(brew info --json=v2 openssl@3 | jq -r '.formulae[0].versions.stable')"
+          [[ "$VER" =~ ^3\.[0-9]+\.[0-9]+$ ]] || { echo "::error::OpenSSL 版本号异常: $VER"; exit 1; }
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "静态库构建使用 OpenSSL $VER 源码"
+
+      - name: 还原 macOS 静态 OpenSSL 缓存 (x64 + arm64)
+        if: runner.os == 'macOS'
+        id: ossl-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          # path/key 与下方「保存」步骤共用 YAML 锚点（单一维护点，防两处漂移）
+          path: &ossl_cache_paths |
+            ~/ossl-x64
+            ~/ossl-arm64
+          key: &ossl_cache_key openssl-static-${{ steps.osslver.outputs.version }}-${{ runner.arch }}
+
+      - name: 构建 macOS 静态 OpenSSL (双架构, 缓存未命中时)
+        id: ossl-build
+        if: runner.os == 'macOS' && steps.ossl-restore.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          OSSL_VER: ${{ steps.osslver.outputs.version }}
+        run: |
+          set -euo pipefail
+          URL="https://github.com/openssl/openssl/releases/download/openssl-${OSSL_VER}/openssl-${OSSL_VER}.tar.gz"
+          TMP="$(mktemp -d)"
+          echo "下载 $URL"
+          curl -fsSL --retry 3 --retry-delay 5 -o "$TMP/openssl.tar.gz" "$URL"
+          # arm64 产物最低支持 macOS 11; 双架构部署目标一致, 保证通用二进制最低版本统一
+          export MACOSX_DEPLOYMENT_TARGET=11.0
+          build_ossl() {
+            local arch="$1" target="$2"
+            local src="$TMP/openssl-${OSSL_VER}-$arch" prefix="$HOME/ossl-$arch"
+            mkdir -p "$src"
+            # 每个架构独立解压源码树, 避免异构配置产物互相污染(perlasm 生成的汇编按架构不同)
+            tar -xzf "$TMP/openssl.tar.gz" -C "$src" --strip-components=1
+            (
+              cd "$src"
+              # no-zlib: 静态链接后不引入 zlib 依赖(仅影响已废弃的 TLS 压缩, 不影响正常 HTTPS)
+              ./Configure "$target" no-shared no-tests no-apps no-zlib --prefix="$prefix" --openssldir="$prefix/ssl"
+              make -j"$(sysctl -n hw.ncpu)" build_libs
+              make install_dev
+            )
+            [[ -f "$prefix/lib/libssl.a" && -f "$prefix/lib/libcrypto.a" ]] || { echo "::error::OpenSSL $arch 静态库缺失"; exit 1; }
+            echo "OpenSSL $arch 完成: $prefix"
+          }
+          build_ossl x64 darwin64-x86_64-cc
+          build_ossl arm64 darwin64-arm64-cc
+
+      - name: 保存 macOS 静态 OpenSSL 缓存
+        # always(): 后续步骤(功能测试等)失败时也保住已构建的静态库, 避免下次运行重复 8 分钟构建;
+        # 仅当本次确实执行且成功构建时保存(命中缓存或构建失败则不存)
+        if: always() && runner.os == 'macOS' && steps.ossl-build.outcome == 'success'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: *ossl_cache_paths
+          key: *ossl_cache_key
+
+      - name: 组装 macOS 通用静态 OpenSSL
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          UNIV="$HOME/ossl-univ"
+          rm -rf "$UNIV"
+          mkdir -p "$UNIV/lib"
+          # 头文件两架构一致, 取 x64 一份
+          cp -R "$HOME/ossl-x64/include" "$UNIV/include"
+          for lib in libssl libcrypto; do
+            lipo -create "$HOME/ossl-x64/lib/$lib.a" "$HOME/ossl-arm64/lib/$lib.a" -output "$UNIV/lib/$lib.a"
+            lipo -info "$UNIV/lib/$lib.a"
+          done
+
+      # ── 配置：CMake 生成（失败自动重试 3 次）──
+      - name: 配置 CMake（Windows x64）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          chcp 65001 | Out-Null
+          $ver = if ($env:RELEASE_VERSION) { "v$env:RELEASE_VERSION" } else { "ci-${{ github.sha }}" }
+          # CMake 配置含第三方库下载，网络抖动时自动重试
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            cmake -B build -A x64 -DGitHubActions=1 "-DFILE_VERSION=$ver"
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -ge 3) { Write-Error "CMake 配置连续失败 3 次"; exit 1 }
+            Write-Warning "CMake 配置失败(第 $attempt 次)，15 秒后重试"
+            Start-Sleep -Seconds 15
+          }
+
+      - name: 配置 CMake（macOS/Linux）
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${RELEASE_VERSION:+v$RELEASE_VERSION}"
+          VER="${VER:-ci-${GITHUB_SHA}}"
+          EXTRA=()
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            # 通用二进制(Intel + Apple Silicon): 交叉编译 arm64 + 静态链接通用 OpenSSL, 产物自包含不依赖 brew;
+            # 部署目标 11.0 为 arm64 产物下限, 双架构一致
+            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64")
+            EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0")
+            EXTRA+=("-DOPENSSL_ROOT_DIR=$HOME/ossl-univ")
+            EXTRA+=("-DOPENSSL_USE_STATIC_LIBS=TRUE")
+          fi
+          for attempt in 1 2 3; do
+            if cmake -B build -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DGitHubActions=1 "-DFILE_VERSION=$VER" ${EXTRA[@]+"${EXTRA[@]}"}; then
+              break
+            fi
+            [[ $attempt -ge 3 ]] && { echo "::error::CMake 配置连续失败 3 次"; exit 1; }
+            echo "::warning::CMake 配置失败(第 $attempt 次)，15 秒后重试"
+            sleep 15
+          done
+
+      # ── 编译 ──
+      - name: 构建
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cmake --build build --config "$BUILD_TYPE"
+          else
+            JOBS="$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
+            cmake --build build --config "$BUILD_TYPE" -j "$JOBS"
+          fi
+
+      # ── 产物验证：功能冒烟（三平台）+ macOS 架构/自包含断言 ──
+      - name: 产物功能测试
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            BIN="build/Release/${EXE_NAME}"
+          else
+            # macOS 通用二进制在本 Intel runner 上以 x86_64 切片原生跑功能测试;
+            # arm64 切片由后续架构/自包含断言校验(同一 SDK/clang 交叉编译)
+            BIN="build/GitHubDesktop2Chinese"
+          fi
+          [[ -f "$BIN" ]] || { echo "::error::未找到构建产物 $BIN"; exit 1; }
+
+          echo "== 测试1: --help 应 exit 0 =="
+          "$BIN" --help > /dev/null
+          echo "OK"
+
+          echo "== 测试2: 非法参数应被拒绝(exit!=0) =="
+          if "$BIN" thisargdoesnotexist > /dev/null 2>&1; then
+            echo "::error::非法参数未被拒绝"
+            exit 1
+          fi
+          echo "OK"
+
+          echo "== 测试3: 中文路径 + EOF 完整汉化流程应 exit 0 =="
+          FIXTURE="$RUNNER_TEMP/汉化测试目录"
+          rm -rf "$FIXTURE"
+          mkdir -p "$FIXTURE"
+          printf '<html></html>' > "$FIXTURE/index.html"
+          printf '// fixture main\n' > "$FIXTURE/main.js"
+          printf '// fixture renderer\n' > "$FIXTURE/renderer.js"
+          set +e
+          OUT="$(echo "" | "$BIN" -g "$FIXTURE" --nopause 2>&1)"
+          CODE=$?
+          set -e
+          if [[ $CODE -ne 0 ]]; then
+            echo "$OUT"
+            echo "::error::完整流程 exit=$CODE"
+            exit 1
+          fi
+          grep -q "renderer.js 文件汉化结束" <<< "$OUT" || { echo "$OUT"; echo "::error::流程未到达 renderer 汉化完成"; exit 1; }
+          echo "OK"
+
+      - name: macOS 架构与自包含断言
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="build/GitHubDesktop2Chinese"
+          echo "== 架构检查(lipo) =="
+          INFO="$(lipo -info "$BIN")"
+          echo "$INFO"
+          grep -q "x86_64" <<< "$INFO" || { echo "::error::产物缺少 x86_64 架构"; exit 1; }
+          grep -q "arm64" <<< "$INFO" || { echo "::error::产物缺少 arm64 架构"; exit 1; }
+          echo "== 自包含检查(不得依赖非系统动态库) =="
+          otool -L "$BIN"
+          # universal 二进制的 otool 输出含 "(architecture xxx):" 头行, 只检查 tab/空格缩进的依赖条目行
+          if otool -L "$BIN" | grep '^[[:space:]]' | grep -Ev '(/usr/lib/|/System/)'; then
+            echo "::error::产物仍依赖非系统动态库(如 brew 路径), 自包含校验失败"
+            exit 1
+          fi
+          echo "OK"
+
+      # ── 打包与归档 ──
+      - name: 准备发布文件名
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp "build/Release/${EXE_NAME}" "dist/${{ matrix.artifact }}"
+          else
+            cp build/GitHubDesktop2Chinese "dist/${{ matrix.artifact }}"
+            chmod +x "dist/${{ matrix.artifact }}"
+          fi
+          ls -l dist/
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ env.ARTIFACT_PREFIX }}-${{ matrix.name }}-${{ needs.version.outputs.version || github.sha }}
+          if-no-files-found: error
+          path: dist/
 
   # ═════════════════════════════════════════════════
   # 5. 自动维护（失效检测 + 候选提取 → 创建/更新 Issue）
@@ -839,12 +853,12 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 校验版本号
-        env:
-          RELEASE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
           VER="$RELEASE_VERSION"
@@ -874,8 +888,6 @@ jobs:
 
       - name: 生成 Release 说明
         shell: bash
-        env:
-          RELEASE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
           VER="$RELEASE_VERSION"
@@ -924,7 +936,6 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
           VER="v$RELEASE_VERSION"
