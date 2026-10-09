@@ -13,19 +13,21 @@ endif()
 #不要放在 if(MSVC) 中
 add_compile_options(/utf-8)
 
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    add_compile_options(/bigobj)
-    message("当前是以Debug模式编译")
-endif()
 
+project ("GitHubDesktop2Chinese")
 
-# 本项目仅支持 64 位（x64）构建
-if (NOT (CMAKE_GENERATOR_PLATFORM STREQUAL "x64" OR CMAKE_EXE_LINKER_FLAGS STREQUAL "/machine:x64"))
+# 本项目仅支持 64 位（x64）构建。
+# 指针宽度由 project() 完成编译器探测后判定，对 VS(-A x64/-A Win32) 与
+# Ninja 预设(external 策略下 CMAKE_GENERATOR_PLATFORM 为空)两条路径均生效
+if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "GitHubDesktop2Chinese 仅支持 64 位（x64）构建，请通过 -A x64 或 x64 预设进行配置")
 endif()
 message("当前是以x64模式编译")
-add_definitions(-DCURRENT_PLATFORM_ISX64)
-set(CURRENT_PLATFORM_ISX64 1)
+
+# 按配置附加标志（生成器表达式对单配置与多配置生成器均生效）:
+# Debug 需要 /bigobj；Release 生成 PDB 并启用链接器调试信息
+add_compile_options($<$<CONFIG:Debug>:/bigobj> $<$<CONFIG:Release>:/Zi>)
+add_link_options($<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF>)
 
 
 
@@ -35,15 +37,6 @@ add_definitions(-DFILEVERSION="${FILE_VERSION}")
 else()
 add_definitions(-DFILEVERSION="0.0.0-Dev.0")
 endif()
-
-# 针对 Visual Studio 编译器（MSVC）
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    # 为 Release 模式添加生成 PDB 文件的标志
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Zi")
-    set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG /OPT:REF /OPT:ICF")
-endif()
-
-project ("GitHubDesktop2Chinese")
 
 include_directories(src)
 include_directories(third_party/include)
@@ -106,9 +99,8 @@ IF(NOT LOCAL_OPENSSL_SSL_LIB)
         FILE(REMOVE ${LOCAL_OPENSSL_LIBRARIES_PATH}/${OPENSSL_SSL_NAME})
         MESSAGE(STATUS "Download failed, error: ${ERR}")
         MESSAGE(FATAL_ERROR
-        "You can try downloading ${LIBSSL_URL} manually"
+        "You can try downloading ${LIBSSL_URL} manually "
         "using curl/wget or a similar tool")
-        return()
     ENDIF()
 ENDIF()
 # 如果路径下存在文件
@@ -148,9 +140,8 @@ IF(NOT LOCAL_OPENSSL_CRYPTO_LIB)
         FILE(REMOVE ${LOCAL_OPENSSL_LIBRARIES_PATH}/${OPENSSL_CRYPTO_NAME})
         MESSAGE(STATUS "Download failed, error: ${ERR}")
         MESSAGE(FATAL_ERROR
-        "You can try downloading ${CRYPTO_URL} manually"
+        "You can try downloading ${CRYPTO_URL} manually "
         "using curl/wget or a similar tool")
-        return()
     ENDIF()
 ENDIF()
 # 如果路径下存在压缩文件
@@ -172,6 +163,4 @@ target_link_libraries(GitHubDesktop2Chinese PRIVATE
 
 # CLI11 已内置到 third_party/include/CLI（header-only，无需额外链接）
 
-if (CMAKE_VERSION VERSION_GREATER 3.12)
-  set_property(TARGET GitHubDesktop2Chinese PROPERTY CXX_STANDARD 20)
-endif()
+set_property(TARGET GitHubDesktop2Chinese PROPERTY CXX_STANDARD 20)
