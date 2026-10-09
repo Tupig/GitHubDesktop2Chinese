@@ -67,7 +67,8 @@ on:
 
 concurrency:
   group: ghdesktop2chinese-${{ github.ref }}
-  cancel-in-progress: false
+  # PR 场景取消陈旧构建(同 PR 连续 push 只保留最新); main/tag/定时发布不取消
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -100,6 +101,10 @@ jobs:
       - name: 计算版本号与变更检测
         id: resolve
         shell: bash
+        # 经 env 传递而非 ${{ }} 内插进脚本: 防止输入中的引号/换行构成脚本注入
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_TYPE: ${{ github.event.inputs.type }}
         run: |
           set -euo pipefail
           VERSION=""
@@ -123,8 +128,8 @@ jobs:
             VERSION="${GITHUB_REF_NAME#v}"
             echo "使用 tag 版本: $VERSION"
           elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" || "${GITHUB_EVENT_NAME}" == "schedule" ]]; then
-            INPUT='${{ github.event.inputs.version }}'
-            TYPE='${{ github.event.inputs.type }}'
+            INPUT="$INPUT_VERSION"
+            TYPE="$INPUT_TYPE"
             if [[ -n "$INPUT" ]]; then
               VERSION="${INPUT#v}"
               echo "使用手动输入版本: $VERSION"
@@ -132,11 +137,12 @@ jobs:
               LATEST="$LATEST_TAG"
               if [[ -z "$LATEST" ]]; then
                 echo "本仓库暂无 v* tag，回落上游最新版本"
+                # 网络失败不直接终止(set -e/pipefail), 交由下方统一检查给出友好报错
                 LATEST="$(curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
                   --connect-timeout 15 --max-time 60 \
                   -H "Authorization: Bearer ${GH_TOKEN}" \
                   https://api.github.com/repos/cngege/GitHubDesktop2Chinese/releases/latest \
-                  | jq -r '.tag_name')"
+                  | jq -r '.tag_name')" || LATEST=""
               fi
               if [[ -z "$LATEST" || "$LATEST" == "null" ]]; then
                 echo "::error::无法确定基础版本号，请手动输入 version"
@@ -148,6 +154,12 @@ jobs:
               VERSION="$MAJOR.$MINOR.$((PATCH+1))"
               echo "自动升级版本: $LATEST -> v$VERSION"
             fi
+          fi
+          # 版本号格式校验(写入 GITHUB_OUTPUT 前):
+          # 非法输入如 abc 会让下轮自动 bump 算出非法 tag(abc..1), 使每日定时发布链路瘫痪
+          if [[ -n "$VERSION" && ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::版本号格式非法: '$VERSION'（须为 x.y.z 纯数字，如 1.2.23；tag 与手动输入同此规则）"
+            exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -169,12 +181,6 @@ jobs:
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: 缓存 OpenSSL 静态库
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: third_party/openssl/lib
-          key: openssl-libs-${{ runner.os }}-x64-${{ hashFiles('third_party/openssl/include/**', 'CMakeLists.txt') }}
 
       - name: Configure CMake (x64)
         shell: pwsh
@@ -209,9 +215,11 @@ jobs:
   # ═════════════════════════════════════════════════
   json-quality:
     name: localization.json 质量校验
+    # push tag 分支: 发布(release needs 本任务)在推 tag 场景同样受本质量门约束
     if: |
       github.event_name == 'pull_request' ||
       github.event_name == 'schedule' ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'security' || inputs.type == 'release'))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -317,10 +325,12 @@ jobs:
   # ═════════════════════════════════════════════════
   tools-test:
     name: 自动维护工具自检
+    # push tag / dispatch release 分支: 保证发布(release needs 本任务)前工具自检已通过
     if: |
       github.event_name == 'pull_request' ||
       github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'security' || inputs.type == 'maintain'))
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'security' || inputs.type == 'maintain' || inputs.type == 'release'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -394,12 +404,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: 缓存 OpenSSL 静态库
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: third_party/openssl/lib
-          key: openssl-libs-${{ runner.os }}-x64-${{ hashFiles('third_party/openssl/include/**', 'CMakeLists.txt') }}
-
       - name: Initialize CodeQL
         uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
@@ -433,7 +437,8 @@ jobs:
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'maintain'))
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # 检测步骤 2×20min 重试 + 版本查询最坏约 6.5min, 需覆盖完整重试设计(30min 会把第二次重试 cancel 掉)
+    timeout-minutes: 50
     env:
       # fetch.js 查询 GitHub API 时使用；匿名限额 60 次/小时会被共享 runner IP 触发 403
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -470,7 +475,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ runner.temp }}/ghdesktop-auto-maintain
-          key: ghd-maintain-v2-${{ steps.version.outputs.ghdesktop_version }}-${{ runner.os }}-${{ hashFiles('tools/auto-maintain/src/**') }}-${{ hashFiles('json/localization.json') }}
+          # key 只含 安装包/解压产物 的实际决定因素(GHD 版本/平台/工具源码);
+          # 不含 localization.json: 映射每次改动都作废 307MB 安装包缓存, 而报告由步骤内重新生成
+          key: ghd-maintain-v3-${{ steps.version.outputs.ghdesktop_version }}-${{ runner.os }}-${{ hashFiles('tools/auto-maintain/src/**') }}
 
       - name: 运行失效检测 + 未翻译候选提取
         working-directory: tools/auto-maintain
@@ -501,6 +508,10 @@ jobs:
               const report = fs.readFileSync(reportPath, 'utf8');
 
               const failedMatch = report.match(/总映射项\s+(\d+)，有效\s+(\d+)，失效\s+(\d+)。/);
+              if (!failedMatch) {
+                // 报告文案与本正则强耦合: 解析失败时若静默降级, 自动关单/标题计数会永久失效且无告警
+                core.warning('report.md 中未找到失效统计行(总映射项 x，有效 x，失效 x。), 失效数按 ? 处理, 请检查 report.js 文案是否变更');
+              }
               const failed = failedMatch ? failedMatch[3] : '?';
               const noFailures = Number(failed) === 0;
 
@@ -581,7 +592,9 @@ jobs:
   # ═════════════════════════════════════════════════
   release:
     name: 发布 Release
-    needs: [version, build]
+    # json-quality/tools-test 与 release 同属任务门: 发布前强制过质量门与工具自检
+    # (二者 if 已覆盖 push tag / dispatch release / schedule 分支, 不会出现 needs 悬空)
+    needs: [version, build, json-quality, tools-test]
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       (github.event_name == 'workflow_dispatch' && inputs.type == 'release') ||
@@ -595,11 +608,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 校验版本号
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          VER="${{ needs.version.outputs.version }}"
+          VER="$RELEASE_VERSION"
           if [[ -z "$VER" ]]; then
             echo "::error::版本号为空，无法发布。请检查 version 任务输出"
+            exit 1
+          fi
+          if [[ ! "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::版本号格式非法: '$VER'（须为 x.y.z），拒绝发布"
             exit 1
           fi
           echo "发布版本: v$VER"
@@ -618,9 +637,11 @@ jobs:
 
       - name: 生成 Release 说明
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          VER="${{ needs.version.outputs.version }}"
+          VER="$RELEASE_VERSION"
           {
             echo "# GitHubDesktop2Chinese v$VER"
             echo ""
@@ -663,10 +684,11 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          VER="v${{ needs.version.outputs.version }}"
-          TITLE="GitHubDesktop2Chinese v${{ needs.version.outputs.version }}"
+          VER="v$RELEASE_VERSION"
+          TITLE="GitHubDesktop2Chinese v$RELEASE_VERSION"
           # 网络抖动时自动重试（上传支持 --clobber，重试安全）
           retry() {
             local max=$1
@@ -681,7 +703,13 @@ jobs:
           }
           if gh release view "$VER" >/dev/null 2>&1; then
             retry 3 gh release upload "$VER" release/GitHubDesktop2Chinese.exe release/localization.json --clobber
-            gh release edit "$VER" --title "$TITLE" --notes-file release-notes.md
+            retry 3 gh release edit "$VER" --title "$TITLE" --notes-file release-notes.md
           else
-            retry 3 gh release create "$VER" release/GitHubDesktop2Chinese.exe release/localization.json --title "$TITLE" --notes-file release-notes.md
+            if ! retry 3 gh release create "$VER" release/GitHubDesktop2Chinese.exe release/localization.json --title "$TITLE" --notes-file release-notes.md; then
+              # view 可能因网络错误误判为不存在, 而 create 实际已存在(already exists):
+              # 此时转 上传+编辑 自愈, 避免"release 已建但资产/说明半成品"永久挂死
+              echo "::warning::gh release create 失败, 按已存在场景转上传+编辑自愈"
+              retry 3 gh release upload "$VER" release/GitHubDesktop2Chinese.exe release/localization.json --clobber
+              retry 3 gh release edit "$VER" --title "$TITLE" --notes-file release-notes.md
+            fi
           fi
