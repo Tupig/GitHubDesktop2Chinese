@@ -221,10 +221,10 @@ jobs:
           echo "version=$VER" >> "$GITHUB_OUTPUT"
           echo "静态库构建使用 OpenSSL $VER 源码"
 
-      - name: 缓存 macOS 静态 OpenSSL (x64 + arm64)
+      - name: 还原 macOS 静态 OpenSSL 缓存 (x64 + arm64)
         if: runner.os == 'macOS'
-        id: ossl-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        id: ossl-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/ossl-x64
@@ -232,7 +232,8 @@ jobs:
           key: openssl-static-${{ steps.osslver.outputs.version }}-${{ runner.arch }}
 
       - name: 构建 macOS 静态 OpenSSL (双架构, 缓存未命中时)
-        if: runner.os == 'macOS' && steps.ossl-cache.outputs.cache-hit != 'true'
+        id: ossl-build
+        if: runner.os == 'macOS' && steps.ossl-restore.outputs.cache-hit != 'true'
         shell: bash
         env:
           OSSL_VER: ${{ steps.osslver.outputs.version }}
@@ -262,6 +263,17 @@ jobs:
           }
           build_ossl x64 darwin64-x86_64-cc
           build_ossl arm64 darwin64-arm64-cc
+
+      - name: 保存 macOS 静态 OpenSSL 缓存
+        # always(): 后续步骤(功能测试等)失败时也保住已构建的静态库, 避免下次运行重复 8 分钟构建;
+        # 仅当本次确实执行且成功构建时保存(命中缓存或构建失败则不存)
+        if: always() && runner.os == 'macOS' && steps.ossl-build.outcome == 'success'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/ossl-x64
+            ~/ossl-arm64
+          key: openssl-static-${{ steps.osslver.outputs.version }}-${{ runner.arch }}
 
       - name: 组装 macOS 通用静态 OpenSSL
         if: runner.os == 'macOS'

@@ -38,7 +38,28 @@ namespace utils {
         if(proxy.second) {
             cli.set_proxy(proxy.first, proxy.second);
         }
-        cli.enable_server_certificate_verification(true); // httplib 未指定CA文件时自动加载系统根证书存储
+        cli.enable_server_certificate_verification(true);
+#ifdef _WIN32
+        // Windows: httplib 自动加载系统 ROOT 证书存储
+#elif defined(__APPLE__)
+        // macOS: 使用系统内置 CA 包; 静态 OpenSSL 的编译期默认信任路径指向构建前缀(用户机器上不存在), 必须显式指定
+        if(fs::exists("/etc/ssl/cert.pem")) {
+            cli.set_ca_cert_path("/etc/ssl/cert.pem");
+        }
+#else
+        // Linux: 按发行版常见位置探测 CA 包(Debian/Ubuntu、RHEL/Fedora、Alpine 等)
+        static const char* ca_bundles[] = {
+            "/etc/ssl/certs/ca-certificates.crt",
+            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+            "/etc/ssl/cert.pem",
+        };
+        for(const char* bundle : ca_bundles) {
+            if(fs::exists(bundle)) {
+                cli.set_ca_cert_path(bundle);
+                break;
+            }
+        }
+#endif
         cli.set_follow_location(true);                    // https://raw.github.com 会要求301重定向
         return cli;
     }
