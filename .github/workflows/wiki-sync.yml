@@ -1,0 +1,41 @@
+# =====================================================================
+# Wiki 同步工作流
+#
+# 职责: docs/wiki/ 文档更新合入 main 后, 自动镜像同步到 GitHub Wiki
+#       （Tupig/GitHubDesktop2Chinese.wiki.git, 即仓库 Wiki 标签页）
+#
+# 触发:
+#   1. push main 且 docs/wiki/** 有变更 —— 文档更新自动同步
+#   2. workflow_dispatch —— 手动兜底（初始化 / 修复 / 验证）
+#
+# 凭据: 内置 GITHUB_TOKEN（contents: write 即可推送同仓库 Wiki, 无需 PAT）
+# 语义: 镜像同步 —— docs/wiki 为唯一真值, 详见 tools/ci/sync-wiki.sh
+# =====================================================================
+name: Wiki 同步
+
+on:
+  push:
+    branches: [main]
+    paths: ['docs/wiki/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# 串行化: 连续文档提交不并发推送 Wiki, 避免交叉覆盖
+concurrency:
+  group: wiki-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-wiki:
+    name: 同步 docs/wiki → GitHub Wiki
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: 执行同步
+        run: bash tools/ci/sync-wiki.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
