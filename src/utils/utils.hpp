@@ -1,4 +1,4 @@
-﻿#ifndef UTILS_UTILS_HPP
+#ifndef UTILS_UTILS_HPP
 #define UTILS_UTILS_HPP
 
 // 通用工具伞形汇总头（对外唯一入口）：调用方统一 #include "utils/utils.hpp"

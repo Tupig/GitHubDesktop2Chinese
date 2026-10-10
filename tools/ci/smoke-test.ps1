@@ -1,4 +1,4 @@
-# 本地冒烟测试(构建产物快速功能验证, CI 产物功能测试的本地等价物)
+﻿# 本地冒烟测试(构建产物快速功能验证, CI 产物功能测试的本地等价物)
 # 用法: pwsh tools/ci/smoke-test.ps1 [-Binary <GitHubDesktop2Chinese.exe 路径>]
 # 默认自动探测 out\build\*\Release\ 与 build\Release\ 下的产物, 取最新者
 [CmdletBinding()]
