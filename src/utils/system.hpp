@@ -8,8 +8,8 @@
 #include <optional>
 #include <utility>
 #include <algorithm>
-#include <iostream>
 #include <cstdlib>
+#include <spdlog/spdlog.h>
 #include "utils/encoding.hpp"
 #ifdef _WIN32
 #include <windows.h>
@@ -96,7 +96,7 @@ namespace utils {
         }
         auto parsed = ParseProxyAddress(p1);
         if(!parsed) {
-            std::cerr << "错误：代理地址无法解析（需形如 [http://]host:port、[IPv6]:port 或 user:pass@host:port）: " << p1 << std::endl;
+            spdlog::warn("错误：代理地址无法解析（需形如 [http://]host:port、[IPv6]:port 或 user:pass@host:port）: {}", p1);
             return {};
         }
         return parsed;
@@ -110,18 +110,45 @@ namespace utils {
 
         if(WinHttpGetIEProxyConfigForCurrentUser(&ieProxyConfig)) {
             if(ieProxyConfig.lpszProxy) {
-                // IE 代理配置可能为 "http=host:port;https=host:port" 形式：取第一段并去掉 scheme= 前缀
+                // IE 代理配置可能为 "http=host:port;https=host:port" 形式: 本程序全部请求均为 HTTPS,
+                // 优先取 https= 段, 其次 http= 段; 无 scheme 前缀(单地址)时取第一段并剥离可能的 "xxx=" 前缀。
                 // 宽转 UTF-8 统一走编码工具, 避免逐字符窄化丢失非 ASCII 主机
-                std::string address = utils::to_byte_string(ieProxyConfig.lpszProxy);
-                size_t semiPos = address.find(';');
-                if(semiPos != std::string::npos) {
-                    address = address.substr(0, semiPos);
+                const std::string address = utils::to_byte_string(ieProxyConfig.lpszProxy);
+                std::string https_addr, http_addr, first_addr;
+                size_t pos = 0;
+                while(pos < address.size()) {
+                    const size_t semi = address.find(';', pos);
+                    const std::string seg = address.substr(pos, semi == std::string::npos ? std::string::npos : semi - pos);
+                    if(!seg.empty() && first_addr.empty()) {
+                        first_addr = seg;
+                    }
+                    const size_t eq = seg.find('=');
+                    if(eq != std::string::npos) {
+                        const std::string scheme = seg.substr(0, eq);
+                        if(scheme == "https" && https_addr.empty()) {
+                            https_addr = seg.substr(eq + 1);
+                        }
+                        else if(scheme == "http" && http_addr.empty()) {
+                            http_addr = seg.substr(eq + 1);
+                        }
+                    }
+                    if(semi == std::string::npos) {
+                        break;
+                    }
+                    pos = semi + 1;
                 }
-                size_t eqPos = address.find('=');
-                if(eqPos != std::string::npos) {
-                    address = address.substr(eqPos + 1);
+                std::string chosen;
+                if(!https_addr.empty()) {
+                    chosen = https_addr;
                 }
-                result = ParseProxyAddress(address);
+                else if(!http_addr.empty()) {
+                    chosen = http_addr;
+                }
+                else if(!first_addr.empty()) {
+                    const size_t eq = first_addr.find('=');
+                    chosen = eq != std::string::npos ? first_addr.substr(eq + 1) : first_addr;
+                }
+                result = ParseProxyAddress(chosen);
             }
 
             // 清理资源

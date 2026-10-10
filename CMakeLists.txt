@@ -68,6 +68,11 @@ if(WIN32)
         SET(LOCAL_OPENSSL_LIBRARIES_PATH "${GHD2C_OPENSSL_ROOT}/lib")
         MESSAGE(STATUS "Folder \"${GHD2C_OPENSSL_ROOT}/lib\" created successfully.")
     endif()
+    # FIND_FILE(NAMES "") 在 lib 目录已存在但库文件缺失时返回 NOTFOUND,
+    # 会展开成 "xxx-NOTFOUND/libssl.lib" 这样的错误下载目标; 回退到固定路径
+    if(NOT LOCAL_OPENSSL_LIBRARIES_PATH)
+        SET(LOCAL_OPENSSL_LIBRARIES_PATH "${GHD2C_OPENSSL_ROOT}/lib")
+    endif()
 
     # /////////////////////////////////////ssl库lib名称////////////////////////////////////////////////
     SET(OPENSSL_SSL_NAME "libssl.lib")

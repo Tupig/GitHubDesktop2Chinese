@@ -28,16 +28,16 @@ private:
         enumbetaversion,    /*反序列化标志位 测试版本号*/
     };
     ParseCheckPosition parseCheckPos = ParseCheckPosition::enummajor;
-    bool vaild = false;
+    bool valid = false;
 public:
 	Version(const char* v) {
-        vaild = Parse(v);
+        valid = Parse(v);
 	}
 
     Version(int major, int minor, int revision, Status status = Status::Release, int betaversion = 0)
     : major(major), minor(minor), revision(revision), status(status), betaversion(betaversion)
     {
-        vaild = true;
+        valid = true;
     }
 
 public:
@@ -111,7 +111,7 @@ public:
     }
 
     operator bool() const {
-        return vaild;
+        return valid;
     }
 
 public:

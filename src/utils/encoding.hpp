@@ -7,7 +7,6 @@
 #include <string>
 #include <codecvt>
 #include <filesystem>
-#include <vector>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -15,22 +14,6 @@
 namespace fs = std::filesystem;
 
 namespace utils {
-
-    inline auto utf8ToAnsi(const std::string& utf8String) -> std::string {
-#ifdef _WIN32
-        int utf8Size = static_cast<int>(utf8String.size());
-        int ansiSize = MultiByteToWideChar(CP_UTF8, 0, utf8String.c_str(), utf8Size, nullptr, 0);
-        std::vector<wchar_t> wideString(ansiSize);
-        MultiByteToWideChar(CP_UTF8, 0, utf8String.c_str(), utf8Size, wideString.data(), ansiSize);
-        ansiSize = WideCharToMultiByte(CP_ACP, 0, wideString.data(), ansiSize, nullptr, 0, nullptr, nullptr);
-        std::vector<char> ansiString(ansiSize);
-        WideCharToMultiByte(CP_ACP, 0, wideString.data(), ansiSize, ansiString.data(), ansiSize, nullptr, nullptr);
-        return std::string(ansiString.begin(), ansiString.end());
-#else
-        // POSIX 终端使用 UTF-8, 无 ANSI 代码页概念, 直接透传
-        return utf8String;
-#endif
-    }
 
     inline auto to_byte_string(const std::wstring& input) -> std::string
     {

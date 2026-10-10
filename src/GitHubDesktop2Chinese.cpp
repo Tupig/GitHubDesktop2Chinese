@@ -7,10 +7,12 @@
 
 // PAUSE: 等待确认(Windows 任意键 / POSIX 一行回车); 非交互 EOF 时立即返回, 管道运行不挂起
 // 展开调用下方 WaitAnyKey()(避免 system("pause") 每次调用创建 shell 进程)
+// do{}while(0); 包裹(含终止分号): 宏作为单条语句使用, 悬挂 else 等语义安全;
+// 项目内全部调用点均为独立语句, 调用处无需再写分号
 #ifdef _WIN32
-#define PAUSE if(!no_pause) { spdlog::info("按任意键继续..."); WaitAnyKey(); }
+#define PAUSE do { if(!no_pause) { spdlog::info("按任意键继续..."); WaitAnyKey(); } } while(0);
 #else
-#define PAUSE if(!no_pause) { spdlog::info("按回车键继续..."); WaitAnyKey(); }
+#define PAUSE do { if(!no_pause) { spdlog::info("按回车键继续..."); WaitAnyKey(); } } while(0);
 #endif
 
 #include "GitHubDesktop2Chinese.h"
@@ -100,12 +102,14 @@ inline void WaitAnyKey() {
     HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
     DWORD mode = 0;
     if(hIn != INVALID_HANDLE_VALUE && hIn != nullptr && GetConsoleMode(hIn, &mode)) {
-        (void)_getch();
+        (void)_getch(); // _getch 不经过 stdin 流, 缓冲残留状态不变, stdin_after_extract 保持有效
         return;
     }
 #endif
+    // 等待一行的实现会连同一并消费缓冲中的 >> 残留行, 标志须同步失效, 避免后续交互被多吞一行
     std::cin.clear();
     std::cin.ignore((std::numeric_limits<std::streamsize>::max)(), '\n');
+    utils::stdin_after_extract = false;
 }
 
 // 转义 std::regex_replace format 串中的 $ (否则 $&/$`/$n 会被展开或吞掉): 用于把捕获文本安全回填到模板
@@ -203,26 +207,43 @@ static void ApplySelectForFile(const char* logTag, const json& sel, const std::s
             if(rege.empty() || rege == "\"\"") {
                 continue;
             }
-            std::regex pattern(rege, std::regex::optimize);
+            // 构造正则: invalidcheck 模式下非法正则本身就是待检测对象, 计入失效项继续;
+            // 正常替换模式 rethrow 交由外层(ProcessJsFile)走"中止并从备份恢复"路径
+            std::optional<std::regex> pattern_opt;
+            try {
+                pattern_opt.emplace(rege, std::regex::optimize);
+            }
+            catch(const std::regex_error& re) {
+                spdlog::warn("[select {}] 非法正则, 计入失效项: {} ({})", logTag, rege, re.what());
+                invalid_count++;
+                continue;
+            }
             // 搜索第一项 是否存在
-            if(!std::regex_search(js_str, pattern)) {
+            if(!std::regex_search(js_str, *pattern_opt)) {
                 spdlog::warn("[select {}] 检测到失效项: {}", logTag, rege.c_str());
                 invalid_count++;
             }
             //如果二层数组字符串有三项
             if(v_item.size() >= 3) {
-                std::regex pattern3(v_item[2], std::regex::optimize);
-                // 搜索第三项是否存在
-                if(!std::regex_search(js_str, pattern3)) {
-                    spdlog::warn("[select {} 3] 检测到失效项: {}", logTag, v_item[2].c_str());
+                try {
+                    std::regex pattern3(v_item[2], std::regex::optimize);
+                    // 搜索第三项是否存在
+                    if(!std::regex_search(js_str, pattern3)) {
+                        spdlog::warn("[select {} 3] 检测到失效项: {}", logTag, v_item[2].c_str());
+                        invalid_count++;
+                    }
+                }
+                catch(const std::regex_error& re) {
+                    spdlog::warn("[select {} 3] 非法正则, 计入失效项: {} ({})", logTag, v_item[2], re.what());
                     invalid_count++;
                 }
             }
         }
     }
     else {  // 正常替换
-        // 询问提示 输出json中的输出提示字符串
-        spdlog::info(">>>>>> {}", sel.value("tooltip", std::string()));
+        // 询问提示 输出json中的输出提示字符串(类型不匹配的畸形 tooltip 防御为空串, 不中止整个 select 段)
+        spdlog::info(">>>>>> {}", (sel.contains("tooltip") && sel.at("tooltip").is_string())
+                                     ? sel.at("tooltip").get<std::string>() : std::string());
         // 读取用户输入
         if(utils::ReadUserInput_bool({ "n","y" }, 1)) {
             // 循环两层数组的外层数组
@@ -249,8 +270,11 @@ static void ApplySelectForFile(const char* logTag, const json& sel, const std::s
                     }
                     v_item[1] = std::move(translation);
                 }
-                // 最终替换
-                js_str = std::regex_replace(js_str, pattern, v_item[1]);
+                // 最终替换: 先预检命中再替换, 避免零匹配时对全文做无谓的整串复制
+                // (std::regex_replace 零匹配也返回完整副本; 输出与预检前逐字节一致)
+                if(std::regex_search(js_str, pattern)) {
+                    js_str = std::regex_replace(js_str, pattern, v_item[1]);
+                }
             }
         }
     }
@@ -291,7 +315,21 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
             if(rege.empty() || rege == "\"\"") {
                 continue;
             }
-            std::regex pattern(rege, std::regex::optimize);
+            // 构造正则: invalidcheck 模式下非法正则本身就是待检测对象(README 功能定义),
+            // 计入失效项并继续; 正常替换模式 rethrow 交由外层 catch 走"中止并从备份恢复"路径
+            std::optional<std::regex> pattern_opt;
+            try {
+                pattern_opt.emplace(rege, std::regex::optimize);
+            }
+            catch(const std::regex_error& re) {
+                if(_debug_invalid_check_mode) {
+                    spdlog::warn("[{}] 非法正则, 计入失效项: {} ({})", logTag, rege, re.what());
+                    invalid_count++;
+                    continue;
+                }
+                throw;
+            }
+            const std::regex& pattern = *pattern_opt;
 
             // 开发者选项 失效检测
             if(_debug_invalid_check_mode) {
@@ -301,11 +339,24 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
                     invalid_count++;
                 }
                 if(item.value().size() >= 3) {
-                    std::regex pattern3(item.value()[2].get<std::string>(), std::regex::optimize);
-                    found = std::regex_search(js_str, pattern3);
-                    if(!found) {
-                        spdlog::warn("[{}] 检测到失效项: {}", logTag, item.value()[2].get<std::string>());
-                        invalid_count++;
+                    // 与正常路径一致的非字符串防御: 畸形第三元素跳过而不是抛异常中止整个检测
+                    if(item.value()[2].is_string()) {
+                        const std::string rege3 = item.value()[2].get<std::string>();
+                        try {
+                            std::regex pattern3(rege3, std::regex::optimize);
+                            found = std::regex_search(js_str, pattern3);
+                            if(!found) {
+                                spdlog::warn("[{}] 检测到失效项: {}", logTag, rege3);
+                                invalid_count++;
+                            }
+                        }
+                        catch(const std::regex_error& re) {
+                            spdlog::warn("[{}] 非法正则, 计入失效项: {} ({})", logTag, rege3, re.what());
+                            invalid_count++;
+                        }
+                    }
+                    else {
+                        spdlog::warn("[{}] 跳过格式无效的条目 {}", logTag, item.key());
                     }
                 }
                 continue;
@@ -331,8 +382,11 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
                 item.value()[1] = std::move(translation);
             }
 
-            // 替换
-            js_str = std::regex_replace(js_str, pattern, item.value()[1].get<std::string>());
+            // 替换: 先预检命中再替换, 避免零匹配时对全文做无谓的整串复制
+            // (std::regex_replace 零匹配也返回完整副本; 输出与预检前逐字节一致)
+            if(std::regex_search(js_str, pattern)) {
+                js_str = std::regex_replace(js_str, pattern, item.value()[1].get<std::string>());
+            }
             if(errorCheckMode) {
                 // 控制台已设为 UTF-8, 直接输出原文, 不再经 GBK 转码造成乱码
                 spdlog::info("[{}][out:{}]已经替换:{}->{}", logTag, out, rege, item.value()[1].get<std::string>());
@@ -343,7 +397,10 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
                         return 1;
                     }
                     spdlog::info("已写入. 你希望下次替换多少条后写入:");
-                    if(!(std::cin >> out)) {
+                    if(std::cin >> out) {
+                        utils::stdin_after_extract = true; // >> 提取成功, 残留换行待后续交互清扫
+                    }
+                    else {
                         // 输入流已结束(非交互运行): 置为极大值, 等价于剩余项全部替换后一次性写入
                         out = (std::numeric_limits<int>::max)();
                     }
@@ -355,10 +412,17 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
         if(!_debug_dev_replace) {
             // 循环select 列表
             for(auto& item_select : localization["select"].items()) {
-                // 判断此项 是否是 对应js， 并且enable项是否开启 (value() 带默认值: 键缺失不抛异常)
+                // 判断此项 是否是 对应js， 并且enable项是否开启
+                // 防御类型不匹配的畸形 select 条目: value() 在键存在但类型不符时抛 type_error
+                // 会中止整个文件, 先行 is_string/is_boolean 判断保持"键缺失取默认"的原语义
                 if(!item_select.value().is_object()) continue;
                 const auto& sel = item_select.value();
-                if(sel.value("replaceFile", std::string()) == fileTag && sel.value("enable", false)) {
+                const bool replace_file_ok = sel.contains("replaceFile") && sel.at("replaceFile").is_string()
+                                             && sel.at("replaceFile").get<std::string>() == fileTag;
+                const bool enable_ok = sel.contains("enable")
+                                       ? (sel.at("enable").is_boolean() && sel.at("enable").get<bool>())
+                                       : false;
+                if(replace_file_ok && enable_ok) {
                     ApplySelectForFile(logTag, sel, item_select.key(), js_str, invalid_count);
                 }
             }
@@ -412,8 +476,10 @@ int wmain(int argc, wchar_t* wargv[])
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     if(hOut != INVALID_HANDLE_VALUE) {
         DWORD mode = 0;
-        GetConsoleMode(hOut, &mode);
-        SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        // GetConsoleMode 失败(输出重定向到文件/管道)时无 VT 支持可言, 跳过 SetConsoleMode
+        if(GetConsoleMode(hOut, &mode)) {
+            SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        }
     }
 
     // 自身可执行文件路径(宽字符, 非ASCII安装目录下无损)
@@ -538,6 +604,7 @@ int main(int argc, char* argv[])
                 spdlog::error("无法读取输入(输入流已结束), 退出版本设置");
                 break;
             }
+            utils::stdin_after_extract = true; // >> 提取成功, 残留换行待后续交互清扫
             if(instr == "exit") {
                 break;
             }
@@ -581,8 +648,12 @@ int main(int argc, char* argv[])
     }
 
 
-    // 打印构建平台与版本（仅支持 x64）
+    // 打印构建平台与版本（仅支持 64 位架构, 与 CMake 的指针宽度校验一致）
+#if defined(__aarch64__) || defined(_M_ARM64)
+    std::string arch_str("arm64");
+#else
     std::string arch_str("x64");
+#endif
 
     if(FileVer) {
         spdlog::info("程序架构：- {}  版本: - {}", arch_str,  FileVer.toString(true));
@@ -661,7 +732,7 @@ int main(int argc, char* argv[])
                                 // 避免共享 IP 触发 60次/小时匿名限流导致下载 403
                                 std::string downlink = browser_download_url;
                                 int download_count = asset->at("download_count").get<int>();
-                                size_t max_size = asset->at("size").get<int64_t>();
+                                int64_t max_size = asset->at("size").get<int64_t>();
                                 // 发布资产声明的 SHA256 摘要(形如 sha256:<hex>), 用于下载后完整性校验
                                 std::string asset_digest = asset->value("digest", std::string());
                                 spdlog::info("下载链接({}次下载): {}", download_count, browser_download_url);
@@ -1041,7 +1112,9 @@ int main(int argc, char* argv[])
                 if(!no_pause) {
                     spdlog::info("输入(f)强制执行替换(可能会导致无法打开), 其他退出..");
                     std::string input;
-                    std::cin >> input;
+                    if(std::cin >> input) {
+                        utils::stdin_after_extract = true; // >> 提取成功, 残留换行待后续交互清扫
+                    }
                     if(!std::cin || (input != "f" && input != "F")) {
                         PAUSE
                         return 1;
@@ -1113,6 +1186,8 @@ bool GetBasePath(std::string& out) {
         spdlog::error("读取输入失败(输入流已结束)");
         return false;
     }
+    // getline 消费了缓冲中可能的 >> 残留行, 标志须同步失效
+    utils::stdin_after_extract = false;
     // 去除首尾空白与成对引号: 支持从资源管理器拖拽文件夹到控制台(终端会为路径加引号)
     {
         const size_t first = out.find_first_not_of(" \t\r\n");
@@ -1210,6 +1285,7 @@ void DeveloperOptions() {
             spdlog::warn("输入无效, 请输入数字");
             continue;
         }
+        utils::stdin_after_extract = true; // >> 提取成功, 残留换行待后续交互清扫
         switch (sys)
         {
         case 0:

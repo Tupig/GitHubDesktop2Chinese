@@ -159,7 +159,17 @@ namespace utils {
         // 1. 如果临时文件已存在，获取已下载大小（用于断点续传）
         uint64_t downloaded_bytes = 0;
         if(fs::exists(tmp_file)) {
-            downloaded_bytes = fs::file_size(tmp_file);
+            std::error_code size_ec;
+            const uint64_t existing = fs::file_size(tmp_file, size_ec);
+            if(size_ec) {
+                // 文件被占用/权限变化等竞态: 大小不可信, 丢弃残留改为完整重下
+                spdlog::warn("读取临时文件大小失败({}), 将删除残留重新下载", size_ec.message());
+                std::error_code rm_ec;
+                fs::remove(tmp_file, rm_ec);
+            }
+            else {
+                downloaded_bytes = existing;
+            }
         }
 
         // 临时文件超过预期大小(异常残留)时丢弃, 重新完整下载
@@ -187,6 +197,7 @@ namespace utils {
             headers.emplace("Accept", "application/octet-stream");
 
             int bad_status = 0; // 非 200/206 的状态码(用于错误提示)
+            uint64_t received_bytes = 0; // 本次会话已接收字节数(用于流式大小上限)
             auto res = cli.Get(params, headers,
             [&](const httplib::Response& response) {
                 // 服务器忽略 Range 返回 200 时，从头覆盖，避免追加写入导致文件损坏
@@ -205,6 +216,13 @@ namespace utils {
                 return true;
             },
             [&](const char* data, size_t data_length) {
+                received_bytes += data_length;
+                // 流式大小上限: 异常/恶意服务端超出发布资产声明大小时立即中止,
+                // 不让无限数据撑爆磁盘(大小校验原先要等下载完成后才做)
+                if(max_size > 0 && downloaded_bytes + received_bytes > static_cast<uint64_t>(max_size)) {
+                    spdlog::error("下载内容超过发布资产声明大小({} 字节), 已中止下载", max_size);
+                    return false;
+                }
                 if(data_length > 0 && downfile.is_open()) {
                     downfile.write(data, data_length);
                     downfile.flush(); // 立即刷入磁盘，不缓存
@@ -353,6 +371,7 @@ namespace utils {
             sh << "#!/bin/sh\n"
                << "sleep 5\n"
                << "mv -f " << sh_quote(tmp_file.string()) << " " << sh_quote(self.string()) << "\n"
+               << "rm -f " << sh_quote(script.string()) << "\n"
                << "exec " << sh_quote(self.string()) << "\n";
         }
         std::error_code ec;

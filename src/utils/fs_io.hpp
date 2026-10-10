@@ -28,7 +28,7 @@ namespace utils {
     // 原子写入: 先写 xxx.writing 临时文件, 校验流状态后改名覆盖目标。
     // 写入中断(磁盘满/进程被杀)时原文件保持不变, 不会留下半截损坏的源文件。
     // 返回是否成功; 失败时已清理临时文件。
-    inline auto WriteFile(const std::string& filename, std::string& txt) -> bool {
+    inline auto WriteFile(const std::string& filename, const std::string& txt) -> bool {
         const std::string tmp_filename = filename + ".writing";
         {
             std::ofstream out(tmp_filename, std::ios::binary | std::ios::trunc);
