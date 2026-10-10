@@ -783,9 +783,8 @@ jobs:
             echo "- \`localization.json\` — 汉化映射（最新）"
             echo ""
             echo "> 产物附带构建溯源证明，可校验来源：\`gh attestation verify <下载的文件> --repo Tupig/GitHubDesktop2Chinese\`"
-            if [[ -n "${SIGNPATH_API_TOKEN:-}" && -n "${SIGNPATH_ORGANIZATION_ID:-}" ]]; then
-              echo "> Windows 产物已通过 [SignPath](https://signpath.org) 代码签名"
-            fi
+            # SignPath Foundation 要求: 下载页须声明使用其代码签名(无条件提及)
+            echo "> Windows 产物使用 [SignPath Foundation](https://signpath.org) 免费开源代码签名证书签名"
             echo ""
             echo "## 使用方法"
             echo "1. 下载对应平台的程序文件直接运行，自动联网获取最新 \`localization.json\` 完成汉化"

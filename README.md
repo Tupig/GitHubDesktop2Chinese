@@ -46,6 +46,7 @@
 
 > [!IMPORTANT]
 > - 本程序提供 **64 位 Windows / macOS（按架构分 x64 与 arm64 两个包）/ Linux（x64）** 多平台版本，从 [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) 页选择对应产物下载。
+> - Windows 版 `GitHubDesktop2Chinese.exe` 使用 [SignPath Foundation](https://signpath.org) 提供的免费开源代码签名证书进行代码签名。
 > - 汉化映射以 **Windows 版** GitHub Desktop 文案为准，其他平台文案基本一致，个别条目可能不匹配。
 > - GitHub Desktop 每次版本更新后，都需要重新运行一次本程序才能完成汉化。
 
