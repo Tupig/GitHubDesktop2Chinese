@@ -15,21 +15,28 @@
 #   注1: tag 提交已在 push main 扫描过, 不重复跑 CodeQL
 #   注2: 定时不含 CodeQL（节省资源, 由 PR / push main 覆盖）
 #   注3: fork PR 不跑 CodeQL（其令牌无 security-events 写权限, 上传必失败）
+#   注4: 构建差异检测(#81): 定时与 push main 且"无待发布变更"时, 若与上次成功构建
+#        的构建相关路径也无差异 → 跳过四平台构建矩阵, 由 build-skip-notice 输出说明;
+#        PR(质量门每次须验证)/tag(连着发布)/手动触发(尊重用户意图)始终构建
 #   防重复: push 仅绑定 main 与 tag → PR 分支的推送不会二次触发(PR 由 pull_request 单路径负责);
 #           同一 PR 连续推送由 concurrency 取消陈旧运行
 #   边界:   发布类(auto/release)仅限 main 触发(防特性分支误发布); 其他 ref 可跑 build/security/maintain 排查
 #
 # ── jobs 总览与依赖 ─────────────────────────────────────────
-#   0. version        解析版本号与变更检测（构建/发布类任务的前置）
+#   0. version        解析版本号与变更检测（构建/发布类任务的前置）;
+#                     构建差异检测: 与上次成功构建对比, 无差异时输出 build_changed=false
 #   1. json-quality   localization.json 数据质量门
 #   2. tools-test     自动维护工具自检门（语法 + 单元测试 + Markdown 链接检查）
 #   3. codeql         C/C++ 安全扫描门
-#   4. build          构建矩阵(三平台四目标) + 产物功能测试
+#   4. build          构建矩阵(三平台四目标) + 产物功能测试（无差异时跳过, 见注4）
+#   4b. build-skip-notice  构建跳过说明（skipped job 自身无日志, 以独立 job 输出醒目说明）
 #   5. auto-maintain  失效检测 + 未翻译候选提取（定时 / 手动）
 #   6. release        汇总产物并发布
 #
-#   job 依赖: build←version；release←version+build+json-quality+tools-test
+#   job 依赖: build←version；build-skip-notice←version；release←version+build+json-quality+tools-test
 #             json-quality / tools-test / codeql / auto-maintain 相互独立，与 build 并行
+#   链路保证: changed=true(有变更待发版)时 build_changed 恒为 true(强制构建),
+#             release 需要的产物永远存在; 无差异跳过只发生在 changed=false 时
 #
 # ── 构建产物约定 ─────────────────────────────────────────────
 #   编译输出  Windows: build/Release/GitHubDesktop2Chinese.exe（MSVC 多配置生成器）
@@ -124,6 +131,8 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       changed: ${{ steps.resolve.outputs.changed }}
+      build_changed: ${{ steps.resolve.outputs.build_changed }}
+      build_base: ${{ steps.resolve.outputs.build_base }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -158,6 +167,35 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "自 ${LATEST_TAG} 以来无构建相关变更，push main/auto/定时模式将跳过发布"
           fi
+
+          # ── 构建差异检测(#81): 与上一次成功构建对比, 无差异则跳过四平台构建矩阵 ──
+          # 仅"无待发布变更"的定时与 push main 评估跳过(省 runner 资源):
+          #   changed=true 时恒为 true 强制构建, 保证 release 需要的产物永远存在;
+          #   PR(质量门每次须验证)/tag(连着发布)/手动触发(尊重用户意图)始终构建
+          BUILD_CHANGED="true"
+          BUILD_BASE_SHA=""
+          if [[ "$BUILD_CHANGES" -eq 0 && ( "${GITHUB_EVENT_NAME}" == "schedule" || ( "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == "main" ) ) ]]; then
+            # 查询 main 分支最近一次成功 run 的 head SHA(本次 run 未结束, 不会匹配到自己;
+            # tag run 的 head_branch 为 tag 名, 不会混入; API 失败则保持构建, fail-open)
+            BUILD_BASE_SHA="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/ghdesktop2chinese.yml/runs?branch=main&status=success&per_page=1" \
+              --jq '.workflow_runs[0].head_sha' 2>/dev/null || true)"
+            if [[ -n "$BUILD_BASE_SHA" && "$BUILD_BASE_SHA" != "null" ]]; then
+              BUILD_DIFF="$(git diff --name-only "${BUILD_BASE_SHA}..HEAD" -- \
+                json src third_party CMakeLists.txt CMakePresets.json \
+                ':(exclude)third_party/README.md' | wc -l | tr -d ' ')"
+              if [[ "$BUILD_DIFF" -eq 0 ]]; then
+                BUILD_CHANGED="false"
+                echo "::notice::无差异，已跳过构建：当前 commit 与上次成功构建 ${BUILD_BASE_SHA:0:7} 的构建相关路径（json/ src/ third_party/ CMakeLists.txt CMakePresets.json，排除 third_party/README.md）完全一致"
+              else
+                echo "上次成功构建 ${BUILD_BASE_SHA:0:7} 以来有 ${BUILD_DIFF} 个构建相关文件变更，正常执行构建"
+              fi
+            else
+              echo "未查询到 main 分支成功构建记录，视为有差异，正常执行构建"
+            fi
+          fi
+          echo "build_changed=$BUILD_CHANGED" >> "$GITHUB_OUTPUT"
+          echo "build_base=$BUILD_BASE_SHA" >> "$GITHUB_OUTPUT"
 
           if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == v* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
@@ -301,11 +339,13 @@ jobs:
   build:
     name: 构建 (${{ matrix.name }})
     needs: version
+    # build_changed=false(与上次成功构建无差异)时跳过整个矩阵, 由 build-skip-notice 输出说明(#81)
     if: |
-      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
+      needs.version.outputs.build_changed == 'true' &&
+      ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
       github.event_name == 'pull_request' ||
       github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'build' || inputs.type == 'release'))
+      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'build' || inputs.type == 'release')))
     strategy:
       # 单平台失败不取消其余平台: 一次运行尽可能拿到全部平台结果
       fail-fast: false
@@ -577,6 +617,45 @@ jobs:
           name: ${{ env.ARTIFACT_PREFIX }}-${{ matrix.name }}-${{ needs.version.outputs.version || github.sha }}
           if-no-files-found: error
           path: dist/
+
+  # ═════════════════════════════════════════════════
+  # 4b. 构建跳过说明（无差异时输出醒目说明）#81
+  #     skipped job 自身不产生日志, 故设独立 job 在 run 摘要页/日志中明确说明
+  #     "无差异，已跳过构建"及原因(对比基准/白名单路径/影响范围)
+  # ═════════════════════════════════════════════════
+  build-skip-notice:
+    name: 无差异，已跳过构建
+    needs: version
+    if: needs.version.outputs.build_changed == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: 输出跳过原因（Step Summary + notice 注释 + 日志）
+        shell: bash
+        env:
+          BUILD_BASE: ${{ needs.version.outputs.build_base }}
+        run: |
+          BASE_SHORT="${BUILD_BASE:0:7}"
+          {
+            echo "## 无差异，已跳过构建"
+            echo ""
+            echo "**原因**：自上一次成功构建 \`${BASE_SHORT}\` 以来，影响构建产物的路径"
+            echo "（\`json/\`、\`src/\`、\`third_party/\`、\`CMakeLists.txt\`、\`CMakePresets.json\`，"
+            echo "排除纯文档 \`third_party/README.md\`）**无任何变更**，构建产物不会变化，"
+            echo "故跳过构建以节省 runner 资源。"
+            echo ""
+            echo "| 项目 | 值 |"
+            echo "| --- | --- |"
+            echo "| 对比基准（上次成功构建） | \`${BASE_SHORT}\` |"
+            echo "| 当前 commit | \`${GITHUB_SHA:0:7}\` |"
+            echo "| 白名单路径 | \`json/\` \`src/\` \`third_party/\` \`CMakeLists.txt\` \`CMakePresets.json\` |"
+            echo "| 跳过范围 | 四平台构建矩阵（Windows x64 / macOS x64 / macOS arm64 / Linux x64） |"
+            echo ""
+            echo "质量校验与自动维护任务不受影响照常执行；"
+            echo "下次检测到构建相关变更时将自动恢复构建。"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::无差异，已跳过构建：基准 ${BASE_SHORT} 与当前 ${GITHUB_SHA:0:7} 的构建相关路径完全一致，四平台构建矩阵全部跳过"
+          echo "无差异，已跳过构建（对比基准：上次成功构建 ${BASE_SHORT}）"
 
   # ═════════════════════════════════════════════════
   # 5. 自动维护（失效检测 + 候选提取 → 创建/更新 Issue）
