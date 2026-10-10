@@ -34,4 +34,4 @@
 ## 脚本位置
 
 - `tools/auto-maintain/` — 数据维护工具（本地与 CI 共用；含共享规则 `regex-blacklist.json`）
-- `tools/ci/` — CI 脚本（数据质量校验 / 工具自检 / 维护报告）
+- `tools/ci/` — CI 脚本（数据质量校验 / 工具自检 / Markdown 链接检查 / 冒烟测试 / 维护报告）

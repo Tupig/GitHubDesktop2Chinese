@@ -120,7 +120,7 @@ cmake --build build --config Release
 ```
 
 > [!NOTE]
-> OpenSSL 依赖：Windows 使用 CMake 内置下载（无需预装）；Linux 安装 `libssl-dev`、macOS 执行 `brew install openssl` 后由 `find_package(OpenSSL)` 自动发现（本机开发可行）。CI 发布的 **macOS 产物按架构拆分（`macos-x64` / `macos-arm64`）、静态链接 OpenSSL 并 strip/LTO 裁剪**，自包含无额外依赖。
+> OpenSSL 依赖：Windows 静态库与头文件随仓库提交（`third_party/openssl/`，无需预装或联网下载；版本与更新方式见 [`third_party/README.md`](third_party/README.md)）；Linux 安装 `libssl-dev`、macOS 执行 `brew install openssl` 后由 `find_package(OpenSSL)` 自动发现（本机开发可行）。CI 发布的 **macOS 产物按架构拆分（`macos-x64` / `macos-arm64`）、静态链接 OpenSSL 并 strip/LTO 裁剪**，自包含无额外依赖。
 
 ## 👕 怎么贡献汉化
 
@@ -164,7 +164,7 @@ cmake --build build --config Release
 | --- | --- | --- |
 | 构建 | push `main` / PR（目标 main）/ tag `v*` / 定时 / 手动 auto、build、release | 构建矩阵 + 产物功能测试：Windows x64、macOS x64 / arm64（单架构包）、Linux x64 |
 | JSON 质量校验 | PR（目标 main）/ push `main` / tag `v*` / 定时 / 手动 auto、security、release | 正则合法性、结构完整性、占位符检查、std::regex 不兼容语法黑名单、译文问句全角风格 |
-| 工具自检 | PR（目标 main）/ push `main` / tag `v*` / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 |
+| 工具自检 | PR（目标 main）/ push `main` / tag `v*` / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 + Markdown 链接检查 |
 | CodeQL 扫描 | PR（目标 main）/ push `main` / 手动 auto、security、release | C/C++ 安全扫描 |
 | 失效检测 + 候选提取 | push `main` / 定时（每日）/ 手动 auto、maintain、release | 检测失效映射、提取未翻译候选，自动创建/关闭 Issue |
 | Release 发布 | push `main`（有变更时）/ tag `v*` / 定时（有变更时）/ 手动 auto（仅 main, 有变更）、release（仅 main） | 自动升级版本号，发布多平台产物 + localization.json |
@@ -206,12 +206,13 @@ npm run all        # 失效检测 + 未翻译候选提取, 报告写入系统临
 │   └── version/Version.hpp       # 版本号解析（自研代码）
 ├── third_party/                  # 第三方依赖（随仓库提交，含预编译 OpenSSL x64 静态库）
 │   ├── include/                  # CLI11、cpp-httplib、nlohmann/json、spdlog、WinReg
-│   └── openssl/                  # OpenSSL 头文件与预编译库
+│   ├── openssl/                  # OpenSSL 3.5.9 头文件与预编译静态库
+│   └── README.md                 # 三方组件版本清单与本地构建/更新说明
 ├── json/
 │   └── localization.json         # 汉化映射（核心数据；路径为已发布程序的公共契约，不可移动）
 ├── tools/
 │   ├── auto-maintain/            # localization.json 自动维护工具（失效检测 / 候选提取）
-│   └── ci/                       # CI 脚本（数据质量校验 / 工具自检 / 维护报告）
+│   └── ci/                       # CI 脚本（数据质量校验 / 工具自检 / Markdown 链接检查 / 冒烟测试 / 维护报告）
 ├── docs/                         # 文档
 │   ├── README.md                 # 文档索引与归类说明
 │   ├── CONTRIBUTING.md           # 汉化贡献指南（GitHub 自动识别）

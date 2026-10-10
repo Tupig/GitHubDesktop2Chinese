@@ -39,122 +39,29 @@ include_directories(src)
 include_directories(third_party/include)
 
 if(WIN32)
-    # ── Windows: OpenSSL 静态库下载（预编译 x64 库）──
-    # 官方与镜像 URL 内容一致, 均通过 EXPECTED_HASH(SHA256) 校验
-    # 哈希来源: 自 GitHub 官方 Release URL 下载实测 (2026-10); 上游更新库文件时需同步更新哈希
-    # OpenSSL 预编译库根目录: 默认位于源码树; 只读源码目录场景可通过
-    # -DGHD2C_OPENSSL_ROOT=<可写目录> 覆盖(下载/查找/头文件/链接均使用该目录)
-    set(GHD2C_OPENSSL_ROOT "${PROJECT_SOURCE_DIR}/third_party/openssl" CACHE PATH "OpenSSL 预编译库根目录")
-    if(DEFINED GitHubActions)
-        set(LIBSSL_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libssl.lib)
-        set(CRYPTO_URL https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libcrypto.lib)
-    else()
-        set(LIBSSL_URL https://www.ghproxy.cc/https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libssl.lib)
-        set(CRYPTO_URL https://www.ghproxy.cc/https://github.com/cngege/cngege.github.io/releases/download/v0.1-beta.1/libcrypto.lib)
-    endif()
-
-
-
-    # 下载libssl.lib
-
-    # 设置库远程下载超时时间
-    SET(DOWNLOAD_OPENSSL_TIMEOUT 300 CACHE STRING "Timeout in seconds when downloading openssl_lib.")
-    FIND_FILE(LOCAL_OPENSSL_LIBRARIES_PATH
-        NAMES ""
-        HINTS "${GHD2C_OPENSSL_ROOT}/lib"
-        NO_DEFAULT_PATH)
-    if(NOT EXISTS "${GHD2C_OPENSSL_ROOT}/lib")
-        file(MAKE_DIRECTORY "${GHD2C_OPENSSL_ROOT}/lib")
-        SET(LOCAL_OPENSSL_LIBRARIES_PATH "${GHD2C_OPENSSL_ROOT}/lib")
-        MESSAGE(STATUS "Folder \"${GHD2C_OPENSSL_ROOT}/lib\" created successfully.")
-    endif()
-    # FIND_FILE(NAMES "") 在 lib 目录已存在但库文件缺失时返回 NOTFOUND,
-    # 会展开成 "xxx-NOTFOUND/libssl.lib" 这样的错误下载目标; 回退到固定路径
-    if(NOT LOCAL_OPENSSL_LIBRARIES_PATH)
-        SET(LOCAL_OPENSSL_LIBRARIES_PATH "${GHD2C_OPENSSL_ROOT}/lib")
-    endif()
-
-    # /////////////////////////////////////ssl库lib名称////////////////////////////////////////////////
+    # ── Windows: OpenSSL 3.5.9 LTS 静态库（随仓库提交于 third_party/openssl/{include,lib}）──
+    # 库由官方源码构建：github.com/openssl/openssl（tag openssl-3.5.9），
+    # perl Configure VC-WIN64A no-shared no-tests no-apps no-zlib no-asm（MSVC x64 静态库），
+    # 构建与更新步骤见 third_party/README.md；CMake 仅做存在性校验，不从任何外部地址下载。
+    # 源码目录只读等场景可通过 -DGHD2C_OPENSSL_ROOT=<目录> 覆盖查找与链接路径。
+    set(GHD2C_OPENSSL_ROOT "${PROJECT_SOURCE_DIR}/third_party/openssl" CACHE PATH "OpenSSL 静态库根目录（含 include/ 与 lib/）")
     SET(OPENSSL_SSL_NAME "libssl.lib")
-
-    # ssl远程下载地址
-    SET(SSL_DOWNLOAD_URL ${LIBSSL_URL})
-    MESSAGE(STATUS "Checking ${OPENSSL_SSL_NAME}...")
-    # 判断库文件是否已经存在
-    FIND_FILE(LOCAL_OPENSSL_SSL_LIB
-        NAMES ${OPENSSL_SSL_NAME}
-        HINTS "${GHD2C_OPENSSL_ROOT}/lib"
-        #NO_CACHE
-        NO_DEFAULT_PATH)
-    MESSAGE(STATUS "Checking url link ${LIBSSL_URL} ...")
-    # 如果路径下没有目标文件
-    IF(NOT LOCAL_OPENSSL_SSL_LIB)
-        MESSAGE(STATUS "Downloading ${OPENSSL_SSL_NAME} to ${LOCAL_OPENSSL_LIBRARIES_PATH} ...")
-            # 从设定的 URL 地址下载相应的压缩包
-        FILE(DOWNLOAD ${LIBSSL_URL}
-            ${LOCAL_OPENSSL_LIBRARIES_PATH}/${OPENSSL_SSL_NAME}
-            EXPECTED_HASH SHA256=80c92c42796d4cde173916debae464c9e7e428fed07ee313b64ff1845c08736f
-            TIMEOUT ${DOWNLOAD_OPENSSL_TIMEOUT}
-            STATUS ERR
-            SHOW_PROGRESS)
-        # 判断下载是否存在错误
-        IF(ERR EQUAL 0)
-            # 如果下载无错误则设置压缩包名称标记下载成功
-            SET(LOCAL_OPENSSL_SSL_LIB "${LOCAL_OPENSSL_LIBRARIES_PATH}/${OPENSSL_SSL_NAME}")
-        #下载错误输出相关的提示信息
-        ELSE()
-            FILE(REMOVE ${LOCAL_OPENSSL_LIBRARIES_PATH}/${OPENSSL_SSL_NAME})
-            MESSAGE(STATUS "Download failed, error: ${ERR}")
-            MESSAGE(FATAL_ERROR
-            "You can try downloading ${LIBSSL_URL} manually "
-            "using curl/wget or a similar tool")
-        ENDIF()
-    ENDIF()
-    # 如果路径下存在文件
-    IF(LOCAL_OPENSSL_SSL_LIB)
-        MESSAGE(STATUS "Checking the direction of ${LOCAL_OPENSSL_LIBRARIES_PATH}/${OPENSSL_SSL_NAME}")
-    ENDIF()
-
-
-    # /////////////////////////////////////crypto库lib名称////////////////////////////////////////////////
     SET(OPENSSL_CRYPTO_NAME "libcrypto.lib")
-    # ssl远程下载地址
-    SET(CRYPTO_DOWNLOAD_URL ${CRYPTO_URL})
-    MESSAGE(STATUS "Checking ${OPENSSL_CRYPTO_NAME}...")
-    # 判断库文件是否已经存在
-    FIND_FILE(LOCAL_OPENSSL_CRYPTO_LIB
-        NAMES ${OPENSSL_CRYPTO_NAME}
-        HINTS "${GHD2C_OPENSSL_ROOT}/lib"
-        #NO_CACHE
-        NO_DEFAULT_PATH)
-    MESSAGE(STATUS "Checking url link ${CRYPTO_URL} ...")
-    # 如果路径下没有目标文件
-    IF(NOT LOCAL_OPENSSL_CRYPTO_LIB)
-        MESSAGE(STATUS "Downloading ${OPENSSL_CRYPTO_NAME} to ${LOCAL_OPENSSL_LIBRARIES_PATH} ...")
-            # 从设定的 URL 地址下载相应的压缩包
-        FILE(DOWNLOAD ${CRYPTO_URL}
-            ${LOCAL_OPENSSL_LIBRARIES_PATH}/${OPENSSL_CRYPTO_NAME}
-            EXPECTED_HASH SHA256=1e32b094bf4d9c5d9eb62c46b3b258c23bf6078e25f48b3cc869b86fed33d87c
-            TIMEOUT ${DOWNLOAD_OPENSSL_TIMEOUT}
-            STATUS ERR
-            SHOW_PROGRESS)
-        # 判断下载是否存在错误
-        IF(ERR EQUAL 0)
-            # 如果下载无错误则设置压缩包名称标记下载成功
-            SET(LOCAL_OPENSSL_CRYPTO_LIB "${LOCAL_OPENSSL_LIBRARIES_PATH}/${OPENSSL_CRYPTO_NAME}")
-        #下载错误输出相关的提示信息
-        ELSE()
-            FILE(REMOVE ${LOCAL_OPENSSL_LIBRARIES_PATH}/${OPENSSL_CRYPTO_NAME})
-            MESSAGE(STATUS "Download failed, error: ${ERR}")
-            MESSAGE(FATAL_ERROR
-            "You can try downloading ${CRYPTO_URL} manually "
-            "using curl/wget or a similar tool")
-        ENDIF()
-    ENDIF()
-    # 如果路径下存在压缩文件
-    IF(LOCAL_OPENSSL_CRYPTO_LIB)
-        MESSAGE(STATUS "Checking the direction of ${LOCAL_OPENSSL_LIBRARIES_PATH}/${OPENSSL_CRYPTO_NAME}")
-    ENDIF()
+
+    # 完整性校验：任一组件缺失即报错并给出恢复指引（git 恢复优先，其次按 third_party/README.md 自行构建）
+    set(GHD2C_OPENSSL_REQUIRED
+        "include/openssl/ssl.h"
+        "lib/${OPENSSL_SSL_NAME}"
+        "lib/${OPENSSL_CRYPTO_NAME}")
+    foreach(_oss_comp IN LISTS GHD2C_OPENSSL_REQUIRED)
+        if(NOT EXISTS "${GHD2C_OPENSSL_ROOT}/${_oss_comp}")
+            message(FATAL_ERROR
+                "OpenSSL 静态库组件缺失: ${GHD2C_OPENSSL_ROOT}/${_oss_comp}\n"
+                "third_party/openssl/{include,lib} 应随仓库提交。若被误删，请执行:\n"
+                "  git checkout -- third_party/openssl\n"
+                "或参考 third_party/README.md 用官方源码自行构建后重试。")
+        endif()
+    endforeach()
 
     # 包含 openssl 的头文件
     include_directories("${GHD2C_OPENSSL_ROOT}/include")
@@ -169,7 +76,7 @@ add_executable (GitHubDesktop2Chinese "src/GitHubDesktop2Chinese.cpp")
 
 
 if(WIN32)
-    # 链接OpenSSL静态库（Windows 预编译 x64）
+    # 链接OpenSSL静态库（third_party/openssl 仓库内 x64 静态库）
     target_link_libraries(GitHubDesktop2Chinese PRIVATE
         ${GHD2C_OPENSSL_ROOT}/lib/${OPENSSL_SSL_NAME}
         ${GHD2C_OPENSSL_ROOT}/lib/${OPENSSL_CRYPTO_NAME})

@@ -1,6 +1,6 @@
 # CI / CD
 
-仓库只有**一个工作流**：[`.github/workflows/ghdesktop2chinese.yml`](../../.github/workflows/ghdesktop2chinese.yml)。大型脚本全部外置于 `tools/ci/`（数据质量校验 / 工具自检 / 维护报告），YAML 内只保留编排逻辑。
+仓库只有**一个工作流**：[`.github/workflows/ghdesktop2chinese.yml`](../../.github/workflows/ghdesktop2chinese.yml)。大型脚本全部外置于 `tools/ci/`（数据质量校验 / 工具自检 / Markdown 链接检查 / 冒烟测试 / 维护报告），YAML 内只保留编排逻辑。
 
 ## 触发方式
 
@@ -36,7 +36,7 @@ Job 依赖关系：`build ← version`；`release ← version + build + json-qua
 | `version`（变更检测） | push main / tag / 定时 / 手动 | 以最新 `v*` tag 为基准，检测 `json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 的实际变更，输出 `changed` 供发布环节判断 |
 | `build` | PR / push / tag / 定时 / 手动 auto、build、release | **四目标构建矩阵 + 产物功能测试**：Windows x64、macOS x64 / arm64（单架构包，静态链接 OpenSSL + strip/LTO 裁剪）、Linux x64；`fail-fast` 关闭，单平台失败不取消其余平台 |
 | `json-quality` | PR / push / tag / 定时 / 手动 auto、security、release | `localization.json` 质量门：正则合法性、结构完整性、占位符检查、`std::regex` 不兼容语法黑名单、ReDoS 启发式、译文问句全角风格 |
-| `tools-test` | PR / push / tag / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 |
+| `tools-test` | PR / push / tag / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 + Markdown 链接检查（`tools/ci/md-check.py`） |
 | `codeql` | PR（仅同仓分支，fork PR 不跑——其令牌无 security-events 写权限，上传必失败）/ push main / 手动 auto、security、release | C/C++ 安全扫描（不含定时，节省资源；运行于 Windows runner） |
 | `auto-maintain` | push main / 每日定时 / 手动 auto、maintain、release | 失效检测 + 候选提取，自动创建/关闭带 `auto-maintain` 标签的 Issue（详见[自动维护工具](自动维护工具.md#ci-自动维护)） |
 | `release` | push main（有变更）/ tag `v*` / 定时（有变更）/ 手动 auto（main，有变更）、release（main） | 发布，见下节 |

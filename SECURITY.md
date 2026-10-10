@@ -29,7 +29,7 @@
 - **自更新**：按发布资产声明的 SHA256 校验下载完整性；文件替换采用原子写入并保留备份
 - **供应链**
   - 第三方 Actions 全部按 commit SHA 固定（版本升级随上游手动执行；依赖漏洞由 Dependabot 告警提示）
-  - Windows 的 OpenSSL 静态库由 CMake 从固定 URL 下载并校验 SHA256；macOS 静态库由 CI 基于上游 OpenSSL 3.x 源码构建
+  - Windows 的 OpenSSL 静态库与头文件直接随仓库提交（`third_party/openssl/`，由上游源码构建，版本记录与构建流程见 [`third_party/README.md`](third_party/README.md)）；macOS 静态库由 CI 基于上游 OpenSSL 3.x 源码构建
   - 发布产物附带构建溯源证明（SLSA provenance），可校验：
 
     ```bash

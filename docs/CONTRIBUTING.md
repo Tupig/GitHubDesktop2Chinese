@@ -69,6 +69,7 @@
 
    > `--nopause` 为程序级参数，必须写在 `dev` 子命令之前；输出会逐个报告匹配失败 / 正则非法的条目。
 4. 也可用自动维护工具离线检测与提取候选：`cd tools/auto-maintain && npm run all`，详见[工具说明](../tools/auto-maintain/README.md)（参数与报告格式另见 [wiki 自动维护工具](wiki/自动维护工具.md)）。
+5. 加载器（`src/`）改动的冒烟回归：运行 [`tools/ci/smoke-test.ps1`](../tools/ci/smoke-test.ps1)，自动探测构建产物并依次执行帮助、非法参数、临时目录汉化、回滚四组用例，全部 PASS 即通过。
 
 ## 发布说明（docs/ReleaseBody.md）
 

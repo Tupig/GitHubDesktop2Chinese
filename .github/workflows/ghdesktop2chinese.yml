@@ -22,7 +22,7 @@
 # ── jobs 总览与依赖 ─────────────────────────────────────────
 #   0. version        解析版本号与变更检测（构建/发布类任务的前置）
 #   1. json-quality   localization.json 数据质量门
-#   2. tools-test     自动维护工具自检门（语法 + 单元测试）
+#   2. tools-test     自动维护工具自检门（语法 + 单元测试 + Markdown 链接检查）
 #   3. codeql         C/C++ 安全扫描门
 #   4. build          构建矩阵(三平台四目标) + 产物功能测试
 #   5. auto-maintain  失效检测 + 未翻译候选提取（定时 / 手动）
@@ -215,7 +215,7 @@ jobs:
         run: python tools/ci/check-localization.py
 
   # ═════════════════════════════════════════════════
-  # 2. 自动维护工具自检门（语法 + 单元测试）
+  # 2. 自动维护工具自检门（语法 + 单元测试 + Markdown 链接检查）
   # ═════════════════════════════════════════════════
   tools-test:
     name: 自动维护工具自检
@@ -242,6 +242,9 @@ jobs:
 
       - name: 单元测试（提取过滤 + 草稿生成逻辑）
         run: node tools/ci/tools-self-test.mjs
+
+      - name: Markdown 链接检查
+        run: python tools/ci/md-check.py
 
   # ═════════════════════════════════════════════════
   # 3. CodeQL 安全扫描门（PR / push main / 手动 auto|security|release；不含定时以节省资源）
@@ -271,7 +274,7 @@ jobs:
         shell: pwsh
         run: |
           chcp 65001 | Out-Null
-          cmake -B build -A x64 -DGitHubActions=1 -DFILE_VERSION="codeql"
+          cmake -B build -A x64 -DFILE_VERSION="codeql"
 
       - name: Build for CodeQL
         shell: pwsh
@@ -408,9 +411,9 @@ jobs:
         run: |
           chcp 65001 | Out-Null
           $ver = if ($env:RELEASE_VERSION) { "v$env:RELEASE_VERSION" } else { "ci-${{ github.sha }}" }
-          # CMake 配置含第三方库下载，网络抖动时自动重试
+          # CMake 配置无需联网（OpenSSL 静态库随仓库提交），环境抖动时自动重试
           for ($attempt = 1; $attempt -le 3; $attempt++) {
-            cmake -B build -A x64 -DGitHubActions=1 "-DFILE_VERSION=$ver"
+            cmake -B build -A x64 "-DFILE_VERSION=$ver"
             if ($LASTEXITCODE -eq 0) { break }
             if ($attempt -ge 3) { Write-Error "CMake 配置连续失败 3 次"; exit 1 }
             Write-Warning "CMake 配置失败(第 $attempt 次)，15 秒后重试"
@@ -438,7 +441,7 @@ jobs:
             EXTRA+=("-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=TRUE")
           fi
           for attempt in 1 2 3; do
-            if cmake -B build -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DGitHubActions=1 "-DFILE_VERSION=$VER" ${EXTRA[@]+"${EXTRA[@]}"}; then
+            if cmake -B build -DCMAKE_BUILD_TYPE="$BUILD_TYPE" "-DFILE_VERSION=$VER" ${EXTRA[@]+"${EXTRA[@]}"}; then
               break
             fi
             [[ $attempt -ge 3 ]] && { echo "::error::CMake 配置连续失败 3 次"; exit 1; }
