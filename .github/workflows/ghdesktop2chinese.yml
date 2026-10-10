@@ -26,6 +26,7 @@
 #   0. version        解析版本号与变更检测（构建/发布类任务的前置）;
 #                     构建差异检测: 与上次成功构建对比, 无差异时输出 build_changed=false
 #   1. json-quality   localization.json 数据质量门
+#   1b. encoding-check 源码编码格式质量门（UTF-8 无 BOM; 第三方依赖排除, 违规即失败）#88
 #   2. tools-test     自动维护工具自检门（语法 + 单元测试 + Markdown 链接检查）
 #   3. codeql         C/C++ 安全扫描门
 #   4. build          构建矩阵(三平台四目标) + 产物功能测试（无差异时跳过, 见注4）
@@ -33,8 +34,8 @@
 #   5. auto-maintain  失效检测 + 未翻译候选提取（定时 / 手动）
 #   6. release        汇总产物并发布
 #
-#   job 依赖: build←version；build-skip-notice←version；release←version+build+json-quality+tools-test
-#             json-quality / tools-test / codeql / auto-maintain 相互独立，与 build 并行
+#   job 依赖: build←version；build-skip-notice←version；release←version+build+json-quality+tools-test+encoding-check
+#             json-quality / encoding-check / tools-test / codeql / auto-maintain 相互独立，与 build 并行
 #   链路保证: changed=true(有变更待发版)时 build_changed 恒为 true(强制构建),
 #             release 需要的产物永远存在; 无差异跳过只发生在 changed=false 时
 #
@@ -255,6 +256,29 @@ jobs:
 
       - name: 深度校验 localization.json
         run: python tools/ci/check-localization.py
+
+  # ═════════════════════════════════════════════════
+  # 1b. 源码编码格式质量门（UTF-8 无 BOM）#88
+  #     全量扫描 git 跟踪文本文件（构建产物未被跟踪天然排除）;
+  #     第三方依赖目录排除（其编码不受本仓管控）;
+  #     非 UTF-8 / 意外 BOM 以明确清单(::error::)+非零退出码使流程失败;
+  #     smoke-test.ps1 为 BOM 白名单例外(Windows PowerShell 5.1 兼容)
+  # ═════════════════════════════════════════════════
+  encoding-check:
+    name: 源码编码格式检查
+    # release needs 本任务: 发布前强制过编码规范门, 防止非 UTF-8/BOM 污染进入发布链
+    if: |
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
+      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'security' || inputs.type == 'release'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: 全量扫描源码编码（UTF-8 无 BOM）
+        run: python tools/ci/check-encoding.py
 
   # ═════════════════════════════════════════════════
   # 2. 自动维护工具自检门（语法 + 单元测试 + Markdown 链接检查）
@@ -742,9 +766,9 @@ jobs:
   # ═════════════════════════════════════════════════
   release:
     name: 发布 Release
-    # json-quality/tools-test 与 release 同属任务门: 发布前强制过质量门与工具自检
-    # (二者 if 已覆盖 push tag / dispatch release / schedule 分支, 不会出现 needs 悬空)
-    needs: [version, build, json-quality, tools-test]
+    # json-quality/encoding-check/tools-test 与 release 同属任务门: 发布前强制过质量门/编码规范门/工具自检
+    # (三者 if 已覆盖 push tag / dispatch release / schedule 分支, 不会出现 needs 悬空)
+    needs: [version, build, json-quality, tools-test, encoding-check]
     # 发布边界: push main 仅在存在构建相关变更时自动补丁发版; 手动 auto/release 仅限 main(防特性分支误发布)
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
