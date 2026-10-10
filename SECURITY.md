@@ -36,6 +36,7 @@
     gh attestation verify <下载的文件> --repo Tupig/GitHubDesktop2Chinese
     ```
 
+  - Windows 发布产物经 [SignPath](https://signpath.org)（Foundation 免费开源代码签名）签名；签名凭据未配置时自动跳过（产物不签名，发布不受阻）；签名后对产物重新生成构建溯源证明
 - **代码与数据扫描**：CodeQL（C/C++，PR 与 main 推送）；`localization.json` 质量门（非法/危险正则黑名单、ReDoS 启发式、结构与占位符校验）；仓库已启用 Secret Scanning 与 Push Protection、Dependabot 漏洞告警与私密漏洞报告；`.gitignore` 防御性排除凭据/密钥类文件（`.env*`/`*.pem`/`*.key` 等）
 
 ## 范围说明

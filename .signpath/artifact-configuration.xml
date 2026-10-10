@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath Artifact Configuration
+  用途: 在 SignPath 平台创建/编辑本仓库项目时, Artifact Configuration 引用本文件内容。
+  说明: CI 通过 upload-artifact 上传待签名 exe(GitHub 打包为 zip), 故根元素为 zip-file;
+        其中唯一的 GitHubDesktop2Chinese.exe 做 Authenticode 签名。
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="GitHubDesktop2Chinese.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

@@ -9,7 +9,7 @@
 > 本仓库派生（fork）自 [cngege/GitHubDesktop2Chinese](https://github.com/cngege/GitHubDesktop2Chinese)，在此基础上继续维护与更新。原作者 [CNGEGE](https://github.com/cngege)，感谢其开创性工作。
 
 > [!TIP]
-> 📚 **更详细的文档**见 [docs/wiki 文档中心](docs/wiki/Home.md)：[安装与使用](docs/wiki/安装与使用.md) · [命令行参数](docs/wiki/命令行参数.md) · [常见问题](docs/wiki/常见问题.md) · [汉化原理](docs/wiki/汉化原理.md) · [映射文件格式](docs/wiki/映射文件格式.md) · [正则表达式指南](docs/wiki/正则表达式指南.md) · [编译指南](docs/wiki/编译指南.md) · [CI/CD](docs/wiki/CI-CD.md)
+> 📚 **更详细的文档**见 [docs/wiki 文档中心](docs/wiki/Home.md)：[安装与使用](docs/wiki/安装与使用.md) · [命令行参数](docs/wiki/命令行参数.md) · [常见问题](docs/wiki/常见问题.md) · [汉化原理](docs/wiki/汉化原理.md) · [映射文件格式](docs/wiki/映射文件格式.md) · [正则表达式指南](docs/wiki/正则表达式指南.md) · [编译指南](docs/wiki/编译指南.md) · [CI/CD](docs/wiki/CI-CD.md) · [贡献指南](docs/wiki/贡献指南.md) · [自动维护工具](docs/wiki/自动维护工具.md)
 
 ## 目录
 

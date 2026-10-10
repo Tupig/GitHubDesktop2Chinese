@@ -1,7 +1,6 @@
 # GitHubDesktop2Chinese 文档中心
 
-> 本目录是项目的 **Wiki 文档中心**，内容比 README 更详细、成体系。
-> 如需将本目录发布到 GitHub Wiki，把各 `.md` 文件推送至仓库的 `wiki` 管理仓库（`<用户名>/<仓库名>.wiki.git`）即可，页面名即文件名（`_Sidebar.md` / `_Footer.md` 会被 GitHub Wiki 自动识别为侧边栏与页脚）。
+> 本页面是项目的 **Wiki 文档中心**首页，内容比 README 更详细、成体系。
 
 [GitHubDesktop2Chinese](https://github.com/Tupig/GitHubDesktop2Chinese) 是一个把 [GitHub Desktop](https://desktop.github.com/) 界面文本自动替换为中文的工具：**无需重打包、无需改安装器**，加载器直接对 GitHub Desktop 的 `main.js` / `renderer.js` 做「正则映射替换」，并全程保留 `.bak` 备份、可一键回滚。
 

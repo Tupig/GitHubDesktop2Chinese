@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `push` | `main` 分支或 `v*` tag | push main 有构建相关变更时自动发布；push tag 始终发布 |
 | `pull_request` | 目标为 `main` | 跑构建 + 质量门，不发布 |
-| `schedule` | 每日 UTC 02:00（北京时间 10:00） | 完整链路：构建 → 检查 → 维护 → （有变更时）发布 |
+| `schedule` | 每日 UTC 02:13（北京时间 10:13；分钟避开整点，防高负载延迟/丢弃） | 完整链路：构建 → 检查 → 维护 → （有变更时）发布 |
 | `workflow_dispatch` | 手动 | 输入 `type` + 可选 `version`，见下表 |
 
 手动触发（`workflow_dispatch`）的 `type` 与执行范围：
@@ -33,7 +33,7 @@ Job 依赖关系：`build ← version`；`release ← version + build + json-qua
 
 | Job | 触发 | 内容 |
 | --- | --- | --- |
-| `version`（变更检测） | push main / tag / 定时 / 手动 | 以最新 `v*` tag 为基准，检测 `json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 的实际变更，输出 `changed` 供发布环节判断 |
+| `version`（变更检测） | push main / tag / 定时 / 手动 | 以最新 `v*` tag 为基准，检测 `json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 的实际变更（排除纯文档 `third_party/README.md`），输出 `changed` 供发布环节判断 |
 | `build` | PR / push / tag / 定时 / 手动 auto、build、release | **四目标构建矩阵 + 产物功能测试**：Windows x64、macOS x64 / arm64（单架构包，静态链接 OpenSSL + strip/LTO 裁剪）、Linux x64；`fail-fast` 关闭，单平台失败不取消其余平台 |
 | `json-quality` | PR / push / tag / 定时 / 手动 auto、security、release | `localization.json` 质量门：正则合法性、结构完整性、占位符检查、`std::regex` 不兼容语法黑名单、ReDoS 启发式、译文问句全角风格 |
 | `tools-test` | PR / push / tag / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 + Markdown 链接检查（`tools/ci/md-check.py`） |
@@ -60,11 +60,21 @@ Job 依赖关系：`build ← version`；`release ← version + build + json-qua
 - 多平台产物：`GitHubDesktop2Chinese.exe`（Windows x64）、`GitHubDesktop2Chinese-macos-x64`、`GitHubDesktop2Chinese-macos-arm64`、`GitHubDesktop2Chinese-linux-x64`；
 - `localization.json`（用户可单独下载映射）；
 - 每个产物的**构建溯源证明**（SLSA provenance），可用 `gh attestation verify <文件> --repo Tupig/GitHubDesktop2Chinese` 校验；
+- Windows 产物的代码签名：配置 SignPath 凭据后自动签名（见[代码签名](#代码签名signpath)）；
 - Release 说明：从 [`docs/ReleaseBody.md`](../ReleaseBody.md) 提取**行尾含全角版本标记**（如 `（v1.2.25）`）的变更行拼接，再附静态的「### 程序说明」段落。未标注或版本号未命中的行不会出现（显示「未找到变更记录」提示），也**不阻断**发布。
 
 **发布前置门禁**：`release` job 强制依赖 json-quality 与 tools-test 通过——质量门挂了就不会发版；CodeQL 与失效检测在手动 release 时为**旁路执行**（发现问题时告警/开 Issue，不阻塞发布）；Release 创建失败有自动自愈重试。
 
 **发布边界**：发布类（`auto` / `release`）仅限 `main` 分支触发，防止特性分支误发布；其他分支可跑 build / security / maintain 做排查。
+
+## 代码签名（SignPath）
+
+Windows 产物（`GitHubDesktop2Chinese.exe`）在发布前经 [SignPath](https://signpath.org)（Foundation 计划为开源项目免费提供代码签名证书）签名。
+
+- **启用条件**：仓库 Secrets `SIGNPATH_API_TOKEN` 与 Variables `SIGNPATH_ORGANIZATION_ID` 同时配置才签名；任一缺失自动跳过，产物保持未签名，发布流程不受影响；
+- **可覆盖项**：Variables `SIGNPATH_PROJECT_SLUG`（默认 `GitHubDesktop2Chinese`）、`SIGNPATH_SIGNING_POLICY_SLUG`（默认 `release-signing`）；
+- **流程**（release 任务内）：下载构建产物 → 单独上传待签名 exe（SignPath 要求签名对象先作为 GitHub artifact 存在）→ 提交签名请求并等待完成 → 签名产物替换原 exe → 对签名产物**重新生成构建溯源证明**（签名会改变文件内容，未签名版本的证明摘要不再匹配）；
+- **SignPath 侧一次性配置**（维护者）：申请 [SignPath Foundation](https://signpath.org/apply) → 创建项目（slug 与仓库名一致；Artifact Configuration 引用 [`.signpath/artifact-configuration.xml`](../../.signpath/artifact-configuration.xml)；Trusted Build System 关联 GitHub.com 本仓库）→ 创建 `release-signing` 签名策略 → 生成 API Token 与组织 ID 分别存入仓库 Secrets / Variables。
 
 ## 质量门明细（json-quality）
 
@@ -81,5 +91,5 @@ PR 与发布前对 `localization.json` 做静态校验（脚本：`tools/ci/chec
 ## 对贡献者的意义
 
 - PR 阶段会自动跑质量门与工具自检，本地过了 CI 一般也过；
-- 合并到 main 后，只要改了 `json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 任一路径，**不需要手动发版**——下次 push / 每日定时会自动出补丁版本；
+- 合并到 main 后，只要改了 `json/`、`src/`、`third_party/`（不含纯文档 `third_party/README.md`）、`CMakeLists.txt`、`CMakePresets.json` 任一路径，**不需要手动发版**——下次 push / 每日定时会自动出补丁版本；
 - 想让自己的变更行出现在 Release 说明里，记得按[贡献指南](贡献指南.md#4-发布说明docsreleasebodymd)在 `docs/ReleaseBody.md` 标注全角版本标记。
