@@ -4,7 +4,11 @@ name: Vendor OpenSSL (macOS)
 # 产出的 include/ + lib/{libssl.a,libcrypto.a}（双架构各一份）以 artifact 上传，
 # 由维护者下载后提交至 third_party/openssl-macos-{x64,arm64}/（步骤见 third_party/README.md）。
 # 默认固定 openssl-3.5.9（与 Windows 内置库一致）；升级 LTS 时通过输入参数指定新版本。
-# 本工作流常驻仓库供未来升级复用，不参与 push/PR/schedule 日常 CI。
+# 本工作流常驻仓库供未来升级复用，不参与 push/schedule 日常 CI。
+#
+# pull_request 触发为「引导」通道：workflow_dispatch 只能触发已登记在默认分支的工作流，
+# 本工作流首次入库时尚不在 main，故临时以 pull_request(paths 限本文件) 在 PR 上产出库；
+# 入库后移除该触发，保留 workflow_dispatch 供未来 LTS 升级手动复用（见 PR 说明）。
 on:
   workflow_dispatch:
     inputs:
@@ -13,6 +17,9 @@ on:
         required: true
         default: '3.5.9'
         type: string
+  pull_request:
+    paths:
+      - .github/workflows/vendor-openssl.yml
 
 permissions:
   contents: read
@@ -33,13 +40,15 @@ jobs:
       matrix:
         arch: [x64, arm64]
     steps:
-      - name: 下载并构建 OpenSSL ${{ inputs.openssl-version }} (${{ matrix.arch }})
+      - name: 下载并构建 OpenSSL (${{ matrix.arch }})
         shell: bash
         env:
-          OSSL_VER: ${{ inputs.openssl-version }}
+          # 非 workflow_dispatch 触发（引导期 pull_request）时 inputs 为空，回退默认版本
+          OSSL_VER: ${{ inputs.openssl-version || '3.5.9' }}
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
+          echo "OpenSSL 版本: $OSSL_VER ($ARCH)"
           [[ "$OSSL_VER" =~ ^3\.[0-9]+\.[0-9]+$ ]] || { echo "::error::OpenSSL 版本号异常: $OSSL_VER"; exit 1; }
           case "$ARCH" in
             x64)   TARGET="darwin64-x86_64-cc" ;;
