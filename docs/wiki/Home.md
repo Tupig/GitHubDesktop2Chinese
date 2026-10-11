@@ -1,5 +1,7 @@
 # GitHubDesktop2Chinese 文档中心
 
+**简体中文** | [English](#githubdesktop2chinese-documentation-hub-english)
+
 > 本页面是项目的 **Wiki 文档中心**首页，内容比 README 更详细、成体系。
 
 [GitHubDesktop2Chinese](https://github.com/Tupig/GitHubDesktop2Chinese) 是一个把 [GitHub Desktop](https://desktop.github.com/) 界面文本自动替换为中文的工具：**无需重打包、无需改安装器**，加载器直接对 GitHub Desktop 的 `main.js` / `renderer.js` 做「正则映射替换」，并全程保留 `.bak` 备份、可一键回滚。
@@ -50,7 +52,7 @@
 | --- | --- |
 | [汉化原理](汉化原理.md) | 架构设计、目录自动探测、备份与原子写入、三元素回填、自动更新机制 |
 | [编译指南](编译指南.md) | 三平台（Windows / macOS / Linux）环境准备、CMake 预设、OpenSSL 处理、常见构建错误 |
-| [CI-CD](CI-CD.md) | 统一工作流的七个 job、触发矩阵、版本号递增与发布规则、质量门 |
+| [CI-CD](CI-CD.md) | 统一工作流的各个 job、触发矩阵、版本号递增与发布规则、质量门、Wiki 自动同步 |
 
 ### 其他
 
@@ -79,3 +81,89 @@
 | Linux | x64 可执行文件 | 依赖系统 OpenSSL（`libssl-dev`）；安装目录需手动输入或用 `-g` 指定 |
 
 > 仅支持 64 位构建与运行；32 位版本已停止提供（v1.2.6 起）。
+
+---
+
+# GitHubDesktop2Chinese Documentation Hub (English)
+
+[简体中文](#githubdesktop2chinese-文档中心) | **English**
+
+> This is the home page of the project's **Wiki documentation hub** — more detailed and better structured than the README.
+
+[GitHubDesktop2Chinese](https://github.com/Tupig/GitHubDesktop2Chinese) is a tool that automatically replaces the interface text of [GitHub Desktop](https://desktop.github.com/) with Chinese: **no repackaging, no installer modifications** — the loader performs "regex-based mapping replacement" directly against GitHub Desktop's `main.js` / `renderer.js`, always keeps `.bak` backups, and supports one-click rollback.
+
+- Original upstream project: [cngege/GitHubDesktop2Chinese](https://github.com/cngege/GitHubDesktop2Chinese) (many thanks to CNGEGE for the pioneering work)
+- Video tutorial: [BiliBili](https://www.bilibili.com/video/BV17HpSeHEaC/)
+
+---
+
+## Quick Start (30-second version)
+
+1. Download the `GitHubDesktop2Chinese` executable for your platform from [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) (Windows x64 / macOS x64·arm64 / Linux x64).
+2. Double-click to run it (on macOS / Linux, run the binary in a terminal). The program will:
+   - Automatically locate the GitHub Desktop installation directory from the registry (Windows);
+   - Automatically fetch the latest `localization.json` mapping over the network;
+   - Automatically back up `main.js` / `renderer.js` as `.bak`;
+   - Apply the mappings one by one and write the files back atomically.
+3. Reopen GitHub Desktop — the interface is now in Chinese.
+
+> After every GitHub Desktop auto-update the localization is replaced by the new version; **simply run this program once more**.
+
+Running into problems? Check the [FAQ](常见问题.md) first.
+
+---
+
+## Documentation Navigation
+
+### For Users
+
+| Page | Contents |
+| --- | --- |
+| [Installation and Usage](安装与使用.md) | Download channels, the two ways to run it, a step-by-step walkthrough of the whole flow, proxy and offline scenarios, enabling preview features |
+| [Command-Line Options](命令行参数.md) | Quick reference for all CLI arguments, the argument-order rule, the developer menu (Shift), exit codes, copy-paste examples |
+| [FAQ](常见问题.md) | Troubleshooting: flash-and-close, missing DLLs, GitHub Desktop won't open after localization, restoring, cross-platform paths, and more |
+
+### For Contributors
+
+| Page | Contents |
+| --- | --- |
+| [Contribution Guide](贡献指南.md) | The complete flow from cloning to opening a PR, local verification methods, how to write release notes |
+| [Mapping File Format](映射文件格式.md) | The semantics of every `localization.json` field, the three-element entry form, the `#{n}` placeholder backfill mechanism |
+| [Regular Expression Guide](正则表达式指南.md) | Escaping rules, the `std::regex` compatibility blacklist, "short-in-long" ordering, translation style conventions |
+| [Auto-Maintain Tool](自动维护工具.md) | How `tools/auto-maintain` detects invalid entries and extracts candidates: internals, parameters, reading the report |
+
+### For Developers
+
+| Page | Contents |
+| --- | --- |
+| [How the Localization Works](汉化原理.md) | Architecture design, automatic directory detection, backups and atomic writes, three-element backfill, the self-update mechanism |
+| [Build Guide](编译指南.md) | Environment setup for three platforms (Windows / macOS / Linux), CMake presets, OpenSSL handling, common build errors |
+| [CI/CD](CI-CD.md) | The jobs of the unified workflow, the trigger matrix, version bumping and release rules, quality gates, automatic Wiki sync |
+
+### Others
+
+- [Security Policy](../../SECURITY.md): private vulnerability reporting, supply chain and verification notes
+- [Release notes template](../ReleaseBody.md): how CI assembles change lines into the release notes
+- [Project structure](../../README.md#-项目结构): a quick look at the repository tree
+
+---
+
+## Design Goals
+
+| Goal | Approach |
+| --- | --- |
+| High compatibility | Regex-based mapping replacement instead of hardcoded offsets — when GitHub Desktop updates frequently, only a few entries break |
+| Low maintenance cost | Daily CI automatically detects invalid entries and extracts untranslated candidates; humans only fill in translations |
+| Recoverable | `.bak` backups are created before the first localization; exceptions trigger automatic rollback; `--rollback` restores with one command |
+| Self-updating | The loader checks for new releases and downloads via browser direct links with SHA256 verification and resumable downloads |
+| Cross-platform | C++20 + CMake — one codebase, three toolchains (MSVC / AppleClang / GCC) |
+
+## Supported Platforms
+
+| Platform | Artifact | Notes |
+| --- | --- | --- |
+| Windows | `GitHubDesktop2Chinese.exe` (x64) | Automatically detects the install directory from the registry; interface texts follow the Windows build of GitHub Desktop |
+| macOS | `GitHubDesktop2Chinese-macos-x64` / `GitHubDesktop2Chinese-macos-arm64` | Pick the single-architecture package for your machine; statically linked OpenSSL, self-contained; the install directory must be entered manually or passed via `-g` |
+| Linux | x64 executable | Depends on the system OpenSSL (`libssl-dev`); the install directory must be entered manually or passed via `-g` |
+
+> Only 64-bit builds and runs are supported; 32-bit versions are no longer provided (since v1.2.6).
