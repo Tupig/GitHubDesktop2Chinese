@@ -2,7 +2,7 @@
 
 **简体中文** | [English](#third-party-dependencies-english)
 
-本目录存放 GitHubDesktop2Chinese 的全部第三方依赖，**全部随仓库提交**（含 Windows 版 OpenSSL 静态库），克隆后无需联网下载依赖即可构建。
+本目录存放 GitHubDesktop2Chinese 的全部第三方依赖，**全部随仓库提交**（含 Windows 与 macOS 版 OpenSSL 静态库），克隆后无需联网下载依赖即可构建。
 
 依赖来源政策：仅使用上游官方 GitHub 仓库 / 官方 Release 资产，不引入外部镜像或非官方预编译产物（CI 使用的 GitHub Actions 仅限 `actions/*` 与 `github/*` 官方维护的 Action，外加 Release 代码签名专用、SignPath 官方维护的 `signpath/github-action-submit-signing-request`）。
 
@@ -10,8 +10,14 @@
 
 ```text
 third_party/
-├── include/          # Header-only 库（CLI11 / cpp-httplib / nlohmann/json / spdlog / WinReg）
-└── openssl/          # Windows 版 OpenSSL 头文件 + 静态库（3.5.9 LTS，MSVC x64）
+├── include/              # Header-only 库（CLI11 / cpp-httplib / nlohmann/json / spdlog / WinReg）
+├── openssl/              # Windows 版 OpenSSL 头文件 + 静态库（3.5.9 LTS，MSVC x64）
+│   ├── include/
+│   └── lib/
+├── openssl-macos-x64/    # macOS x64 版 OpenSSL 头文件 + 静态库（3.5.9 LTS）
+│   ├── include/
+│   └── lib/
+└── openssl-macos-arm64/  # macOS arm64 版 OpenSSL 头文件 + 静态库（3.5.9 LTS）
     ├── include/
     └── lib/
 ```
@@ -26,6 +32,7 @@ third_party/
 | spdlog | 1.13.0 | [gabime/spdlog](https://github.com/gabime/spdlog) | MIT | `include/spdlog/` |
 | WinReg | 2024-02-22 快照（上游无版本号） | [GiovanniDicanio/WinReg](https://github.com/GiovanniDicanio/WinReg) | MIT | `include/WinReg/` |
 | OpenSSL（Windows 静态库） | 3.5.9 LTS（2026-09-29 发布） | [openssl/openssl](https://github.com/openssl/openssl)（tag `openssl-3.5.9`） | Apache-2.0 | `openssl/{include,lib}` |
+| OpenSSL（macOS 静态库 x64/arm64） | 3.5.9 LTS（2026-09-29 发布） | [openssl/openssl](https://github.com/openssl/openssl)（tag `openssl-3.5.9`） | Apache-2.0 | `openssl-macos-x64/`、`openssl-macos-arm64/` |
 
 > 版本以各头文件内版本宏为准（如 `CPPHTTPLIB_VERSION`、`NLOHMANN_JSON_VERSION_*`、`SPDLOG_VER_*`、`OPENSSL_VERSION_TEXT`）；WinReg 无版本宏，以其头部注释的更新日期标识。
 
@@ -33,8 +40,8 @@ third_party/
 
 - **只升级、不随手换源**：新版本必须来自上表列出的官方 GitHub 仓库或其官方 Release；禁止引入镜像站、第三方预编译包。
 - **Header-only 库**：用上游官方发布内容替换 `include/` 对应子目录，替换后以版本宏核对版本，并同步更新本表。
-- **OpenSSL**：仅跟随 **LTS** 分支升级；Windows 静态库由维护者本地构建后连同头文件一起提交（构建步骤见下）。升级后需同步更新：`third_party/openssl/`、本文件版本表、`README.md`、`SECURITY.md`、`docs/wiki/编译指南.md`。
-- **macOS / Linux**：不使用本目录的 OpenSSL——macOS 产物由 CI 基于官方源码构建静态库（见工作流），Linux 使用系统包管理器安装（如 `libssl-dev`）。
+- **OpenSSL**：仅跟随 **LTS** 分支升级；Windows 静态库由维护者本地构建后连同头文件一起提交（构建步骤见下），macOS 静态库由 `vendor-openssl.yml` 工作流产出后提交（步骤见下）。升级后需同步更新：`third_party/openssl/`、`third_party/openssl-macos-{x64,arm64}/`、本文件版本表、`README.md`、`SECURITY.md`、`docs/wiki/编译指南.md`。
+- **Linux**：使用系统包管理器安装（如 `libssl-dev`）；macOS 自 v1.2.36 起同样内置静态库，不再依赖 Homebrew 或系统 OpenSSL。
 
 ## Windows OpenSSL 静态库构建步骤（维护者参考）
 
@@ -61,13 +68,28 @@ nmake install_sw
 - `no-zlib`：与 CI 的 macOS 静态库构建保持一致，不引入 zlib 依赖
 - `no-asm`：纯 C 实现；NASM 官方二进制仅发布于 nasm.us（非 GitHub），按仓库来源政策不引入，对本工具的 TLS 下载场景性能影响可忽略
 
+## macOS OpenSSL 静态库生成步骤（维护者参考）
+
+macOS 双架构静态库由仓库内工作流 [.github/workflows/vendor-openssl.yml](../.github/workflows/vendor-openssl.yml) 统一产出（手动触发，不参与日常 CI）：
+
+1. 在 GitHub Actions 页面手动运行 **Vendor OpenSSL (macOS)** 工作流（`workflow_dispatch`），版本输入默认 `3.5.9`（仅 LTS）。
+2. 运行完成后，从两个 artifact（`openssl-macos-x64` / `openssl-macos-arm64`，保留 7 天）下载产物：
+   `gh run download <run-id> -n openssl-macos-x64 -D third_party/openssl-macos-x64`（arm64 同理）。
+3. 确认 `include/openssl/ssl.h`、`lib/libssl.a`、`lib/libcrypto.a` 齐备后随仓库提交。
+
+构建选项与产物约定（与主构建工作流原内联构建一致）：
+
+- 目标 `darwin64-x86_64-cc` / `darwin64-arm64-cc`，在 `macos-15-intel` runner 上产出，与 CI 构建环境同源
+- `no-shared`（静态库 `libssl.a` / `libcrypto.a`）、`no-tests` / `no-apps`、`no-zlib`（与 Windows 构建一致，不引入 zlib 依赖）
+- `MACOSX_DEPLOYMENT_TARGET=11.0`：arm64 产物最低支持 macOS 11，双架构部署目标统一
+
 ---
 
 # Third-Party Dependencies (English)
 
 [简体中文](#third_party-三方依赖清单) | **English**
 
-This directory holds all third-party dependencies of GitHubDesktop2Chinese. **Everything is committed to the repository** (including the Windows OpenSSL static libraries), so a clone can be built without downloading any dependencies.
+This directory holds all third-party dependencies of GitHubDesktop2Chinese. **Everything is committed to the repository** (including the Windows and macOS OpenSSL static libraries), so a clone can be built without downloading any dependencies.
 
 Dependency provenance policy: only upstream official GitHub repositories / official release assets are used; external mirrors and unofficial prebuilt artifacts are never introduced (the GitHub Actions used by CI are limited to the officially maintained `actions/*` and `github/*` Actions, plus `signpath/github-action-submit-signing-request`, maintained by SignPath and used solely for release code signing).
 
@@ -75,8 +97,14 @@ Dependency provenance policy: only upstream official GitHub repositories / offic
 
 ```text
 third_party/
-├── include/          # Header-only libraries (CLI11 / cpp-httplib / nlohmann/json / spdlog / WinReg)
-└── openssl/          # Windows OpenSSL headers + static libraries (3.5.9 LTS, MSVC x64)
+├── include/              # Header-only libraries (CLI11 / cpp-httplib / nlohmann/json / spdlog / WinReg)
+├── openssl/              # Windows OpenSSL headers + static libraries (3.5.9 LTS, MSVC x64)
+│   ├── include/
+│   └── lib/
+├── openssl-macos-x64/    # macOS x64 OpenSSL headers + static libraries (3.5.9 LTS)
+│   ├── include/
+│   └── lib/
+└── openssl-macos-arm64/  # macOS arm64 OpenSSL headers + static libraries (3.5.9 LTS)
     ├── include/
     └── lib/
 ```
@@ -91,6 +119,7 @@ third_party/
 | spdlog | 1.13.0 | [gabime/spdlog](https://github.com/gabime/spdlog) | MIT | `include/spdlog/` |
 | WinReg | 2024-02-22 snapshot (upstream has no version number) | [GiovanniDicanio/WinReg](https://github.com/GiovanniDicanio/WinReg) | MIT | `include/WinReg/` |
 | OpenSSL (Windows static libraries) | 3.5.9 LTS (released 2026-09-29) | [openssl/openssl](https://github.com/openssl/openssl) (tag `openssl-3.5.9`) | Apache-2.0 | `openssl/{include,lib}` |
+| OpenSSL (macOS static libraries x64/arm64) | 3.5.9 LTS (released 2026-09-29) | [openssl/openssl](https://github.com/openssl/openssl) (tag `openssl-3.5.9`) | Apache-2.0 | `openssl-macos-x64/`, `openssl-macos-arm64/` |
 
 > Versions are authoritative per the version macros inside each header (e.g. `CPPHTTPLIB_VERSION`, `NLOHMANN_JSON_VERSION_*`, `SPDLOG_VER_*`, `OPENSSL_VERSION_TEXT`); WinReg has no version macro and is identified by the update date in its header comment.
 
@@ -98,8 +127,8 @@ third_party/
 
 - **Upgrade only, never swap sources casually**: new versions must come from the official GitHub repositories listed above or their official releases; mirrors and third-party prebuilt packages are forbidden.
 - **Header-only libraries**: replace the corresponding subdirectory under `include/` with the upstream official release, verify the version via the version macros after replacing, and update the table above accordingly.
-- **OpenSSL**: follow **LTS** branches only; the Windows static libraries are built locally by a maintainer and committed together with the headers (build steps below). After upgrading, update in sync: `third_party/openssl/`, the version table in this file, `README.md`, `SECURITY.md`, and `docs/wiki/编译指南.md`.
-- **macOS / Linux**: the OpenSSL in this directory is not used — macOS artifacts get their static libraries built by CI from official sources (see the workflow), and Linux installs via the system package manager (e.g. `libssl-dev`).
+- **OpenSSL**: follow **LTS** branches only; the Windows static libraries are built locally by a maintainer and committed together with the headers (build steps below), while the macOS static libraries are produced by the `vendor-openssl.yml` workflow and committed (steps below). After upgrading, update in sync: `third_party/openssl/`, `third_party/openssl-macos-{x64,arm64}/`, the version table in this file, `README.md`, `SECURITY.md`, and `docs/wiki/编译指南.md`.
+- **Linux**: installs via the system package manager (e.g. `libssl-dev`); since v1.2.36 macOS also ships bundled static libraries and no longer depends on Homebrew or the system OpenSSL.
 
 ## Windows OpenSSL Static Library Build Steps (maintainer reference)
 
@@ -125,3 +154,18 @@ Build options and artifact conventions:
 - `no-tests` / `no-apps`: skip tests and command-line tools to shorten build time
 - `no-zlib`: consistent with the CI macOS static library build; avoids introducing a zlib dependency
 - `no-asm`: pure-C implementation; official NASM binaries are published only on nasm.us (not GitHub), so per the repository provenance policy they are not introduced — the performance impact for this tool's TLS download scenario is negligible
+
+## macOS OpenSSL Static Library Generation Steps (maintainer reference)
+
+Both macOS architectures are produced by the in-repo workflow [.github/workflows/vendor-openssl.yml](../.github/workflows/vendor-openssl.yml) (manually triggered, not part of day-to-day CI):
+
+1. Run the **Vendor OpenSSL (macOS)** workflow manually from the GitHub Actions page (`workflow_dispatch`); the version input defaults to `3.5.9` (LTS only).
+2. Once the run completes, download the two artifacts (`openssl-macos-x64` / `openssl-macos-arm64`, retained for 7 days):
+   `gh run download <run-id> -n openssl-macos-x64 -D third_party/openssl-macos-x64` (likewise for arm64).
+3. Verify that `include/openssl/ssl.h`, `lib/libssl.a` and `lib/libcrypto.a` are present, then commit them to the repository.
+
+Build options and artifact conventions (identical to the previous inline build in the main workflow):
+
+- Targets `darwin64-x86_64-cc` / `darwin64-arm64-cc`, produced on the `macos-15-intel` runner — same toolchain as the CI builds
+- `no-shared` (static libraries `libssl.a` / `libcrypto.a`), `no-tests` / `no-apps`, `no-zlib` (consistent with the Windows build; avoids introducing a zlib dependency)
+- `MACOSX_DEPLOYMENT_TARGET=11.0`: arm64 artifacts support macOS 11 at minimum, unifying the deployment target across both architectures

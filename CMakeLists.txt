@@ -67,8 +67,46 @@ if(WIN32)
 
     # 包含 openssl 的头文件
     include_directories("${GHD2C_OPENSSL_ROOT}/include")
+elseif(APPLE)
+    # ── macOS: OpenSSL 3.5.9 LTS 静态库（随仓库提交于 third_party/openssl-macos-{x64,arm64}）──
+    # 库由 .github/workflows/vendor-openssl.yml 从官方源码构建（tag openssl-3.5.9，
+    # darwin64-{x86_64,arm64}-cc no-shared no-tests no-apps no-zlib，MACOSX_DEPLOYMENT_TARGET=11.0），
+    # 构建与更新步骤见 third_party/README.md；CMake 按 CMAKE_OSX_ARCHITECTURES（回退
+    # CMAKE_SYSTEM_PROCESSOR）自动选架构目录，构建期零下载零编译。
+    # 本地自建库可通过 -DGHD2C_OPENSSL_ROOT=<目录> 覆盖查找与链接路径。
+    if("${CMAKE_OSX_ARCHITECTURES}" STREQUAL "arm64")
+        set(GHD2C_OPENSSL_DEFAULT_DIR "${PROJECT_SOURCE_DIR}/third_party/openssl-macos-arm64")
+    elseif("${CMAKE_OSX_ARCHITECTURES}" STREQUAL "x86_64")
+        set(GHD2C_OPENSSL_DEFAULT_DIR "${PROJECT_SOURCE_DIR}/third_party/openssl-macos-x64")
+    elseif("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "^(arm64|aarch64)$")
+        set(GHD2C_OPENSSL_DEFAULT_DIR "${PROJECT_SOURCE_DIR}/third_party/openssl-macos-arm64")
+    else()
+        set(GHD2C_OPENSSL_DEFAULT_DIR "${PROJECT_SOURCE_DIR}/third_party/openssl-macos-x64")
+    endif()
+    set(GHD2C_OPENSSL_ROOT "" CACHE PATH "OpenSSL 静态库根目录覆盖（留空=按架构自动选择 third_party/openssl-macos-*）")
+    if("${GHD2C_OPENSSL_ROOT}" STREQUAL "")
+        set(GHD2C_OPENSSL_ROOT "${GHD2C_OPENSSL_DEFAULT_DIR}")
+    endif()
+
+    # 完整性校验：任一组件缺失即报错并给出恢复指引（与 Windows 分支一致）
+    set(GHD2C_OPENSSL_REQUIRED
+        "include/openssl/ssl.h"
+        "lib/libssl.a"
+        "lib/libcrypto.a")
+    foreach(_oss_comp IN LISTS GHD2C_OPENSSL_REQUIRED)
+        if(NOT EXISTS "${GHD2C_OPENSSL_ROOT}/${_oss_comp}")
+            message(FATAL_ERROR
+                "OpenSSL 静态库组件缺失: ${GHD2C_OPENSSL_ROOT}/${_oss_comp}\n"
+                "third_party/openssl-macos-{x64,arm64} 应随仓库提交。若被误删，请执行:\n"
+                "  git checkout -- third_party/openssl-macos-x64 third_party/openssl-macos-arm64\n"
+                "或参考 third_party/README.md 用 vendor-openssl.yml 工作流重新产出后提交。")
+        endif()
+    endforeach()
+
+    include_directories("${GHD2C_OPENSSL_ROOT}/include")
+    find_package(Threads REQUIRED)
 else()
-    # ── macOS/Linux: 系统包管理器提供的 OpenSSL（如 apt install libssl-dev / brew install openssl）──
+    # ── Linux: 系统包管理器提供的 OpenSSL（如 apt install libssl-dev）──
     find_package(OpenSSL REQUIRED)
     find_package(Threads REQUIRED)
 endif()
@@ -89,6 +127,13 @@ if(WIN32)
         target_link_options(GitHubDesktop2Chinese PRIVATE
             "SHELL:/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/src/app.manifest")
     endif()
+elseif(APPLE)
+    # 链接内置 OpenSSL 静态库（third_party/openssl-macos-*，配置段已按架构选定；
+    # libssl 依赖 libcrypto，顺序不可颠倒）
+    target_link_libraries(GitHubDesktop2Chinese PRIVATE
+        ${GHD2C_OPENSSL_ROOT}/lib/libssl.a
+        ${GHD2C_OPENSSL_ROOT}/lib/libcrypto.a
+        Threads::Threads)
 else()
     target_link_libraries(GitHubDesktop2Chinese PRIVATE
         OpenSSL::SSL
