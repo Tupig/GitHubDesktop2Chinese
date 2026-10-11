@@ -153,12 +153,12 @@ jobs:
           VERSION=""
           LATEST_TAG="$(git tag -l 'v*' --sort=-v:refname | head -n1 || true)"
 
-          # 自上一个版本 tag 以来是否存在影响构建产物的变更（无 tag 视为有变更）
+          # 构建相关路径白名单(单一维护点): 变更检测与构建差异检测共用;
           # third_party/README.md 为纯文档(政策说明), 排除以免文档性修改误触发自动发版
+          PATHSPEC=(json src third_party CMakeLists.txt CMakePresets.json ':(exclude)third_party/README.md')
+          # 自上一个版本 tag 以来是否存在影响构建产物的变更（无 tag 视为有变更）
           if [[ -n "$LATEST_TAG" ]]; then
-            BUILD_CHANGES="$(git diff --name-only "${LATEST_TAG}..HEAD" -- \
-              json src third_party CMakeLists.txt CMakePresets.json \
-              ':(exclude)third_party/README.md' | wc -l | tr -d ' ')"
+            BUILD_CHANGES="$(git diff --name-only "${LATEST_TAG}..HEAD" -- "${PATHSPEC[@]}" | wc -l | tr -d ' ')"
           else
             BUILD_CHANGES=1
           fi
@@ -182,9 +182,7 @@ jobs:
               "repos/${GITHUB_REPOSITORY}/actions/workflows/ghdesktop2chinese.yml/runs?branch=main&status=success&per_page=1" \
               --jq '.workflow_runs[0].head_sha' 2>/dev/null || true)"
             if [[ -n "$BUILD_BASE_SHA" && "$BUILD_BASE_SHA" != "null" ]]; then
-              BUILD_DIFF="$(git diff --name-only "${BUILD_BASE_SHA}..HEAD" -- \
-                json src third_party CMakeLists.txt CMakePresets.json \
-                ':(exclude)third_party/README.md' | wc -l | tr -d ' ')"
+              BUILD_DIFF="$(git diff --name-only "${BUILD_BASE_SHA}..HEAD" -- "${PATHSPEC[@]}" | wc -l | tr -d ' ')"
               if [[ "$BUILD_DIFF" -eq 0 ]]; then
                 BUILD_CHANGED="false"
                 echo "::notice::无差异，已跳过构建：当前 commit 与上次成功构建 ${BUILD_BASE_SHA:0:7} 的构建相关路径（json/ src/ third_party/ CMakeLists.txt CMakePresets.json，排除 third_party/README.md）完全一致"
@@ -831,10 +829,26 @@ jobs:
           mkdir -p release
           cp "json/localization.json" release/
 
+      - name: SignPath 门控判定
+        # token 与组织 ID 齐备才启用签名链路; 判定一次, 后续 4 个签名步骤统一引用(单一维护点, 防四处条件漂移)
+        id: signpath_gate
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${SIGNPATH_API_TOKEN:-}" && -n "${SIGNPATH_ORGANIZATION_ID:-}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "SignPath 凭据齐备, 启用 Windows 产物签名链路"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "SignPath 凭据不齐备, 跳过 Windows 产物签名(#79 按实际状态门控)"
+          fi
+
       - name: 上传待签名 Windows 产物
         # SignPath 前置要求: 待签名文件须先作为 GitHub artifact 上传(v4+), 以 artifact-id 提交签名请求
         id: upload-unsigned
-        if: env.SIGNPATH_API_TOKEN != '' && env.SIGNPATH_ORGANIZATION_ID != ''
+        if: steps.signpath_gate.outputs.enabled == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: unsigned-windows-${{ needs.version.outputs.version || github.sha }}
@@ -844,7 +858,7 @@ jobs:
 
       - name: SignPath 代码签名（Windows exe）
         # SignPath Foundation 免费开源代码签名; project/policy slug 可用仓库 variables 覆盖
-        if: env.SIGNPATH_API_TOKEN != '' && env.SIGNPATH_ORGANIZATION_ID != ''
+        if: steps.signpath_gate.outputs.enabled == 'true'
         uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -856,7 +870,7 @@ jobs:
           output-artifact-directory: signed/
 
       - name: 替换为已签名 Windows 产物
-        if: env.SIGNPATH_API_TOKEN != '' && env.SIGNPATH_ORGANIZATION_ID != ''
+        if: steps.signpath_gate.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           test -f signed/GitHubDesktop2Chinese.exe
@@ -866,7 +880,7 @@ jobs:
       - name: 为签名产物重新生成构建溯源证明
         # build 任务的 attestation 绑定未签名 exe 摘要, 签名后内容已变;
         # 对签名产物重新 attest, 保证 release 资产可通过 gh attestation verify 校验
-        if: env.SIGNPATH_API_TOKEN != '' && env.SIGNPATH_ORGANIZATION_ID != ''
+        if: steps.signpath_gate.outputs.enabled == 'true'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: release/GitHubDesktop2Chinese.exe
@@ -944,15 +958,18 @@ jobs:
               sleep 15
             done
           }
-          if gh release view "$VER" >/dev/null 2>&1; then
+          # 上传资产+更新说明(已存在场景); 定义一次, 正常路径与自愈路径共用
+          publish() {
             retry 3 gh release upload "$VER" release/* --clobber
             retry 3 gh release edit "$VER" --title "$TITLE" --notes-file release-notes.md
+          }
+          if gh release view "$VER" >/dev/null 2>&1; then
+            publish
           else
             if ! retry 3 gh release create "$VER" release/* --title "$TITLE" --notes-file release-notes.md; then
               # view 可能因网络错误误判为不存在, 而 create 实际已存在(already exists):
               # 此时转 上传+编辑 自愈, 避免"release 已建但资产/说明半成品"永久挂死
               echo "::warning::gh release create 失败, 按已存在场景转上传+编辑自愈"
-              retry 3 gh release upload "$VER" release/* --clobber
-              retry 3 gh release edit "$VER" --title "$TITLE" --notes-file release-notes.md
+              publish
             fi
           fi
