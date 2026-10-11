@@ -1,0 +1,13 @@
+{
+    "allowed_encodings": ["utf-8", "ascii"],
+    "exclude_dirs": ["third_party/"],
+    "bom_exceptions": ["tools/ci/smoke-test.ps1"],
+    "binary_extensions": [
+        ".png", ".jpg", ".jpeg", ".gif", ".ico", ".icns", ".pdf", ".zip",
+        ".gz", ".tar", ".7z", ".exe", ".dll", ".so", ".dylib", ".lib",
+        ".a", ".o", ".obj", ".bin", ".woff", ".woff2", ".ttf", ".otf"
+    ],
+    "sample_size": 8192,
+    "workers": 0,
+    "continue_on_violation": false
+}
