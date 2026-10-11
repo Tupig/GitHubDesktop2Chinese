@@ -1,5 +1,7 @@
 # 安全政策
 
+**简体中文** | [English](#security-policy-english)
+
 ## 支持的版本
 
 仅**最新发布版本**（自 `v1.2.30` 起）接收安全修复；更早版本不再维护，请先升级。
@@ -36,9 +38,58 @@
     gh attestation verify <下载的文件> --repo Tupig/GitHubDesktop2Chinese
     ```
 
-  - Windows 发布产物经 [SignPath](https://signpath.org)（Foundation 免费开源代码签名）签名；签名凭据未配置时自动跳过（产物不签名，发布不受阻）；签名后对产物重新生成构建溯源证明
+  - Windows 发布产物支持 [SignPath](https://signpath.org) 自动代码签名；签名凭据未配置时自动跳过（产物不签名，发布不受阻——当前即此状态：SignPath Foundation 申请未获批，集成保持休眠）；启用签名后对签名产物重新生成构建溯源证明
 - **代码与数据扫描**：CodeQL（C/C++，PR 与 main 推送）；`localization.json` 质量门（非法/危险正则黑名单、ReDoS 启发式、结构与占位符校验）；仓库已启用 Secret Scanning 与 Push Protection、Dependabot 漏洞告警与私密漏洞报告；`.gitignore` 防御性排除凭据/密钥类文件（`.env*`/`*.pem`/`*.key` 等）
 
 ## 范围说明
 
 本程序按设计会修改本机 GitHub Desktop 的 `main.js` / `renderer.js`（汉化）并保留 `.bak` 备份，该行为属预期功能而非漏洞。漏洞范围包括但不限于：任意代码执行、路径穿越、更新流程被劫持、敏感信息泄露等。
+
+---
+
+# Security Policy (English)
+
+[简体中文](#安全政策) | **English**
+
+## Supported Versions
+
+Only the **latest release** (since `v1.2.30`) receives security fixes; earlier versions are no longer maintained — please upgrade first.
+
+| Version | Supported |
+| --- | --- |
+| `v1.2.30` and later | ✅ |
+| Earlier versions | ❌ |
+
+## Reporting a Vulnerability
+
+Please do **not** report security vulnerabilities through public issues. Use GitHub's Private Vulnerability Reporting instead:
+
+- Repository page: **Security → Report a vulnerability**
+- Or go directly to: <https://github.com/Tupig/GitHubDesktop2Chinese/security/advisories/new>
+
+Reports should ideally include: a description of the issue, reproduction steps, the affected scope (version / platform), and, optionally, a suggested fix.
+
+## Response Expectations
+
+- We generally acknowledge receipt and provide an initial assessment within 7 days; fix timelines depend on severity
+- Please do not disclose the issue publicly before a fix is released; contributors are credited in the release notes (mention in your report if you prefer to remain anonymous)
+
+## Security Design
+
+- **Network transport**: HTTPS everywhere with server certificate validation enabled (Windows loads the system root certificate store; macOS uses the system `/etc/ssl/cert.pem`; Linux probes the system CA bundle)
+- **Self-update**: download integrity is verified against the SHA256 declared by the release asset; file replacement is atomic and keeps backups
+- **Supply chain**
+  - Third-party Actions are all pinned by commit SHA (upgrades are performed manually; dependency vulnerabilities are flagged by Dependabot alerts)
+  - The Windows OpenSSL static libraries and headers are committed directly to the repository (`third_party/openssl/`, built from upstream sources — see [`third_party/README.md`](third_party/README.md) for version records and the build process); macOS static libraries are built by CI from upstream OpenSSL 3.x sources
+  - Release artifacts carry build provenance attestations (SLSA provenance) that can be verified with:
+
+    ```bash
+    gh attestation verify <downloaded file> --repo Tupig/GitHubDesktop2Chinese
+    ```
+
+  - Windows release artifacts support automatic code signing via [SignPath](https://signpath.org); when signing credentials are not configured, signing is skipped automatically (artifacts stay unsigned and releases are never blocked — the current state: the SignPath Foundation application was not approved and the integration remains dormant); once signing is enabled, the build provenance attestation is regenerated for the signed artifact
+- **Code and data scanning**: CodeQL (C/C++, on PRs and pushes to main); a `localization.json` quality gate (denylist of illegal/dangerous regexes, ReDoS heuristics, structure and placeholder checks); the repository has Secret Scanning, Push Protection, Dependabot alerts, and private vulnerability reporting enabled; `.gitignore` defensively excludes credential/key files (`.env*` / `*.pem` / `*.key`, etc.)
+
+## Scope
+
+By design, this program modifies the local GitHub Desktop `main.js` / `renderer.js` (localization) and keeps `.bak` backups; that behavior is an intended feature, not a vulnerability. Vulnerabilities include, but are not limited to: arbitrary code execution, path traversal, hijacking of the update flow, and leakage of sensitive information.

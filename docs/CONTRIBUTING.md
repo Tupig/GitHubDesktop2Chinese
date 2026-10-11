@@ -1,5 +1,7 @@
 # 汉化贡献指南
 
+**简体中文** | [English](#localization-contribution-guide-english)
+
 感谢参与 GitHubDesktop2Chinese 的汉化贡献！补充或修改翻译（`json/localization.json`）前，请先阅读以下注意事项。
 
 > 程序使用**正则表达式**进行匹配替换，理解以下规则可以避免「匹配不到」或「替换后程序打不开」的问题。
@@ -75,6 +77,99 @@
 
 `json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 任一变更都会在 push main / 每日定时 / 手动 `auto` 时自动触发新版本发布（补丁号 +1）。CI 发布时从 `docs/ReleaseBody.md` 中提取**行尾含全角版本标记**（如 `（v1.2.23）`）的变更行拼进 Release 说明：
 
-- 在「本次更新」区域追加一行变更描述，行尾标注**下一个发布版本**的全角括号标记（用 `git tag --sort=-v:refname | head -1` 查当前最新 tag，版本号 +1）。
+- 在「版本更新日志」区域追加一行中文变更描述与一行对应英文翻译，两行行尾均标注**下一个发布版本**的全角括号标记（用 `git tag --sort=-v:refname | head -1` 查当前最新 tag，版本号 +1）。
 - 未标注或版本号未命中的行不会出现在任何 Release 中，也**不阻断**发布（说明里会显示「未找到变更记录」提示）。
 - 静态的「### 程序说明」段落每次发布都会附带，无需逐版维护。
+
+## 行为准则
+
+参与贡献即表示你同意遵守[行为准则](../.github/CODE_OF_CONDUCT.md)。交流请保持友善；安全漏洞请勿在 Issue 或 PR 中公开讨论，走[私密漏洞报告](../SECURITY.md)。
+
+---
+
+# Localization Contribution Guide (English)
+
+[简体中文](#汉化贡献指南) | **English**
+
+Thanks for contributing translations to GitHubDesktop2Chinese! Before adding or modifying translations (`json/localization.json`), please read the notes below.
+
+> The program matches and replaces text with **regular expressions**. Understanding the rules below helps you avoid "pattern does not match" failures or "GitHub Desktop won't open after replacement" breakage.
+>
+> This page is the quick-reference edition. For the full replacement internals, the mapping-field reference and the regex tutorial, see the [wiki contribution guide](wiki/贡献指南.md), the [wiki mapping file format](wiki/映射文件格式.md) and the [wiki regular expression guide](wiki/正则表达式指南.md).
+
+## Core Rules
+
+1. **Double quotes inside matched text must be escaped with a backslash**; the style of "outer single quotes with unescaped inner double quotes" is not allowed:
+
+   - Incorrect: `['i am "zhangsan"','我是"张三"']`
+   - Correct: `["i am \"zhangsan\"","我是\"张三\""]`
+
+2. **Regex matching is supported**: the program matches and rewrites text with regular expressions, so find patterns natively support regex syntax.
+
+3. **Escaping `?`**: to match a literal `?` character, use two backslashes before it in the find pattern; in the filled-in content (the translation), do not put a backslash before `?`.
+
+4. **Include quote boundaries in find patterns**: e.g. `["\"&View\"","\"视图\""]`, to avoid accidentally matching longer texts such as `&View on GitHub`; if those longer texts get rewritten, later mappings can no longer match them.
+
+5. **Unified escaping rules**: whether it is `?` or any other regex special character, escape it with two backslashes; only the double quote takes a single backslash. Backslashes added for regex purposes must never appear in the translation part.
+
+   Quick reference for common regex symbols:
+
+   | Symbol | Meaning |
+   | --- | --- |
+   | `.` | Matches any single character (except a newline) |
+   | `*` | Matches the preceding sub-expression zero or more times |
+   | `+` | Matches the preceding sub-expression one or more times |
+   | `?` | Matches the preceding sub-expression zero or one time |
+   | `{n}` / `{n,}` / `{n,m}` | Matches exactly n times / at least n times / n to m times |
+   | `^` / `$` | Matches the start / end position of the input string |
+   | `[...]` | Character set: matches any character in the brackets |
+   | `|` | Alternation: matches any expression before or after `|` |
+   | `( )` | Capturing group |
+   | `\` | Escape character: to match a literal special character or a backslash itself, precede it with `\` |
+
+6. **JSON syntax**: the last item of an array must not be followed by a comma, otherwise the file cannot be read. For example, `[["xx","xxx"],["",""],]` is incorrect.
+
+7. **Use regex fuzzy matching wisely**: function arguments such as `yD` in `Ee.createElement\\(yD,null,this.props.repositoryName` often change between GitHub Desktop releases; match those two characters fuzzily with a regex to make the entry more resilient:
+
+   - Find: `Ee.createElement\\((..),null,this.props.repositoryName` (the find pattern is a regex; in JSON, `\\(` escapes to the regex `\(`)
+   - Replace: `Ee.createElement($1,null,this.props.repositoryName` (the replacement text is inserted **literally** and must not contain backslashes — writing `\\(` would emit `createElement\(` into the generated main.js and cause a syntax error; `$1` refers to the content captured by the first regex group)
+
+8. **Use the auto-maintain tool to help add translations** (it generates ready-to-paste entry drafts):
+
+   ```bash
+   cd tools/auto-maintain
+   npm run all
+   ```
+
+   The report is written to `ghdesktop-auto-maintain/report.md` in the system temp directory. Following its "source" column, put the entries into the `main` (main.js) or `renderer` (renderer.js) array, and replace the `【待翻译】` placeholder in each draft with the Chinese translation (find patterns are already escaped as literals).
+
+   > [!NOTE]
+   > **Entry order**: find patterns are applied from the top of the array and the first match wins. If a new entry is "short-in-long" with an existing one (its find pattern is a substring of another's, e.g. `"Save"` vs `"Save":"Add"`), it must be **inserted before the broader (shorter) entry** — otherwise the broader entry matches first and the specific one never applies. CI quality checks warn about this.
+   >
+   > **Translation style**: sentence-final question marks use the full-width `？`; do not leave trailing spaces in translations.
+
+## Verifying Changes Locally
+
+1. Build the loader following the [README "Building from source"](../README.md#-怎么编译源代码) section.
+2. **Quick check**: put the new entries into `main_dev` / `renderer_dev`, hold `Shift` at startup to open the developer options and pick "replace only specified mappings"; move them into the official arrays after verifying.
+3. **Batch self-check for invalid entries** (recommended before submitting; requires GitHub Desktop installed locally, or pass its js directory via `-g`):
+
+   ```powershell
+   GitHubDesktop2Chinese.exe --nopause dev --invalidcheck --translationfrombak
+   ```
+
+   > `--nopause` is a program-level flag and must come **before** the `dev` subcommand; the output reports each entry whose pattern fails to match or whose regex is invalid.
+4. You can also use the auto-maintain tool for offline checking and candidate extraction: `cd tools/auto-maintain && npm run all` — see the [tool README](../tools/auto-maintain/README.md) (parameters and report format are also covered in the [wiki auto-maintain tool](wiki/自动维护工具.md) page).
+5. Smoke regression for loader (`src/`) changes: run [`tools/ci/smoke-test.ps1`](../tools/ci/smoke-test.ps1); it auto-detects the build output and runs four test groups in turn — help, invalid-argument rejection, localization in a temp directory, and rollback. All groups PASS means the change passes.
+
+## Release Notes (docs/ReleaseBody.md)
+
+Any change to `json/`, `src/`, `third_party/`, `CMakeLists.txt` or `CMakePresets.json` automatically publishes a new version (patch number +1) on push to main, on the daily schedule, or on manual `auto`. When publishing, CI extracts the change lines from `docs/ReleaseBody.md` whose **line ends with the full-width version marker** (e.g. `（v1.2.23）`) and assembles them into the release notes:
+
+- Append a Chinese change line and its English companion line to the "版本更新日志 / Changelog" section, both ending with the full-width version marker of the **next release version** (check the current latest tag with `git tag --sort=-v:refname | head -1`, then +1).
+- Lines without a marker, or whose version number does not match the release, never appear in any release, and never block publishing (the notes will show a "no change record found" notice instead).
+- The static "### 程序说明" section is attached to every release as-is; no per-version maintenance is needed.
+
+## Code of Conduct
+
+By contributing, you agree to follow the [Code of Conduct](../.github/CODE_OF_CONDUCT.md). Please keep discussions friendly; do not discuss security vulnerabilities in public Issues or PRs — use [private vulnerability reporting](../SECURITY.md) instead.

@@ -6,6 +6,8 @@
 [![C++](https://img.shields.io/badge/C%2B%2B-20-blue?logo=cplusplus&logoColor=white)](#-怎么编译源代码)
 [![localization.json](https://img.shields.io/badge/localization.json-v3-green)](#-映射文件-localizationjson)
 
+**简体中文** | [English](#githubdesktop2chinese-english)
+
 > 本仓库派生（fork）自 [cngege/GitHubDesktop2Chinese](https://github.com/cngege/GitHubDesktop2Chinese)，在此基础上继续维护与更新。原作者 [CNGEGE](https://github.com/cngege)，感谢其开创性工作。
 
 > [!TIP]
@@ -46,7 +48,7 @@
 
 > [!IMPORTANT]
 > - 本程序提供 **64 位 Windows / macOS（按架构分 x64 与 arm64 两个包）/ Linux（x64）** 多平台版本，从 [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) 页选择对应产物下载。
-> - Windows 版 `GitHubDesktop2Chinese.exe` 使用 [SignPath Foundation](https://signpath.org) 提供的免费开源代码签名证书进行代码签名。
+> - 发布产物附带构建溯源证明（SLSA provenance），可用 `gh attestation verify <下载的文件> --repo Tupig/GitHubDesktop2Chinese` 校验来源；Windows 产物的代码签名流程已内置（SignPath 集成），凭据配置后自动启用，当前产物未签名。
 > - 汉化映射以 **Windows 版** GitHub Desktop 文案为准，其他平台文案基本一致，个别条目可能不匹配。
 > - GitHub Desktop 每次版本更新后，都需要重新运行一次本程序才能完成汉化。
 
@@ -314,4 +316,314 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 <details>
 <summary>点击展开示例图片</summary>
 <img src="https://github.com/lkyero/GitHubDesktop_zh/assets/28597788/3023d028-8f63-4919-8900-ab3e953a1f76" alt="汉化效果展示图" />
+</details>
+
+---
+
+# GitHubDesktop2Chinese (English)
+
+[简体中文](#githubdesktop2chinese) | **English**
+
+> This repository is a fork of [cngege/GitHubDesktop2Chinese](https://github.com/cngege/GitHubDesktop2Chinese), maintained and updated on top of the original work. All credit for the original idea and implementation goes to [CNGEGE](https://github.com/cngege).
+
+> [!TIP]
+> 📚 **Full documentation** is available in the [docs/wiki documentation center](docs/wiki/Home.md) (in Chinese): [Install & Usage](docs/wiki/安装与使用.md) · [Command-line Arguments](docs/wiki/命令行参数.md) · [FAQ](docs/wiki/常见问题.md) · [How It Works](docs/wiki/汉化原理.md) · [Mapping File Format](docs/wiki/映射文件格式.md) · [Regex Guide](docs/wiki/正则表达式指南.md) · [Build Guide](docs/wiki/编译指南.md) · [CI/CD](docs/wiki/CI-CD.md) · [Contributing](docs/wiki/贡献指南.md) · [Auto-maintain Tools](docs/wiki/自动维护工具.md)
+
+## Contents
+
+- [🥮 What is this](#-what-is-this)
+- [🎯 How to use it](#-how-to-use-it)
+- [⚙️ Command-line arguments](#-command-line-arguments)
+- [🏗 Building from source](#-building-from-source)
+- [👕 How to contribute translations](#-how-to-contribute-translations)
+- [🍬 The mapping file localization.json](#-the-mapping-file-localizationjson)
+- [🧪 CI / Auto-maintenance](#-ci--auto-maintenance)
+- [📁 Project structure](#-project-structure)
+- [🔭 Enabling GitHub Desktop preview options](#-enabling-github-desktop-preview-options)
+- [🧭 FAQ](#-faq)
+- [🎋 Features](#-features)
+- [📦 Third-party libraries](#-third-party-libraries)
+
+## 🥮 What is this
+
+A program that automatically replaces the UI text of [GitHub Desktop](https://desktop.github.com/) ([official repository desktop/desktop](https://github.com/desktop/desktop)) with a target language (Chinese):
+
+- **High compatibility**: replacement is driven by regex-based mappings, which tolerate the frequent version updates of GitHub Desktop
+- **Low maintenance cost**: after a GitHub Desktop update, usually only a few broken translation entries need fixing
+- **Self-updating**: the loader detects new releases automatically and supports one-click updates with resumable downloads
+
+## 🎯 How to use it
+
+[🎀 Video tutorial (BiliBili, in Chinese)](https://www.bilibili.com/video/BV17HpSeHEaC/) · [📖 Full tutorial: Install & Usage](docs/wiki/安装与使用.md)
+
+**Option 1 (recommended)**: download `GitHubDesktop2Chinese.exe` from [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases), double-click to run it, and the program fetches the latest `localization.json` over the network and localizes GitHub Desktop.
+
+**Option 2**: download both `GitHubDesktop2Chinese.exe` and `localization.json`, put them in the same folder, and run the program.
+
+> [!IMPORTANT]
+> - Prebuilt binaries are provided for **64-bit Windows / macOS (separate x64 and arm64 packages) / Linux (x64)**; pick the matching artifact from the [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) page.
+> - Release artifacts carry build provenance attestations (SLSA provenance); verify their origin with `gh attestation verify <downloaded file> --repo Tupig/GitHubDesktop2Chinese`. The code-signing flow for the Windows binary is built in (SignPath integration) and activates automatically once credentials are configured; artifacts are currently unsigned.
+> - Translation mappings are based on the **Windows** build of GitHub Desktop; texts on other platforms are mostly identical, but a few entries may not match.
+> - After each GitHub Desktop update, run this program once again to re-apply the localization.
+
+## ⚙️ Command-line arguments
+
+> All arguments are optional; double-clicking without arguments runs the default flow (auto-locate the GitHub Desktop directory + fetch the latest mapping over the network).
+>
+> **Argument order**: `--nopause` is a program-level argument and must come **before** any subcommand (such as `dev`), e.g. `GitHubDesktop2Chinese.exe --nopause dev --invalidcheck`.
+
+### General arguments
+
+| Argument | Description |
+| --- | --- |
+| `-h, --help` | Show help and exit |
+| `-g, --githubdesktoppath <dir>` | Directory containing the GitHub Desktop js files (must contain `index.html`, `main.js`, `renderer.js`) |
+| `-j, --json <path>` | Path to a local `localization.json` (must end with `.json`; if the file does not exist, a template is created and the program exits with a notice) |
+| `-r, --onlyfromremote` | Read the mapping file from the remote repository only (ignore local) |
+| `--rollback` | Restore the pre-localization state from `main.js.bak` / `renderer.js.bak` |
+| `--nopause` | Do not pause before exiting (for scripts/automation; when the version requirement is not met, skips the prompt and forces the replacement) |
+
+### Developer arguments (`dev` subcommand)
+
+| Argument | Description |
+| --- | --- |
+| `-d, --dev` | Enter the developer options menu at startup (same as holding `Shift` at launch) |
+| `--mainerrorcheck` | [Error-check mode] Check `main.js` entry by entry |
+| `--rendererrorcheck` | [Error-check mode] Check `renderer.js` entry by entry |
+| `--invalidcheck` | Detect invalid entries in `localization.json` (no match / illegal regex) |
+| `--noreplaceres` | Do not replace resources (does not affect error-check mode) |
+| `--translationfrombak` | Prefer reading js content from `.bak` backups for replacement (recommended together with `--invalidcheck`) |
+| `--devreplace` | Replace only the mappings in `main_dev` / `renderer_dev` for quick debugging |
+| `--devsetver` | Set the current program version (only available in the developer build `0.0.0-Dev`) |
+
+### Common examples
+
+```powershell
+# Regular localization (auto-locate directory + fetch latest mapping)
+GitHubDesktop2Chinese.exe
+
+# Specify the GitHub Desktop directory and a local mapping file
+GitHubDesktop2Chinese.exe -g "$env:LOCALAPPDATA\GitHubDesktop\app-<version>\resources\app" -j .\localization.json
+
+# Use the remote mapping only (ignore the local file with the same name)
+GitHubDesktop2Chinese.exe -r
+
+# Batch-check invalid entries (non-interactive: --nopause must come before dev)
+GitHubDesktop2Chinese.exe --nopause dev --invalidcheck
+
+# GitHub Desktop fails to open after localization: restore from backup
+GitHubDesktop2Chinese.exe dev --translationfrombak
+
+# Undo the localization and restore the original state
+GitHubDesktop2Chinese.exe --rollback
+```
+
+> [!TIP]
+> Built-in help: `GitHubDesktop2Chinese.exe --help`. For the full reference (developer menu, exit codes, error-check mode details) see [📖 Wiki: Command-line Arguments](docs/wiki/命令行参数.md).
+
+## 🏗 Building from source
+
+> The project uses CMake and supports three toolchains: **MSVC (Windows) / AppleClang (macOS) / GCC (Linux)**. Only 64-bit (x64 / arm64) builds are supported; other architectures fail at the CMake stage. **All released artifacts are 64-bit.** For per-platform setup and common build errors see [📖 Wiki: Build Guide](docs/wiki/编译指南.md).
+
+1. Clone the repository
+2. Open the project folder directly with **VS2022** (opened via CMake)
+3. Build with the `x64-debug` / `x64-release` presets (presets target Windows MSVC/Ninja; on macOS/Linux use the command line below)
+
+Command-line build (works on Windows / macOS / Linux):
+
+```powershell
+cmake -B build
+cmake --build build --config Release
+```
+
+> [!NOTE]
+> OpenSSL dependency: on Windows the static libraries and headers are committed to the repository (`third_party/openssl/`; no preinstall or download needed — see [`third_party/README.md`](third_party/README.md) for versions and update instructions). On Linux install `libssl-dev`; on macOS run `brew install openssl`; `find_package(OpenSSL)` then picks them up (sufficient for local development). **CI-released macOS artifacts are split per architecture (`macos-x64` / `macos-arm64`), statically linked against OpenSSL, and trimmed with strip/LTO** — self-contained with no extra dependencies.
+
+## 👕 How to contribute translations
+
+1. Clone the repository and read [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) (see [📖 Wiki: Contributing Guide](docs/wiki/贡献指南.md) for the detailed workflow, and [📖 Wiki: Regex Guide](docs/wiki/正则表达式指南.md) for regex conventions)
+2. Add translation entries to [`json/localization.json`](json/localization.json) following the existing format
+3. Open a PR
+
+**Debugging tip**: put new entries into `main_dev` or `renderer_dev` first, hold `Shift` at startup, and enable "replace only the specified mappings" for quick testing. Once verified, move them into `main` / `renderer` following the entry-order rules in [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) (usually append at the end; if a shorter entry is contained in a broader one, it must be placed before that entry), then open the PR.
+
+## 🍬 The mapping file localization.json
+
+Stores the mapping from English GitHub Desktop texts to Chinese, applied via regex matching. Day-to-day maintenance of this project is mostly about editing this file (see [📖 Wiki: Mapping File Format](docs/wiki/映射文件格式.md) for fields and entry rules, and [📖 Wiki: Regex Guide](docs/wiki/正则表达式指南.md) for regex conventions).
+
+- Path: `json/localization.json`
+
+| Node | Type | Description |
+| --- | --- | --- |
+| `version` | int | JSON file format version; bumped only when the format changes |
+| `minversion` | string | Minimum loader version required |
+| `tip` | string[] | Notices displayed in the loader |
+| `select` | object[] | Entries offered as optional changes during localization |
+| `main` | array | Mappings applied to `main.js` |
+| `main_dev` | array | Quick-replacement mappings for `main.js` development |
+| `renderer` | array | Mappings applied to `renderer.js` |
+| `renderer_dev` | array | Quick-replacement mappings for `renderer.js` development |
+
+Structure of a `select` element:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `replaceFile` | string | Target file (`main.js` / `renderer.js`) |
+| `tooltip` | string | Notice text |
+| `enable` | bool | Whether this entry is enabled |
+| `replace` | string[][] | 2-D replacement array: `[find regex, replacement text, optional find regex]` |
+
+## 🧪 CI / Auto-maintenance
+
+This repository uses a single unified workflow, [`ghdesktop2chinese.yml`](.github/workflows/ghdesktop2chinese.yml) (see [📖 Wiki: CI/CD](docs/wiki/CI-CD.md) for the job matrix, release rules, and quality gates):
+
+| Function | Triggers | Description |
+| --- | --- | --- |
+| Build | push to `main` / PR (targeting main) / tag `v*` / scheduled / manual auto, build, release | Build matrix + artifact functional tests: Windows x64, macOS x64 / arm64 (per-architecture packages), Linux x64 |
+| JSON quality checks | PR (targeting main) / push `main` / tag `v*` / scheduled / manual auto, security, release | Regex validity, structural integrity, placeholder checks, blacklist of syntax unsupported by std::regex, full-width question-mark style in translations |
+| Tool self-checks | PR (targeting main) / push `main` / tag `v*` / scheduled / manual auto, security, maintain, release | Auto-maintain tool syntax check + unit tests + Markdown link check |
+| CodeQL scan | PR (targeting main) / push `main` / manual auto, security, release | C/C++ security scanning |
+| Invalid-entry detection + candidate extraction | push `main` / scheduled (daily) / manual auto, maintain, release | Detect broken mappings, extract untranslated candidates, auto-create/close issues |
+| Release | push `main` (when changed) / tag `v*` / scheduled (when changed) / manual auto (main only, when changed), release (main only) | Auto-bump the version number and publish multi-platform artifacts + localization.json |
+
+> A manual `type` runs only the corresponding subset; `version` is an optional override — **leave it empty to auto-bump the patch number** (e.g. `1.2.24 → 1.2.25`); if filled in it must be plain `x.y.z` digits, otherwise CI fails at the version validation step.
+
+> [!TIP]
+> Manual `type=auto` runs the full pipeline (build → checks → maintenance → release) and auto-bumps the patch number (e.g. `1.2.4 → 1.2.5`); you can also specify `version` in the input box (`x.y.z` format).
+
+The auto-maintain tool lives in [`tools/auto-maintain`](tools/auto-maintain) and detects against the **Windows** build of GitHub Desktop's `main.js` / `renderer.js`; run it locally with:
+
+```powershell
+cd tools/auto-maintain
+npm run all        # invalid-entry detection + untranslated candidate extraction; report written to ghdesktop-auto-maintain/report.md in the system temp directory
+```
+
+> [!NOTE]
+> **Scheduling and release rules**
+> - **Scheduled runs**: build and auto-maintenance run daily at 10:00 Beijing time (02:00 UTC).
+> - **Change detection**: actual changes to `json/`, `src/`, `third_party/`, `CMakeLists.txt`, `CMakePresets.json` are detected against the latest `v*` tag.
+> - **Conditional releases**: push to `main`, scheduled runs, and manual `auto` publish a new version (patch number +1) only when such changes are detected; otherwise the release step is skipped to avoid empty versions. `type=release` and pushed tags always publish.
+
+## 📁 Project structure
+
+Architecture overview: a C++ main program (`src/`, loader + localizer, producing a single-file exe), one localization mapping file (`json/localization.json`, loaded from disk or the network at runtime), a Node.js auto-maintain tool (`tools/auto-maintain`), and a unified CI workflow (`.github/workflows`, with CI scripts in `tools/ci`).
+
+```text
+.
+├── src/                          # C++ main program sources
+│   ├── GitHubDesktop2Chinese.cpp # Entry point and main localization flow
+│   ├── GitHubDesktop2Chinese.h
+│   ├── utils/                    # Shared utilities (umbrella header + per-responsibility subheaders)
+│   │   ├── utils.hpp             # Umbrella header (the only public entry)
+│   │   ├── encoding.hpp          # Encoding conversion (wide/narrow strings, path building)
+│   │   ├── system.hpp            # Environment variables and system proxy detection
+│   │   ├── fs_io.hpp             # File I/O
+│   │   ├── http.hpp              # HTTP / TLS validation / auto-update
+│   │   └── input.hpp             # Interactive input
+│   └── version/Version.hpp       # Version parsing (self-written code)
+├── third_party/                  # Third-party dependencies (committed to the repo, incl. prebuilt OpenSSL x64 static libs)
+│   ├── include/                  # CLI11, cpp-httplib, nlohmann/json, spdlog, WinReg
+│   ├── openssl/                  # OpenSSL 3.5.9 headers and prebuilt static libraries
+│   └── README.md                 # Third-party version list and local build/update instructions
+├── json/
+│   └── localization.json         # Localization mapping (core data; the path is a public contract of released binaries and must not move)
+├── tools/
+│   ├── auto-maintain/            # localization.json auto-maintain tool (invalid-entry detection / candidate extraction)
+│   └── ci/                       # CI scripts (data quality checks / tool self-checks / Markdown link check / smoke tests / maintenance report)
+├── docs/                         # Documentation
+│   ├── README.md                 # Documentation index and categories
+│   ├── CONTRIBUTING.md           # Translation contribution guide (auto-detected by GitHub)
+│   ├── ReleaseBody.md            # Release note template (assembled into release notes by CI)
+│   └── wiki/                     # In-depth wiki docs (usage / internals / contributing / development)
+├── .github/
+│   └── workflows/                # Unified CI/CD workflow (the repository's only workflow)
+├── SECURITY.md                   # Security policy (private vulnerability reporting / supply chain notes)
+├── CMakeLists.txt
+└── CMakePresets.json
+```
+
+## 🔭 Enabling GitHub Desktop preview options
+
+How GitHub Desktop internally decides whether preview features are on:
+
+```javascript
+const nn = !1;
+function rn() {
+    return !nn && "1" === process.env.GITHUB_DESKTOP_PREVIEW_FEATURES
+}
+// when rn() returns true, preview mode is enabled
+```
+
+**Option 1**: set the environment variable, then start GitHub Desktop
+
+```cmd
+set GITHUB_DESKTOP_PREVIEW_FEATURES=1
+"GitHub Desktop.lnk"
+```
+
+**Option 2**: choose as prompted while running the loader, which enables the preview features automatically (these are the optional replacements under `select`).
+
+## 🧭 FAQ
+
+> [!TIP]
+> **Cannot find the OpenSSL DLLs**: please update to the [latest release](https://github.com/Tupig/GitHubDesktop2Chinese/releases).
+>
+> **"The mapping file requires loader version …" / version requirement not met**: since v1.2.30 the remote mapping targets only the latest loader; please upgrade the loader from [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases). You can also type `f` at the prompt to force the replacement (not recommended — some entries may not match).
+>
+> **The program does not run / flashes and exits / `MSVCP140_ATOMIC_WAIT.dll` is missing**: install the **x64** build of the [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) (`vc_redist.x64.exe`).
+>
+> If it still fails after installing the latest VC++ runtime, check the program folder for leftover files such as `MSVCP140.dll` or `VCRUNTIME140.dll` and delete them.
+>
+> **GitHub Desktop fails to open after localization**: after updating the loader, run `GitHubDesktop2Chinese.exe dev --translationfrombak`.
+>
+> **Want to undo the localization**: run `GitHubDesktop2Chinese.exe --rollback` (restores from `main.js.bak` / `renderer.js.bak`).
+>
+> **Is macOS / Linux supported?**: per-architecture macOS binaries are provided (Intel: download `macos-x64`; Apple Silicon: `macos-arm64`) along with a Linux x64 build (from the Release page). The mappings target the **Windows** build of GitHub Desktop's UI texts (including Windows-specific content such as `&` access keys); a few entries may not match on other platforms.
+>
+> **Scripted / automated runs**: add `--nopause` for non-interactive use; note that it is a program-level argument and must come before subcommands such as `dev`.
+>
+> More topics (proxy not taking effect, `#{n}` placeholders, resumable downloads, `--invalidcheck`, etc.) in [📖 Wiki: FAQ](docs/wiki/常见问题.md).
+
+Suggestions are welcome in [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues).
+
+Please report security vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md); build provenance of released artifacts can be verified with `gh attestation verify <file> --repo Tupig/GitHubDesktop2Chinese`.
+
+## 🎋 Features
+
+- [x] JSON file declaring its format version and the minimum loader version
+- [x] Loader program version defined via a macro
+- [x] Third element of a replacement entry (find parameter) used as a global regex lookup, with `#{number}` placeholder backfill
+- [x] Minimum-version check that prompts or asks before forcing a replacement
+- [x] Pause confirmation (wait for a key before exiting; when `minversion` is not met, force only after typing `f`) — skipped entirely by `--nopause` (note: when the version requirement is not met, the prompt is skipped and the replacement is forced)
+- [x] Automatic update detection with one-click update + resumable download
+- [x] Extra description text (`tip`) from the JSON displayed in the loader
+- [x] Project contributors displayed after localization completes
+- [x] Recovery from backups when localization fails
+- [x] Selective localization (`select` prompts)
+- [x] One-click enablement of preview features
+- [x] System HTTP proxy support (environment variables + registry)
+- [x] Reads the latest GitHub Desktop version and compares it with the local one
+
+## 📦 Third-party libraries
+
+Thanks to these excellent open-source projects:
+
+| Library | Purpose | Repository |
+| --- | --- | --- |
+| CLI11 | Command-line parsing | [CLIUtils/CLI11](https://github.com/CLIUtils/CLI11) |
+| cpp-httplib | HTTP client | [yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) |
+| nlohmann/json | JSON parsing | [nlohmann/json](https://github.com/nlohmann/json) |
+| spdlog | Logging | [gabime/spdlog](https://github.com/gabime/spdlog) |
+| WinReg | Windows registry access | [GiovanniDicanio/WinReg](https://github.com/GiovanniDicanio/WinReg) |
+| OpenSSL | SSL/TLS support | [openssl/openssl](https://github.com/openssl/openssl) |
+
+## 🏘 Credits
+
+![Contributors](https://contrib.rocks/image?repo=Tupig/GitHubDesktop2Chinese)
+
+**Upstream project**: [cngege/GitHubDesktop2Chinese](https://github.com/cngege/GitHubDesktop2Chinese)
+
+<details>
+<summary>Click to expand the screenshot</summary>
+<img src="https://github.com/lkyero/GitHubDesktop_zh/assets/28597788/3023d028-8f63-4919-8900-ab3e953a1f76" alt="Localization preview" />
 </details>

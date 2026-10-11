@@ -1,5 +1,7 @@
 # third_party 三方依赖清单
 
+**简体中文** | [English](#third-party-dependencies-english)
+
 本目录存放 GitHubDesktop2Chinese 的全部第三方依赖，**全部随仓库提交**（含 Windows 版 OpenSSL 静态库），克隆后无需联网下载依赖即可构建。
 
 依赖来源政策：仅使用上游官方 GitHub 仓库 / 官方 Release 资产，不引入外部镜像或非官方预编译产物（CI 使用的 GitHub Actions 仅限 `actions/*` 与 `github/*` 官方维护的 Action，外加 Release 代码签名专用、SignPath 官方维护的 `signpath/github-action-submit-signing-request`）。
@@ -58,3 +60,68 @@ nmake install_sw
 - `no-tests` / `no-apps`：跳过测试与命令行工具，缩短构建时间
 - `no-zlib`：与 CI 的 macOS 静态库构建保持一致，不引入 zlib 依赖
 - `no-asm`：纯 C 实现；NASM 官方二进制仅发布于 nasm.us（非 GitHub），按仓库来源政策不引入，对本工具的 TLS 下载场景性能影响可忽略
+
+---
+
+# Third-Party Dependencies (English)
+
+[简体中文](#third_party-三方依赖清单) | **English**
+
+This directory holds all third-party dependencies of GitHubDesktop2Chinese. **Everything is committed to the repository** (including the Windows OpenSSL static libraries), so a clone can be built without downloading any dependencies.
+
+Dependency provenance policy: only upstream official GitHub repositories / official release assets are used; external mirrors and unofficial prebuilt artifacts are never introduced (the GitHub Actions used by CI are limited to the officially maintained `actions/*` and `github/*` Actions, plus `signpath/github-action-submit-signing-request`, maintained by SignPath and used solely for release code signing).
+
+## Directory Layout
+
+```text
+third_party/
+├── include/          # Header-only libraries (CLI11 / cpp-httplib / nlohmann/json / spdlog / WinReg)
+└── openssl/          # Windows OpenSSL headers + static libraries (3.5.9 LTS, MSVC x64)
+    ├── include/
+    └── lib/
+```
+
+## Version Manifest
+
+| Component | Version | Upstream (official GitHub) | License | In-repo location |
+| --- | --- | --- | --- | --- |
+| CLI11 | 2.4.1 | [CLIUtils/CLI11](https://github.com/CLIUtils/CLI11) | BSD-3-Clause | `include/CLI/` |
+| cpp-httplib | 0.15.3 | [yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) | MIT | `include/http/` |
+| nlohmann/json | 3.11.3 | [nlohmann/json](https://github.com/nlohmann/json) | MIT | `include/nlohmann/` |
+| spdlog | 1.13.0 | [gabime/spdlog](https://github.com/gabime/spdlog) | MIT | `include/spdlog/` |
+| WinReg | 2024-02-22 snapshot (upstream has no version number) | [GiovanniDicanio/WinReg](https://github.com/GiovanniDicanio/WinReg) | MIT | `include/WinReg/` |
+| OpenSSL (Windows static libraries) | 3.5.9 LTS (released 2026-09-29) | [openssl/openssl](https://github.com/openssl/openssl) (tag `openssl-3.5.9`) | Apache-2.0 | `openssl/{include,lib}` |
+
+> Versions are authoritative per the version macros inside each header (e.g. `CPPHTTPLIB_VERSION`, `NLOHMANN_JSON_VERSION_*`, `SPDLOG_VER_*`, `OPENSSL_VERSION_TEXT`); WinReg has no version macro and is identified by the update date in its header comment.
+
+## Update Policy
+
+- **Upgrade only, never swap sources casually**: new versions must come from the official GitHub repositories listed above or their official releases; mirrors and third-party prebuilt packages are forbidden.
+- **Header-only libraries**: replace the corresponding subdirectory under `include/` with the upstream official release, verify the version via the version macros after replacing, and update the table above accordingly.
+- **OpenSSL**: follow **LTS** branches only; the Windows static libraries are built locally by a maintainer and committed together with the headers (build steps below). After upgrading, update in sync: `third_party/openssl/`, the version table in this file, `README.md`, `SECURITY.md`, and `docs/wiki/编译指南.md`.
+- **macOS / Linux**: the OpenSSL in this directory is not used — macOS artifacts get their static libraries built by CI from official sources (see the workflow), and Linux installs via the system package manager (e.g. `libssl-dev`).
+
+## Windows OpenSSL Static Library Build Steps (maintainer reference)
+
+Toolchain: Visual Studio (MSVC x64) + portable [Strawberry Perl](https://github.com/StrawberryPerl/Perl-Dist-Strawberry) (portable edition downloaded from the official GitHub Release); NASM is not needed (`no-asm` pure-C build avoids the non-GitHub nasm.us channel).
+
+```powershell
+# 1. Official source: https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz
+tar -xzf openssl-3.5.9.tar.gz
+cd openssl-3.5.9
+
+# 2. In an "x64 Native Tools Command Prompt" (or after calling vcvars64.bat),
+#    with the portable Perl's perl\bin prepended to PATH, run:
+perl Configure VC-WIN64A no-shared no-tests no-apps no-zlib no-asm --prefix=<install dir> --openssldir=<install dir>\ssl
+nmake
+nmake install_sw
+
+# 3. Replace third_party\openssl\{include,lib} wholesale with <install dir>\include and <install dir>\lib, then commit
+```
+
+Build options and artifact conventions:
+
+- `no-shared`: static libraries (`libssl.lib` / `libcrypto.lib`), linked into the single-file executable
+- `no-tests` / `no-apps`: skip tests and command-line tools to shorten build time
+- `no-zlib`: consistent with the CI macOS static library build; avoids introducing a zlib dependency
+- `no-asm`: pure-C implementation; official NASM binaries are published only on nasm.us (not GitHub), so per the repository provenance policy they are not introduced — the performance impact for this tool's TLS download scenario is negligible

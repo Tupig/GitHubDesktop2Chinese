@@ -1,5 +1,7 @@
 # 文档索引
 
+**简体中文** | [English](#documentation-index-english)
+
 本目录集中存放仓库文档。各文件职责与归类依据如下：
 
 | 文件 | 职责 | 归类依据 |
@@ -35,3 +37,40 @@
 
 - `tools/auto-maintain/` — 数据维护工具（本地与 CI 共用；含共享规则 `regex-blacklist.json`）
 - `tools/ci/` — CI 脚本（数据质量校验 / 工具自检 / Markdown 链接检查 / 冒烟测试 / 维护报告）
+
+---
+
+# Documentation Index (English)
+
+[简体中文](#文档索引) | **English**
+
+This directory holds the repository's documentation. Each file's role and placement rationale:
+
+| File | Role | Placement rationale |
+| --- | --- | --- |
+| `CONTRIBUTING.md` | Localization contribution guide (rules / local verification / release-notes conventions) | A GitHub community-file location (one of root / `.github/` / `docs/`) — do not move |
+| `ReleaseBody.md` | Release-notes template (CI extracts change lines by full-width version markers) | The single source of truth for the release pipeline (referenced directly by the workflow's `grep/awk`) — do not move |
+| `wiki/` | GitHub Wiki publishing source (13 pages: install / usage / internals / contribution / CI-CD, etc.) | Layered apart from the main docs: main docs serve repository readers, the wiki serves product users |
+| `README.md` (this file) | Documentation index and placement notes | — |
+
+## Relationship to Other Documentation
+
+- The root `README.md` / `SECURITY.md` are entry-point documents (platform-conventional locations); this directory and `wiki/` are the second level
+- Cross-links are in place between the root README and `wiki/` (e.g. the contribution guide and the regex guide)
+
+## Wiki Maintenance Conventions
+
+- `wiki/` content is the publishing source for the GitHub Wiki: after updating, sync to the Wiki repository (the page title is the file name; `_Sidebar.md` / `_Footer.md` are the Wiki layout files)
+- **The landing page file name is fixed as `Home.md`**: the GitHub Wiki `/wiki` URL always points to the Home page — renaming or deleting it leaves `/wiki` as a blank page list (verified in practice); the Chinese presentation is achieved via the「首页」entry text in `_Sidebar.md` and the H1 title inside the page
+- When wiki pages overlap with the main docs (e.g. command-line options, FAQ), **the root-level documents are the source of truth**; wiki pages stay summary-level and link back to the main docs
+
+## Frozen Paths (moving these breaks functionality)
+
+| Path | Reason |
+| --- | --- |
+| `json/localization.json` | Released older builds embed its remote URL (`raw.githubusercontent.com/.../main/json/localization.json`); moving it breaks historical versions |
+| `.github/workflows/` | GitHub Actions only recognizes this directory |
+| `docs/ReleaseBody.md` | Source of truth for the CI release pipeline's `grep/awk` |
+| `docs/CONTRIBUTING.md` | GitHub community-file location |
+| `src/app.manifest`, `third_party/openssl/**` | Referenced precisely by CMake link / manifest parameters |
+| `CMakeLists.txt` / `CMakePresets.json` | Toolchain-conventional locations + the CI change-detection whitelist |

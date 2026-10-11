@@ -1,5 +1,7 @@
 # auto-maintain — localization.json 自动维护工具
 
+**简体中文** | [English](#auto-maintain--localizationjson-maintenance-tool-english)
+
 自动维护 GitHubDesktop2Chinese 的 `json/localization.json`：
 
 1. **失效检测** (`check`)：获取最新 GitHub Desktop（Windows 版），对现有映射逐条检测是否能匹配到 `main.js` / `renderer.js`，找出失效（匹配不到）的映射项。
@@ -105,4 +107,117 @@ tools/auto-maintain/
 │   ├── check-invalid.js   # 失效检测
 │   ├── extract-new.js     # 未翻译候选提取
 │   └── report.js          # Markdown 报告渲染（含表格行数上限防护）
+```
+
+---
+
+# auto-maintain — localization.json Maintenance Tool (English)
+
+[简体中文](#auto-maintain--localizationjson-自动维护工具) | **English**
+
+Automates maintenance of GitHubDesktop2Chinese's `json/localization.json`:
+
+1. **Invalid-entry check** (`check`): fetches the latest GitHub Desktop (Windows edition) and tests every existing mapping against `main.js` / `renderer.js` to find stale (no-longer-matching) entries.
+2. **Untranslated candidate extraction** (`extract`): extracts English UI string candidates from the latest GitHub Desktop that are not yet covered by existing mappings, and produces ready-to-paste JSON entry drafts.
+
+> The tool **only produces reports; it never modifies** `localization.json` directly. All changes still require manual confirmation, to avoid a broken regex leaving GitHub Desktop unable to start.
+
+## Requirements
+
+- Node.js >= 18
+- An unzip tool: Linux/macOS need `unzip` (or `tar`); Windows ships with `tar`
+
+## Usage
+
+```bash
+cd tools/auto-maintain
+
+# Invalid-entry check (reads json/localization.json at the repository root by default, regardless of cwd)
+node src/index.js check
+
+# Untranslated candidate extraction
+node src/index.js extract
+
+# Run both and write the report to workdir/report.md
+node src/index.js check extract --write-report
+
+# Specify a mapping file path
+node src/index.js check --json /path/to/localization.json
+
+# Local debugging: reuse existing main.js/renderer.js (skips the ~307MB download)
+node src/index.js check extract --keep-js
+```
+
+## Options
+
+| Option | Description |
+| --- | --- |
+| `check` / `extract` / `all` | Subcommands, combinable (e.g. `check extract`) |
+| `--json <path>` | Path to localization.json (defaults to `json/localization.json` at the repository root, resolved from the script location and unaffected by cwd) |
+| `--workdir <dir>` | Download/extraction working directory (defaults to the system temp directory) |
+| `--keep-js` | Reuse the `main.js`/`renderer.js` already in workdir, skipping the download |
+| `--top <n>` | Number of candidates extract outputs (default 60) |
+| `--write-report` | Write the full report to `workdir/report.md` |
+| `--no-color` | Disable colored output |
+
+## How It Works
+
+### Data Source
+
+Downloads `GitHubDesktop-<version>-x64-full.nupkg` (~307MB, the Windows Squirrel full package — essentially a zip) from the latest `desktop/desktop` release.
+It contains `lib/net45/resources/app/{main.js,renderer.js}` — the Electron resources before packaging (not asar-packed) — which can be read directly.
+
+> Download integrity is triple-checked: the EOCD signature, the byte size declared by the release asset (a mismatch deletes the partial file and restarts), and the `.part.url` sidecar (deleted when the resume URL differs from the current one, preventing cross-version resumed downloads from producing a hybrid file).
+
+> ⚠️ **Do not switch to the macOS `GitHub.Desktop-x64.zip`**: application strings differ between the two platforms (Windows menus carry `&` access keys; path-related strings reference Explorer/Command Prompt, etc.).
+> The macOS package produces massive false positives (in practice, about 239 false stale entries out of 1006 mappings). This project's localization target is the Windows edition.
+
+### Invalid-Entry Check
+
+Aligned with the C++ main program's `--invalidcheck` logic (`GitHubDesktop2Chinese.cpp`):
+
+- For every item of each `main`/`renderer`/`main_dev`/`renderer_dev` array:
+  - `item[0]` is treated as a regex and `test`ed against the corresponding JS text
+  - If `item[2]` (the third search parameter) exists, it is tested too
+  - No match is recorded as `not-found`; a regex compile failure as `regex-error`;
+    syntax incompatible with C++ `std::regex` (lookbehind assertions, named capture groups, `\p{...}`, inline flags, etc. — compilable on the JS side but throwing at C++ runtime) is recorded as `unsupported-syntax`
+    (the rule list lives in `regex-blacklist.json` in this directory, shared with the CI data quality check)
+  - Suspected catastrophic backtracking (nested quantifiers) is recorded as `redos-suspect` — **a warning only, never blocking** (shown in both the local console and report.md, consistent with the CI quality-gate warning)
+- For `select` entries with `enable=true`: tested against the corresponding JS per `replaceFile` **exactly equal to** `main.js` / `renderer.js` (consistent with the C++ app-side literal-equality check; any other value makes the whole select entry ineffective — skipped without counting)
+
+### Untranslated Candidate Extraction
+
+1. Extract double-quoted/single-quoted string literals from `main.js`/`renderer.js`
+2. `isLikelyUiText()` filters out clearly non-UI strings (internal library messages, URLs, paths, error messages, colors, regexes, template strings, concatenation fragments, etc.)
+3. Coverage check against all regexes of existing mappings (including `select` `replace` items); anything matched by any regex is considered "already translated" and excluded
+4. Remaining candidates are sorted by occurrence count and annotated with their source file (`main.js` / `renderer.js`)
+5. The report generates a JSON draft for each candidate (search terms escaped as literals); a human replaces `【待翻译】` with the translation and adds it to the corresponding array
+
+> Extraction is heuristic and includes some noise (e.g. internal library hints). Candidates assist maintenance and do not necessarily need translating (proper nouns can be skipped).
+
+## CI Automated Maintenance
+
+The workflow lives at `../../.github/workflows/ghdesktop2chinese.yml` (repository root):
+
+- **Triggers**: push to `main` + daily schedule (10:00 Beijing time) + manual `workflow_dispatch` with `type=auto` or `type=maintain`
+- **Flow**: query the latest version → restore caches (installer + extraction results) → run `check extract` → generate the report → create/update the `auto-maintain` labeled issue
+- **Auto-closing issues**: historical maintenance issues are closed automatically once stale entries drop to 0
+- **Never auto-merges**: all mapping changes still require manual confirmation, to avoid breaking GitHub Desktop
+
+> ⚠️ The cache key binds the GitHub Desktop version, platform, and tool source (`ghd-maintain-v3-<version>-<platform>-<tool hash>`); it is invalidated and rebuilt automatically when the installer or tool changes.
+> It deliberately excludes the `localization.json` hash: mappings change every time, and including it would invalidate the 307MB installer cache, while the report is regenerated by the step anyway.
+> Extraction results matching the installer are reused automatically (`.source.txt` source marker), skipping redundant extraction.
+
+## Directory Layout
+
+```
+tools/auto-maintain/
+├── package.json
+├── regex-blacklist.json   # Denylist of std::regex-incompatible syntax (shared with the CI data quality check)
+├── src/
+│   ├── index.js           # CLI entry
+│   ├── fetch.js           # Fetch/download/extract the latest GitHub Desktop, extract main.js/renderer.js
+│   ├── check-invalid.js   # Invalid-entry check
+│   ├── extract-new.js     # Untranslated candidate extraction
+│   └── report.js          # Markdown report rendering (with table row-limit protection)
 ```
