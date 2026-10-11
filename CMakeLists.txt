@@ -18,6 +18,8 @@ if(MSVC)
     # Debug 需要 /bigobj；Release 生成 PDB 并启用链接器调试信息
     add_compile_options($<$<CONFIG:Debug>:/bigobj> $<$<CONFIG:Release>:/Zi>)
     add_link_options($<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF>)
+    # OpenSSL 静态库不含 PDB，LNK4099 为已知噪音：显式忽略，保证构建零告警（#92）
+    add_link_options(/ignore:4099)
 endif()
 
 # 本项目仅支持 64 位架构（x64 / arm64 / x86_64 均可，指针宽度为 8）。
@@ -30,13 +32,13 @@ message(STATUS "目标架构: ${CMAKE_SYSTEM_PROCESSOR} (64 位)")
 
 if(DEFINED FILE_VERSION)
 add_definitions(-DFILEVERSION="${FILE_VERSION}")
-#add_definitions(-DFILEVERSION="v1.0.2")
 else()
 add_definitions(-DFILEVERSION="0.0.0-Dev.0")
 endif()
 
 include_directories(src)
-include_directories(third_party/include)
+# SYSTEM：第三方头文件（spdlog/fmt/CLI11）告警不归本仓管控，GCC/Clang 按 -isystem 抑制（#92）
+include_directories(SYSTEM third_party/include)
 
 if(WIN32)
     # ── Windows: OpenSSL 3.5.9 LTS 静态库（随仓库提交于 third_party/openssl/{include,lib}）──
