@@ -1,0 +1,35 @@
+name: 功能建议 / Feature request
+description: 明确的功能或改进请求 / A concrete feature or improvement request
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢建议！提交前请在 [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues?q=is%3Aissue) 与 [Discussions](https://github.com/Tupig/GitHubDesktop2Chinese/discussions) 搜索是否已被提出；发散性想法更适合 [Discussions 的「创意」分类](https://github.com/Tupig/GitHubDesktop2Chinese/discussions)。
+
+        Thanks for the suggestion! Before submitting, please search [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues?q=is%3Aissue) and [Discussions](https://github.com/Tupig/GitHubDesktop2Chinese/discussions) for prior proposals; open-ended ideas are a better fit for the [Discussions 创意 (Ideas) category](https://github.com/Tupig/GitHubDesktop2Chinese/discussions).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题 / Problem to solve
+      description: 这个功能解决什么问题？什么场景下需要？/ What problem does this solve, and in which scenario is it needed?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: 期望的方案 / Proposed solution
+      description: 你希望它怎么工作？/ How should it work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 考虑过的替代方案 / Alternatives considered
+      description: 可选 / Optional
+    validations:
+      required: false

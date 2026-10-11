@@ -1,0 +1,79 @@
+name: Bug 报告 / Bug report
+description: 程序异常行为、汉化失效、运行崩溃等问题 / Abnormal behavior, localization failures, crashes
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请先：
+
+        1. 在 [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues?q=is%3Aissue) 搜索关键词，避免重复提交；
+        2. 用[最新版程序](https://github.com/Tupig/GitHubDesktop2Chinese/releases/latest)复现一次（旧版问题可能已修复）；
+        3. 「汉化不生效」类问题请先联网运行一次程序（自动拉取最新映射），确认仍可复现。
+
+        Thanks for reporting! Before submitting, please:
+
+        1. Search existing [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues?q=is%3Aissue) for duplicates;
+        2. Reproduce once with the [latest release](https://github.com/Tupig/GitHubDesktop2Chinese/releases/latest) — older bugs may already be fixed;
+        3. For "localization not taking effect" issues, run the program once online first (it fetches the latest mapping) and confirm the problem persists.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述 / Description
+      description: 发生了什么？与预期的差别？/ What happened, and how does it differ from what you expected?
+      placeholder: |
+        例如：程序运行后提示「未找到 GitHub Desktop」。
+        e.g. The program reports it cannot find GitHub Desktop.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 程序版本 / Program version
+      description: 下载来源页显示的版本（如 v1.2.33）；本地自编译请注明 / The version shown on the release page (e.g. v1.2.33); note it if self-built
+      placeholder: "v1.2.33"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统 / Operating system
+      options:
+        - Windows 10 / 11（x64）
+        - Windows（其他版本 / other versions）
+        - macOS（Apple Silicon / arm64）
+        - macOS（Intel / x64）
+        - Linux（x64）
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      description: 按顺序列出操作步骤 / List the steps in order
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 输出与截图 / Output and screenshots
+      description: 程序输出、报错弹窗或截图（可选）/ Program output, error dialogs, or screenshots (optional)
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: 确认事项 / Confirmations
+      options:
+        - label: 我已用最新版复现，并搜索过现有 Issues（无重复）/ I reproduced this with the latest release and searched existing Issues (no duplicates)
+          required: true

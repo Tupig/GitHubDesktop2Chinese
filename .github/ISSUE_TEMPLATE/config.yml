@@ -1,8 +1,8 @@
 blank_issues_enabled: true
 contact_links:
-  - name: 使用问题求助（Discussions · 问答）
+  - name: 使用问题求助 / Usage help (Discussions · 问答 Q&A)
     url: https://github.com/Tupig/GitHubDesktop2Chinese/discussions
-    about: 使用中遇到问题？请到 Discussions 的「问答」分类发起讨论，便于社区互助与后续检索。
-  - name: 功能建议（Discussions · 创意）
+    about: 使用中遇到问题？请到 Discussions 的「问答」分类发起讨论，便于社区互助与后续检索。/ Trouble using the program? Start a thread in the Discussions 问答 (Q&A) category for community help and future reference.
+  - name: 想法讨论 / Open-ended ideas (Discussions · 创意 Ideas)
     url: https://github.com/Tupig/GitHubDesktop2Chinese/discussions
-    about: 想要新功能或改进？欢迎到 Discussions 的「创意」分类分享想法。
+    about: 发散性想法与方向讨论欢迎到 Discussions 的「创意」分类；明确的功能请求请用「功能建议」Issue 模板提交。/ Open-ended ideas and direction talks belong in the Discussions 创意 (Ideas) category; concrete feature requests should use the 功能建议 (Feature request) Issue template instead.
