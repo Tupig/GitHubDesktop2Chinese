@@ -8,6 +8,10 @@
  *  4. 对剩余候选去重、按出现频率排序输出
  */
 
+// 可翻译 UI 文案的长度过滤阈值: 过短多为残留噪音, 过长多为许可/法律整段文本
+const MIN_UI_TEXT_LEN = 4;
+const MAX_UI_TEXT_LEN = 160;
+
 /**
  * 判断字符串是否像一条可翻译的英文 UI 文案。
  * 过滤规则针对 GitHub Desktop bundle 的实际噪音设计。
@@ -15,7 +19,7 @@
 export function isLikelyUiText(s) {
   if (typeof s !== 'string' || !s) return false;
   const len = s.length;
-  if (len < 4 || len > 160) return false;
+  if (len < MIN_UI_TEXT_LEN || len > MAX_UI_TEXT_LEN) return false;
 
   // 必须包含大小写字母和至少一个空格（句子/短语特征）
   if (!/[A-Za-z]{2}/.test(s)) return false;

@@ -31,6 +31,8 @@ namespace utils {
     inline constexpr int kReadTimeoutSec = 30;
     // 单次请求可接受的响应体上限(32MB): 防止异常/恶意服务端响应撑爆内存
     inline constexpr size_t kMaxResponseBytes = 32 * 1024 * 1024;
+    // 哈希计算时文件分块读取的缓冲区大小
+    inline constexpr size_t kHashBufferSize = 64 * 1024;
 
     // 构造带超时与 TLS 校验的 HTTP 客户端
     inline auto MakeHttpClient(const std::string& url_host, const std::pair<std::string, int>& proxy = {}) -> httplib::Client {
@@ -73,7 +75,7 @@ namespace utils {
         EVP_MD_CTX* ctx = EVP_MD_CTX_new();
         if(!ctx) return "";
         bool ok = EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) == 1;
-        std::vector<char> buf(64 * 1024);
+        std::vector<char> buf(kHashBufferSize);
         while(ok && in) {
             in.read(buf.data(), static_cast<std::streamsize>(buf.size()));
             const std::streamsize n = in.gcount();

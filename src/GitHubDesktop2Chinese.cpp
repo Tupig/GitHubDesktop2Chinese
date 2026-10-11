@@ -50,6 +50,21 @@
 // 不进行替换 以便调试
 #define NO_REPLACE 0
 
+// ---------------------------------------------------------------------------
+// 远程端点与业务常量集中定义: 原先散落在各调用点的硬编码 URL / 魔法数字
+// 统一抽取至此, 调整端点或阈值只需修改这一处
+// ---------------------------------------------------------------------------
+constexpr const char kApiHost[] = "https://api.github.com";                                            // GitHub REST API 主机
+constexpr const char kRawHost[] = "https://raw.githubusercontent.com";                                 // 仓库原始内容主机
+constexpr const char kReleasesPageUrl[] = "https://github.com/Tupig/GitHubDesktop2Chinese/releases";   // 发布页(提示用)
+constexpr const char kRepoApiPath[] = "/repos/Tupig/GitHubDesktop2Chinese";                            // 本仓库信息
+constexpr const char kLatestReleaseApiPath[] = "/repos/Tupig/GitHubDesktop2Chinese/releases/latest";   // 本仓库最新 Release
+constexpr const char kContributorsApiPath[] = "/repos/Tupig/GitHubDesktop2Chinese/contributors";       // 本仓库贡献者列表
+constexpr const char kDesktopLatestReleaseApiPath[] = "/repos/desktop/desktop/releases/latest";        // GitHub Desktop 上游最新 Release
+constexpr const char kLocalizationJsonRawPath[] = "/Tupig/GitHubDesktop2Chinese/main/json/localization.json"; // 远程汉化映射文件
+constexpr int kMaxContributorsShown = 10;                          // 贡献者列表展示条数上限(完整获取, 仅限展示)
+constexpr std::size_t kDesktopTagPrefixLen = 8;                    // GitHub Desktop 官方 tag 前缀 "release-" 的长度
+
 versionparse::Version FileVer{0,0,0};
 
 
@@ -676,7 +691,7 @@ int main(int argc, char* argv[])
         // 读取项目更新时间
         try {
             std::string repoinfo;
-            if(utils::ReadHttpDataString("https://api.github.com", "/repos/Tupig/GitHubDesktop2Chinese", repoinfo, proxy)) {
+            if(utils::ReadHttpDataString(kApiHost, kRepoApiPath, repoinfo, proxy)) {
                 auto infojson = json::parse(repoinfo);
                 std::optional<std::string> info = formatTime(infojson["updated_at"]);
                 if(info) {
@@ -700,7 +715,7 @@ int main(int argc, char* argv[])
             spdlog::info("检查更新中..");
             try {
                 std::string repoinfo;
-                if(utils::ReadHttpDataString("https://api.github.com" , "/repos/Tupig/GitHubDesktop2Chinese/releases/latest", repoinfo, proxy)) {
+                if(utils::ReadHttpDataString(kApiHost, kLatestReleaseApiPath, repoinfo, proxy)) {
                     auto infojson = json::parse(repoinfo);
                     auto tag_name = infojson["tag_name"].get<std::string>();
                     versionparse::Version remoteVer(tag_name.c_str());
@@ -810,13 +825,13 @@ int main(int argc, char* argv[])
                 std::string httpjson_str;
                 // 使用 GitHub Releases API: releases/latest 仅返回最新非预发布(正式版),
                 // 避免把 beta 预览版(如 3.6.7-beta)误报为最新正式版
-                if(utils::ReadHttpDataString("https://api.github.com", "/repos/desktop/desktop/releases/latest", httpjson_str, proxy)) {
+                if(utils::ReadHttpDataString(kApiHost, kDesktopLatestReleaseApiPath, httpjson_str, proxy)) {
                     // 远程信息仅用于提示, 解析失败不应中断主流程
                     try {
                         auto httpjson = json::parse(httpjson_str);
                         std::string v = httpjson.at("tag_name").get<std::string>();
                         if(v.rfind("release-", 0) == 0) {
-                            v = v.substr(8); // 剥离 "release-" 前缀
+                            v = v.substr(kDesktopTagPrefixLen); // 剥离 "release-" 前缀
                         }
                         versionparse::Version desktop_remote_ver(v.c_str());
                         if(desktop_remote_ver) {
@@ -926,7 +941,7 @@ int main(int argc, char* argv[])
     if (only_read_from_remote) {
         spdlog::info("尝试从远程仓库中获取");
         std::string httpjson;
-        if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/Tupig/GitHubDesktop2Chinese/main/json/localization.json", httpjson, proxy)) {
+        if (utils::ReadHttpDataString(kRawHost, kLocalizationJsonRawPath, httpjson, proxy)) {
             try {
                 localization = json::parse(httpjson);
                 spdlog::info("远程读取成功");
@@ -951,7 +966,7 @@ int main(int argc, char* argv[])
             spdlog::warn("没有指定,或从指定位置没有发现 {} 文件", "localization.json");
             spdlog::info("尝试从远程仓库中获取");
             std::string httpjson;
-            if (utils::ReadHttpDataString("https://raw.githubusercontent.com" , "/Tupig/GitHubDesktop2Chinese/main/json/localization.json", httpjson, proxy)) {
+            if (utils::ReadHttpDataString(kRawHost, kLocalizationJsonRawPath, httpjson, proxy)) {
                 try {
                     localization = json::parse(httpjson);
                     spdlog::info("远程读取成功");
@@ -1106,7 +1121,7 @@ int main(int argc, char* argv[])
             if(FileVer < JsonVer) {
                 // 不符合要求
                 spdlog::warn("文件要求加载器版本至少为: {}, 但加载器版本为: {}", JsonVer.toString(), FileVer.toString());
-                spdlog::info("请更新：{}", "https://github.com/Tupig/GitHubDesktop2Chinese/releases");
+                spdlog::info("请更新：{}", kReleasesPageUrl);
                 // 询问是否强制执行
 
                 if(!no_pause) {
@@ -1157,14 +1172,14 @@ int main(int argc, char* argv[])
     try {
         spdlog::info("正在获取项目参与者");
         std::string contributors;
-        if(utils::ReadHttpDataString("https://api.github.com" , "/repos/Tupig/GitHubDesktop2Chinese/contributors", contributors, proxy)) {
+        if(utils::ReadHttpDataString(kApiHost, kContributorsApiPath, contributors, proxy)) {
             auto contributorsjson = json::parse(contributors);
             spdlog::info("人数: {}", contributorsjson.size());
             int num = 0;
             for(auto& item : contributorsjson.items()) {
                 num++;
-                if(num > 10) break;
-                spdlog::info("{}/10 名称:{} 贡献:{}{}{} 主页:{}", num, item.value()["login"].get<std::string>(),"\033[37m\033[5m", item.value()["contributions"].get<int>(),"\033[0m", item.value()["html_url"].get<std::string>());
+                if(num > kMaxContributorsShown) break;
+                spdlog::info("{}/{} 名称:{} 贡献:{}{}{} 主页:{}", num, kMaxContributorsShown, item.value()["login"].get<std::string>(),"\033[37m\033[5m", item.value()["contributions"].get<int>(),"\033[0m", item.value()["html_url"].get<std::string>());
             }
         }
     }

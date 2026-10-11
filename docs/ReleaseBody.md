@@ -15,6 +15,8 @@
   - Engineering standards: text encoding unified to UTF-8 without BOM (BOM removed from 6 files across CMake config / JSON / Markdown / C++ headers); the smoke-test script gained a UTF-8 BOM so it runs on local Windows PowerShell 5.1（v1.2.33）
 - 构建治理: 移除弃用的 codecvt 宽窄转换(消除 macOS 构建告警), 第三方头文件改为 SYSTEM 包含并屏蔽 MSVC LNK4099(第三方库无 PDB), 清理 CMake 残留调试注释, 目标四平台构建零告警（v1.2.34）
   - Build hygiene: removed the deprecated codecvt wide-narrow conversion (clears the macOS build warning); third-party headers are now included as SYSTEM and MSVC LNK4099 (third-party libs ship no PDBs) is suppressed; a leftover CMake debug comment was cleaned up — aiming for zero build warnings on all four platforms（v1.2.34）
+- 代码治理: 远程端点与魔法数字集中常量化, 消除散落各调用点的硬编码 URL/数值(GitHub API/RAW 端点、EOCD 搜索窗口、UI 文案长度阈值等), 调整端点或阈值只需改一处 (#94)
+  - Code governance: remote endpoints and magic numbers centralized into named constants — scattered hardcoded URLs/values (GitHub API/RAW endpoints, the EOCD search window, UI-text length thresholds, etc.) are now managed in one place, so adjusting an endpoint or threshold takes a single edit (#94)
 
 <!--
 #### 修复BUG:

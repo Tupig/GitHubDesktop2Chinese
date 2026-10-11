@@ -61,6 +61,12 @@ export async function getLatestRelease() {
   throw new Error(`获取 GitHub Desktop 最新 release 连续失败 ${attempts} 次: ${lastError?.message ?? '未知错误'}`);
 }
 
+// ZIP 规范: EOCD 结构固定 22 字节, 归档注释(archive comment)最大 65535 字节
+const EOCD_MIN_SIZE = 22;
+const MAX_ARCHIVE_COMMENT = 65535;
+// EOCD 搜索窗口 = EOCD 结构 + 最大注释(归档带注释时 EOCD 会整体前移)
+const EOCD_SEARCH_WINDOW = EOCD_MIN_SIZE + MAX_ARCHIVE_COMMENT;
+
 /**
  * 快速校验 zip/nupkg 完整性：检查 EOCD 签名 (PK\x05\x06) 是否出现在文件末尾。
  */
@@ -69,10 +75,10 @@ export function isZipComplete(zipPath) {
     const fd = fs.openSync(zipPath, 'r');
     try {
       const size = fs.fstatSync(fd).size;
-      if (size < 22) return false;
+      if (size < EOCD_MIN_SIZE) return false;
       // EOCD(签名 PK\x05\x06)位于归档尾部; 归档带 archive comment 时会前移,
-      // 因此在尾部 64KB(注释最大 65535 字节 + EOCD 22 字节)窗口内向前搜索
-      const windowLen = Math.min(size, 65557);
+      // 因此在尾部窗口(EOCD + 最大注释长度)内向前搜索
+      const windowLen = Math.min(size, EOCD_SEARCH_WINDOW);
       const buf = Buffer.alloc(windowLen);
       fs.readSync(fd, buf, 0, windowLen, size - windowLen);
       const sig = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
