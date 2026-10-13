@@ -51,10 +51,12 @@
 #             localization.json                — 汉化映射（最新）
 #
 # ── 版本号规则 ───────────────────────────────────────────────
-#   tag 触发     取 tag 版本（v1.2.5 → 1.2.5）
+#   tag 触发     取 tag 版本（v0.0.1 → 0.0.1）
 #   手动 version 使用输入值
-#   auto/release/定时 未输入时自动升级补丁号（最新 v* tag +1）
-#   push main     有构建相关变更时自动补丁号+1 发布；无变更不发布（版本留空, 产物名回退 commit SHA）
+#   auto/release/定时 未输入时自动递增版本（基于最新 v* tag，无 tag 自 v0.0.0 起步）:
+#     patch +1; patch 满 100 进位 minor 并重置为 1（0.0.100 → 0.1.1）;
+#     minor 满 100 进位 major 并重置为 0（0.100.100 → 1.0.1）
+#   push main     有构建相关变更时自动递增版本发布；无变更不发布（版本留空, 产物名回退 commit SHA）
 #
 # ── 稳定性设计 ───────────────────────────────────────────────
 #   - runner 固定版本（ubuntu-24.04 / windows-2025 / macos-15-intel），CodeQL v4
@@ -100,7 +102,7 @@ on:
           - maintain
           - release
       version:
-        description: "版本号（不带 v 前缀, 如 1.2.5; 留空自动升级补丁号; 仅对 build/auto/release 的产物命名与发布生效）"
+        description: "版本号（不带 v 前缀, 如 0.0.2; 留空自动递增版本; 仅对 build/auto/release 的产物命名与发布生效）"
         required: false
         type: string
 
@@ -209,29 +211,25 @@ jobs:
             elif [[ "$TYPE" == "auto" || "$TYPE" == "release" || "${GITHUB_EVENT_NAME}" == "schedule" || ( "${GITHUB_EVENT_NAME}" == "push" && "$BUILD_CHANGES" -gt 0 ) ]]; then
               LATEST="$LATEST_TAG"
               if [[ -z "$LATEST" ]]; then
-                echo "本仓库暂无 v* tag，回落上游最新版本"
-                # 网络失败不直接终止(set -e/pipefail), 交由下方统一检查给出友好报错
-                LATEST="$(curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
-                  --connect-timeout 15 --max-time 60 \
-                  -H "Authorization: Bearer ${GH_TOKEN}" \
-                  https://api.github.com/repos/cngege/GitHubDesktop2Chinese/releases/latest \
-                  | jq -r '.tag_name')" || LATEST=""
-              fi
-              if [[ -z "$LATEST" || "$LATEST" == "null" ]]; then
-                echo "::error::无法确定基础版本号，请手动输入 version"
-                exit 1
+                echo "本仓库暂无 v* tag，从初始版本 v0.0.0 起步"
+                LATEST="v0.0.0"
               fi
               BASE="${LATEST#v}"
               IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
-              PATCH="${PATCH:-0}"
-              VERSION="$MAJOR.$MINOR.$((PATCH+1))"
-              echo "自动升级版本: $LATEST -> v$VERSION"
+              MAJOR="${MAJOR:-0}"; MINOR="${MINOR:-0}"; PATCH="${PATCH:-0}"
+              # 版本进位规则: patch 满 100 进位 minor 并重置为 1(0.0.100 → 0.1.1);
+              # minor 满 100 进位 major 并重置为 0(0.100.100 → 1.0.1)
+              PATCH=$((PATCH+1))
+              if [[ "$PATCH" -gt 100 ]]; then MINOR=$((MINOR+1)); PATCH=1; fi
+              if [[ "$MINOR" -gt 100 ]]; then MAJOR=$((MAJOR+1)); MINOR=0; PATCH=1; fi
+              VERSION="$MAJOR.$MINOR.$PATCH"
+              echo "自动递增版本: $LATEST -> v$VERSION"
             fi
           fi
           # 版本号格式校验(写入 GITHUB_OUTPUT 前):
           # 非法输入如 abc 会让下轮自动 bump 算出非法 tag(abc..1), 使每日定时发布链路瘫痪
           if [[ -n "$VERSION" && ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::版本号格式非法: '$VERSION'（须为 x.y.z 纯数字，如 1.2.23；tag 与手动输入同此规则）"
+            echo "::error::版本号格式非法: '$VERSION'（须为 x.y.z 纯数字，如 0.0.2；tag 与手动输入同此规则）"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -741,8 +739,17 @@ jobs:
           # 正常情况下最新 tag 应为 v<x.y.(z-1)>, 不一致仅告警不阻断(记录实际对应关系)
           LATEST_TAG="$(git ls-remote --tags --refs origin 'v*' | sed 's#.*refs/tags/##' | sort -V | tail -n1 || true)"
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VER"
-          if [[ -n "$LATEST_TAG" && "$PATCH" -gt 0 ]]; then
+          # 按进位规则反推预期前驱: patch>1 直接减 1; patch=1 由 minor-1 的 patch=100 进位而来; 依此类推
+          if [[ "$PATCH" -gt 1 ]]; then
             EXPECT_PREV="v${MAJOR}.${MINOR}.$((PATCH-1))"
+          elif [[ "$MINOR" -gt 0 ]]; then
+            EXPECT_PREV="v${MAJOR}.$((MINOR-1)).100"
+          elif [[ "$MAJOR" -gt 0 ]]; then
+            EXPECT_PREV="v$((MAJOR-1)).100.100"
+          else
+            EXPECT_PREV=""
+          fi
+          if [[ -n "$LATEST_TAG" && -n "$EXPECT_PREV" ]]; then
             if [[ "$LATEST_TAG" != "$EXPECT_PREV" ]]; then
               echo "::warning::版本漂移: 当前最新 tag 为 ${LATEST_TAG}, 预期 ${EXPECT_PREV}; 本次实际发布 v${VER}"
             else

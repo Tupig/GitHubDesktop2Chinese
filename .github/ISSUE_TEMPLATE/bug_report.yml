@@ -33,8 +33,8 @@ body:
     id: version
     attributes:
       label: 程序版本 / Program version
-      description: 下载来源页显示的版本（如 v1.2.33）；本地自编译请注明 / The version shown on the release page (e.g. v1.2.33); note it if self-built
-      placeholder: "v1.2.33"
+      description: 下载来源页显示的版本（如 v0.0.1）；本地自编译请注明 / The version shown on the release page (e.g. v0.0.1); note it if self-built
+      placeholder: "v0.0.1"
     validations:
       required: true
 
