@@ -22,9 +22,14 @@ export function loadLocalization(jsonPath) {
  * JS new RegExp 接受但 C++ std::regex 会抛 regex_error 的写法必须显式拦截，
  * 否则实际运行时 C++ 侧 regex_error 中断汉化。
  */
-const STD_REGEX_BLACKLIST = JSON.parse(
+const _BLACKLIST_JSON = JSON.parse(
   fs.readFileSync(new URL('../regex-blacklist.json', import.meta.url), 'utf8'),
-).rules.map((r) => ({ re: new RegExp(r.regex), why: r.why }));
+);
+const STD_REGEX_BLACKLIST = _BLACKLIST_JSON.rules.map((r) => ({ re: new RegExp(r.regex), why: r.why }));
+// ReDoS 启发式(仅告警不阻断): 规则与 CI 的 tools/ci/check-localization.py 共用 regex-blacklist.json 单一事实来源(#119)
+const REDOS_HEURISTIC = _BLACKLIST_JSON.redos_heuristic?.regex
+  ? new RegExp(_BLACKLIST_JSON.redos_heuristic.regex)
+  : null;
 
 /**
  * 对单个映射项执行失效检测（与 C++ std::regex 语义对齐）。
@@ -53,8 +58,8 @@ export function checkEntry(jsText, item) {
       errors.push({ reason: `unsupported-syntax: ${hit.why}`, pattern: p });
       continue;
     }
-    // ReDoS 启发式(仅告警不阻断): 与 CI 的 tools/ci/check-localization.py 对齐, 由调用方纳入输出与报告
-    if (/\([^()]*[+*][^()]*\)\s*[+*{]/.test(p)) {
+    // ReDoS 启发式(仅告警不阻断): 规则来自 regex-blacklist.json, 与 CI 的 tools/ci/check-localization.py 对齐, 由调用方纳入输出与报告
+    if (REDOS_HEURISTIC && REDOS_HEURISTIC.test(p)) {
       warnings.push({ reason: 'redos-suspect', pattern: p });
     }
     try {
@@ -93,7 +98,6 @@ export function checkInvalid(localization, mainJsText, rendererJsText) {
         failed.push({
           array: arrayName,
           index: i,
-          item: arr[i],
           errors,
         });
       }
@@ -129,7 +133,6 @@ export function checkInvalid(localization, mainJsText, rendererJsText) {
           failed.push({
             array: `select[${s}].replace`,
             index: j,
-            item: replaces[j],
             errors,
           });
         }

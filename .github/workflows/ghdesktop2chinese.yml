@@ -141,10 +141,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # 默认最小权限：读代码；issues 供自动维护写报告；security-events 供 CodeQL 上传结果
+# 顶层默认最小权限；需要更高权限的 job 在各自 permissions 块显式声明（#117）
 permissions:
   contents: read
-  issues: write
-  security-events: write
 
 # 全局变量：构建类型 / 可执行文件名 / 产物名前缀
 env:
@@ -160,6 +159,10 @@ jobs:
     name: 解析版本号
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # gh api 查询 workflow runs（#81 构建差异检测）需要 actions 读权限，显式声明不依赖平台默认行为（#117）
+    permissions:
+      contents: read
+      actions: read
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       changed: ${{ steps.resolve.outputs.changed }}
@@ -358,6 +361,10 @@ jobs:
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'security' || inputs.type == 'release'))
     runs-on: windows-2025
     timeout-minutes: 30
+    # SARIF 上传需要 security-events 写权限；顶层已收窄，job 级显式声明（#117）
+    permissions:
+      contents: read
+      security-events: write
     env:
       # cpp 语言查询包不支持 overlay-base 增量分析，显式关闭以避免构建回退告警
       CODEQL_OVERLAY_DATABASE_MODE: none
@@ -432,6 +439,8 @@ jobs:
       attestations: write
     env:
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
+      # 经 env 传递而非 ${{ }} 内插进脚本（#119，防注入统一约定）
+      CI_SHA: ${{ github.sha }}
     steps:
       # ── 检出 ──
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -442,7 +451,7 @@ jobs:
         shell: pwsh
         run: |
           chcp 65001 | Out-Null
-          $ver = if ($env:RELEASE_VERSION) { "v$env:RELEASE_VERSION" } else { "ci-${{ github.sha }}" }
+          $ver = if ($env:RELEASE_VERSION) { "v$env:RELEASE_VERSION" } else { "ci-$env:CI_SHA" }
           # CMake 配置无需联网（OpenSSL 静态库随仓库提交），环境抖动时自动重试
           for ($attempt = 1; $attempt -le 3; $attempt++) {
             cmake -B build -A x64 "-DFILE_VERSION=$ver"
@@ -660,9 +669,14 @@ jobs:
     runs-on: ubuntu-24.04
     # 检测步骤 2×20min 重试 + 版本查询最坏约 6.5min, 需覆盖完整重试设计(30min 会把第二次重试 cancel 掉)
     timeout-minutes: 50
+    # report-issue.js / github-script 创建 Issue 需要 issues 写权限；顶层已收窄，job 级显式声明（#117）
+    permissions:
+      contents: read
+      issues: write
     env:
       # fetch.js 查询 GitHub API 时使用；匿名限额 60 次/小时会被共享 runner IP 触发 403
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 与其余 job 统一取 github.token（#119）
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -799,6 +813,8 @@ jobs:
       contents: write
       # SignPath 签名后需对签名产物重新生成构建溯源证明(OIDC)
       id-token: write
+      # attest-build-provenance 写入 attestation；缺失时 SignPath 启用后该步骤 403 阻断发布（#117）
+      attestations: write
     env:
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       # SignPath 代码签名(Foundation 免费开源证书): token 与组织 ID 齐备才签名, 缺任一则跳过
@@ -1039,10 +1055,15 @@ jobs:
           # 与主构建一致的部署目标, 防止 SDK 差异引入更高系统版本依赖
           export MACOSX_DEPLOYMENT_TARGET=11.0
           cd "$RUNNER_TEMP"
-          rm -rf openssl-src "openssl-$OSSL_VER.tar.gz"
+          rm -rf openssl-src "openssl-$OSSL_VER.tar.gz" "openssl-$OSSL_VER.tar.gz.sha256"
           curl --fail --location --retry 3 --retry-delay 5 \
             --output "openssl-$OSSL_VER.tar.gz" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
+          # 供应链校验(#118): 官方 release 附带的 .sha256 旁证(openssl.org/source 链接的同一文件), 对照后才解压
+          curl --fail --location --retry 3 --retry-delay 5 \
+            --output "openssl-$OSSL_VER.tar.gz.sha256" \
+            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
+          sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
           mkdir -p openssl-src
           tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
           cd openssl-src
@@ -1095,10 +1116,15 @@ jobs:
             exit 1
           fi
           cd "$RUNNER_TEMP"
-          rm -rf openssl-src "openssl-$OSSL_VER.tar.gz"
+          rm -rf openssl-src "openssl-$OSSL_VER.tar.gz" "openssl-$OSSL_VER.tar.gz.sha256"
           curl --fail --location --retry 3 --retry-delay 5 \
             --output "openssl-$OSSL_VER.tar.gz" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
+          # 供应链校验(#118): 官方 release 附带的 .sha256 旁证(openssl.org/source 链接的同一文件), 对照后才解压
+          curl --fail --location --retry 3 --retry-delay 5 \
+            --output "openssl-$OSSL_VER.tar.gz.sha256" \
+            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
+          sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
           mkdir -p openssl-src
           tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
           cd openssl-src
@@ -1154,10 +1180,15 @@ jobs:
             exit 1
           fi
           cd "$RUNNER_TEMP"
-          rm -rf openssl-src "openssl-$OSSL_VER.tar.gz"
+          rm -rf openssl-src "openssl-$OSSL_VER.tar.gz" "openssl-$OSSL_VER.tar.gz.sha256"
           curl --fail --location --retry 3 --retry-delay 5 \
             --output "openssl-$OSSL_VER.tar.gz" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
+          # 供应链校验(#118): 官方 release 附带的 .sha256 旁证(openssl.org/source 链接的同一文件), 对照后才解压
+          curl --fail --location --retry 3 --retry-delay 5 \
+            --output "openssl-$OSSL_VER.tar.gz.sha256" \
+            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
+          sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
           mkdir -p openssl-src
           tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
 

@@ -157,4 +157,8 @@ async function main() {
   }
 }
 
-main();
+// 顶层兜底: main 内部已有 try/catch, 此处仅防御未来漏网异常以 unhandled rejection 形式暴露(#119)
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
