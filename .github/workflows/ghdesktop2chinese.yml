@@ -80,11 +80,11 @@ on:
   pull_request:
     branches:
       - main
-  # 每日北京时间 10:13 = UTC 02:13: 构建 + 质量 + 维护, 有构建相关变更时发布
-  # 分钟取 13 避开整点: GitHub Actions 高负载时段(整点开始)定时任务会被延迟甚至丢弃(官方文档),
-  # 实测整点 cron 曾延迟 6.5 小时/次日被丢弃; schedule 本身是尽力而为, 准点不保证
+  # 每日北京时间 09:23 = UTC 01:23: 构建 + 质量 + 维护, 有构建相关变更时发布
+  # 分钟取 23 避开整点: GitHub Actions 高负载时段(整点开始)定时任务会被延迟甚至丢弃(官方文档),
+  # 实测非整点 cron 仍可能延迟数小时/偶发丢失; schedule 本身是尽力而为, 准点不保证
   schedule:
-    - cron: "13 2 * * *"
+    - cron: "23 1 * * *"
   # 手动触发（建议在 main 上执行; 发布类 auto/release 仅 main 生效, 见 release job 边界注释）
   workflow_dispatch:
     inputs:
