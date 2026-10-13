@@ -69,7 +69,7 @@ if(WIN32)
     include_directories("${GHD2C_OPENSSL_ROOT}/include")
 elseif(APPLE)
     # ── macOS: OpenSSL 3.5.9 LTS 静态库（随仓库提交于 third_party/openssl-macos-{x64,arm64}）──
-    # 库由 .github/workflows/vendor-openssl.yml 从官方源码构建（tag openssl-3.5.9，
+    # 库由主工作流 ghdesktop2chinese.yml 的 vendor 任务从官方源码构建（tag openssl-3.5.9，
     # darwin64-{x86_64,arm64}-cc no-shared no-tests no-apps no-zlib，MACOSX_DEPLOYMENT_TARGET=11.0），
     # 构建与更新步骤见 third_party/README.md；CMake 按 CMAKE_OSX_ARCHITECTURES（回退
     # CMAKE_SYSTEM_PROCESSOR）自动选架构目录，构建期零下载零编译。
@@ -99,7 +99,7 @@ elseif(APPLE)
                 "OpenSSL 静态库组件缺失: ${GHD2C_OPENSSL_ROOT}/${_oss_comp}\n"
                 "third_party/openssl-macos-{x64,arm64} 应随仓库提交。若被误删，请执行:\n"
                 "  git checkout -- third_party/openssl-macos-x64 third_party/openssl-macos-arm64\n"
-                "或参考 third_party/README.md 用 vendor-openssl.yml 工作流重新产出后提交。")
+                "或参考 third_party/README.md 用主工作流 vendor 任务重新产出后提交。")
         endif()
     endforeach()
 

@@ -2,7 +2,7 @@
 
 **简体中文** | [English](#ci--cd-english)
 
-仓库有**两个工作流**：主工作流 [`.github/workflows/ghdesktop2chinese.yml`](../../.github/workflows/ghdesktop2chinese.yml)（构建 / 检查 / 维护 / 发布）与 [`.github/workflows/wiki-sync.yml`](../../.github/workflows/wiki-sync.yml)（文档自动同步到 GitHub Wiki）。大型脚本全部外置于 `tools/ci/`（数据质量校验 / 编码检查 / 工具自检 / Markdown 链接检查 / 冒烟测试 / 维护报告 / Wiki 同步），YAML 内只保留编排逻辑。本文聚焦主工作流，Wiki 同步见[下文](#wiki-自动同步)。
+仓库只有**一个工作流** [`.github/workflows/ghdesktop2chinese.yml`](../../.github/workflows/ghdesktop2chinese.yml)（构建 / 检查 / 维护 / Wiki 同步 / OpenSSL 产库 / 发布）。大型脚本全部外置于 `tools/ci/`（数据质量校验 / 编码检查 / 工具自检 / Markdown 链接检查 / 单工作流规范校验 / 冒烟测试 / 维护报告 / Wiki 同步），YAML 内只保留编排逻辑。Wiki 同步见[下文](#wiki-自动同步)。
 
 ## 触发方式
 
@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | `push` | `main` 分支或 `v*` tag | push main 有构建相关变更时自动发布；push tag 始终发布 |
 | `pull_request` | 目标为 `main` | 跑构建 + 质量门，不发布 |
-| `schedule` | 每日 UTC 02:13（北京时间 10:13；分钟避开整点，防高负载延迟/丢弃） | 完整链路：构建（无差异时跳过）→ 检查 → 维护 → （有变更时）发布 |
+| `schedule` | 每日 UTC 01:23（北京时间 09:23；分钟避开整点，防高负载延迟/丢弃） | 完整链路：构建（无差异时跳过）→ 检查 → 维护 → （有变更时）发布 |
 | `workflow_dispatch` | 手动 | 输入 `type` + 可选 `version`，见下表 |
 
 手动触发（`workflow_dispatch`）的 `type` 与执行范围：
@@ -22,8 +22,9 @@
 | `release` | 构建 + 发布（仅 main 分支可用；CodeQL 与失效检测旁路执行，不阻塞发布） |
 | `security` | 质量校验 + 工具自检 + CodeQL |
 | `maintain` | 仅自动维护（失效检测 + 候选提取 + Issue） |
+| `vendor` | 仅产库 OpenSSL 静态库（三平台 artifact，版本由 `openssl-version` 指定） |
 
-`version` 为可选覆盖：**留空即自动递增版本**（如 `0.0.1 → 0.0.2`，patch 满 100 进位 minor 并重置为 1）；填写时不带 `v` 前缀（如 `0.0.2`），必须为 `x.y.z` 纯数字，否则 CI 在版本号校验处直接失败；仅对 build / auto / release 的产物命名与发布生效。
+`version` 为可选覆盖：**留空即自动递增版本**（如 `0.0.1 → 0.0.2`，patch 满 100 进位 minor 并重置为 1）；填写时不带 `v` 前缀（如 `0.0.2`），必须为 `x.y.z` 纯数字，否则 CI 在版本号校验处直接失败；仅对 build / auto / release 的产物命名与发布生效。`openssl-version` 仅 `type=vendor` 生效：产库 OpenSSL 版本（不带 `v` 前缀，须为 `3.x.y` LTS），留空默认 `3.5.9`。
 
 并发控制：同一 ref 的重复触发会取消进行中的旧运行（PR 场景 `cancel-in-progress`），避免排队堆积。
 
@@ -31,18 +32,20 @@
 
 ## Job 矩阵
 
-Job 依赖关系：`build` / `build-skip-notice` ← `version`；`release` ← `version + build + json-quality + tools-test + encoding-check`。质量门、CodeQL 与 auto-maintain 相互独立，与 build 并行。**CodeQL 与 auto-maintain 是旁路校验**——手动 `release` 时也会执行（发现问题出 Issue / 告警），但**不阻塞发布**。
+Job 依赖关系：`build` / `build-skip-notice` / `codeql` / `auto-maintain` / `sync-wiki` / `vendor-*` ← `version`；`release` ← `version + build + json-quality + tools-test + encoding-check`。质量门、CodeQL、auto-maintain、sync-wiki 与 vendor 任务相互独立，与 build 并行。**CodeQL 与 auto-maintain 是旁路校验**——手动 `release` 时也会执行（发现问题出 Issue / 告警），但**不阻塞发布**。
 
 | Job | 触发 | 内容 |
 | --- | --- | --- |
 | `version`（变更检测） | 全部触发场景（PR / push / tag / 定时 / 手动） | 以最新 `v*` tag 为基准，检测 `json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 的实际变更（排除纯文档 `third_party/README.md`），输出 `changed` 供发布环节判断；并与上次成功构建对比输出 `build_changed`（见[构建差异检测](#构建差异检测构建跳过)） |
 | `json-quality` | PR / push / tag / 定时 / 手动 auto、security、release | `localization.json` 质量门：正则合法性、结构完整性、占位符检查、`std::regex` 不兼容语法黑名单、ReDoS 启发式、译文问句全角风格 |
 | `encoding-check` | PR / push / tag / 定时 / 手动 auto、security、release | 源码编码格式门：全量扫描 git 跟踪文本文件要求 UTF-8；GBK / 非 UTF-8 与意外 BOM 以 `::error` 清单 + 非零退出码失败；第三方依赖排除 |
-| `tools-test` | PR / push / tag / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 + Markdown 链接检查（`tools/ci/md-check.py`） |
+| `tools-test` | PR / push / tag / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 + Markdown 链接检查（`tools/ci/md-check.py`）+ 单工作流规范校验（`tools/ci/check-workflow.py`，W0-W5） |
 | `codeql` | PR（仅同仓分支，fork PR 不跑——其令牌无 security-events 写权限，上传必失败）/ push main / 手动 auto、security、release | C/C++ 安全扫描（不含定时，节省资源；运行于 Windows runner） |
 | `build` | PR / push / tag / 定时 / 手动 auto、build、release；无差异的定时 / push main 跳过（见[构建差异检测](#构建差异检测构建跳过)） | **四目标构建矩阵 + 产物功能测试**：Windows x64、macOS x64 / arm64（单架构包，静态链接 OpenSSL + strip/LTO 裁剪）、Linux x64；`fail-fast` 关闭，单平台失败不取消其余平台 |
 | `build-skip-notice` | 仅无差异的定时 / push main | 在 Run 摘要 / notice / 日志中输出跳过原因（skipped job 自身无日志，故设独立 job 说明） |
 | `auto-maintain` | push main / 每日定时 / 手动 auto、maintain、release | 失效检测 + 候选提取，自动创建/关闭带 `auto-maintain` 标签的 Issue（详见[自动维护工具](自动维护工具.md#ci-自动维护)） |
+| `sync-wiki` | push main / 手动 auto、release | 检测 `docs/wiki/**` 变更后将文档镜像同步到 GitHub Wiki（见[Wiki 自动同步](#wiki-自动同步)） |
+| `vendor-macos` / `vendor-linux` / `vendor-windows` | PR 打 `vendor-openssl` 标签 / 手动 `vendor` | 产库 OpenSSL 静态库（三平台 artifact，保留 7 天），供维护者下载后提交 `third_party/`，构建期零下载零编译 |
 | `release` | push main（有变更）/ tag `v*` / 定时（有变更）/ 手动 auto（main，有变更）、release（main） | 发布，见下节 |
 
 ## 发布规则
@@ -83,12 +86,12 @@ Job 依赖关系：`build` / `build-skip-notice` ← `version`；`release` ← `
 
 ## Wiki 自动同步
 
-文档页面（`docs/wiki/`）合入 `main` 后由 [`wiki-sync.yml`](../../.github/workflows/wiki-sync.yml) 自动镜像到 GitHub Wiki 标签页：
+文档页面（`docs/wiki/`）合入 `main` 后，由主工作流的 `sync-wiki` 任务自动镜像到 GitHub Wiki 标签页：
 
-- **触发**：push `main` 且 `docs/wiki/**` 有变更；或手动 `workflow_dispatch` 兜底（初始化 / 修复 / 验证）；
+- **触发**：push `main` 或手动 `type=auto|release`；任务内先检测 `docs/wiki/**` 是否有变更，无变更自动跳过（手动触发视为有变更，可作初始化 / 修复 / 验证兜底）；
 - **同步语义**：镜像同步——`docs/wiki/` 为唯一真值，Wiki 端多余的页面会被**删除**（实现见 [`tools/ci/sync-wiki.sh`](../../tools/ci/sync-wiki.sh)）；
 - **凭据**：内置 `GITHUB_TOKEN`（`contents: write` 即可推送同仓库 Wiki，无需 PAT）；
-- **并发**：`concurrency` group `wiki-sync` 串行且不取消，连续文档提交排队执行，避免交叉覆盖。
+- **并发**：与主工作流共享全局 `concurrency` 组（同一 ref 串行），不与其他运行交叉执行。
 
 ## 代码签名（SignPath）
 
@@ -164,7 +167,7 @@ python tools/ci/check-encoding.py --exclude docs/legacy/                  # 临�
 
 [简体中文](#ci--cd) | **English**
 
-The repository has **two workflows**: the main workflow [`.github/workflows/ghdesktop2chinese.yml`](../../.github/workflows/ghdesktop2chinese.yml) (build / checks / maintenance / release) and [`.github/workflows/wiki-sync.yml`](../../.github/workflows/wiki-sync.yml) (automatic sync of docs to the GitHub Wiki). Large scripts live outside the YAML in `tools/ci/` (data quality validation / encoding check / tool self-tests / Markdown link checks / smoke tests / maintenance reports / Wiki sync); the YAML only holds the orchestration. This page focuses on the main workflow; Wiki sync is covered [below](#automatic-wiki-sync).
+The repository has a **single workflow**: [`.github/workflows/ghdesktop2chinese.yml`](../../.github/workflows/ghdesktop2chinese.yml) (build / checks / maintenance / Wiki sync / OpenSSL vendoring / release). Large scripts live outside the YAML in `tools/ci/` (data quality validation / encoding check / tool self-tests / Markdown link checks / single-workflow spec validation / smoke tests / maintenance reports / Wiki sync); the YAML only holds the orchestration. Wiki sync is covered [below](#automatic-wiki-sync).
 
 ## Triggers
 
@@ -172,7 +175,7 @@ The repository has **two workflows**: the main workflow [`.github/workflows/ghde
 | --- | --- | --- |
 | `push` | `main` branch or `v*` tag | Push to main auto-releases when build-related changes exist; pushing a tag always releases |
 | `pull_request` | targeting `main` | Runs build + quality gates, no release |
-| `schedule` | Daily UTC 02:13 (Beijing 10:13; the minute avoids the top of the hour to prevent delay/dropping under heavy load) | Full pipeline: build (skipped when unchanged) → checks → maintenance → release (when changed) |
+| `schedule` | Daily UTC 01:23 (Beijing 09:23; the minute avoids the top of the hour to prevent delay/dropping under heavy load) | Full pipeline: build (skipped when unchanged) → checks → maintenance → release (when changed) |
 | `workflow_dispatch` | Manual | Inputs `type` + optional `version`, see the table below |
 
 Execution scope per `type` for manual (`workflow_dispatch`) runs:
@@ -184,8 +187,9 @@ Execution scope per `type` for manual (`workflow_dispatch`) runs:
 | `release` | Build + release (main branch only; CodeQL and invalid-entry detection run as bypasses and don't block the release) |
 | `security` | Quality validation + tool self-tests + CodeQL |
 | `maintain` | Maintenance only (invalid detection + candidate extraction + Issues) |
+| `vendor` | OpenSSL static-library vendoring only (three-platform artifacts; version via `openssl-version`) |
 
-`version` is an optional override: **leave it empty to auto-increment the version** (e.g. `0.0.1 → 0.0.2`; a full patch of 100 carries into minor, resetting it to 1); when provided, omit the `v` prefix (e.g. `0.0.2`) and it must be plain digits `x.y.z`, otherwise CI fails at version validation; it only affects artifact naming and releases for build / auto / release.
+`version` is an optional override: **leave it empty to auto-increment the version** (e.g. `0.0.1 → 0.0.2`; a full patch of 100 carries into minor, resetting it to 1); when provided, omit the `v` prefix (e.g. `0.0.2`) and it must be plain digits `x.y.z`, otherwise CI fails at version validation; it only affects artifact naming and releases for build / auto / release. `openssl-version` only takes effect for `type=vendor`: the OpenSSL version to vendor (no `v` prefix, must be `3.x.y` LTS); empty defaults to `3.5.9`.
 
 Concurrency: repeated triggers for the same ref cancel older in-progress runs (`cancel-in-progress` in the PR scenario), avoiding queue pile-ups.
 
@@ -193,18 +197,20 @@ Scoped permissions: `contents: read`, `issues: write`, `security-events: write` 
 
 ## The Job Matrix
 
-Job dependencies: `build` / `build-skip-notice` ← `version`; `release` ← `version + build + json-quality + tools-test + encoding-check`. The quality gates, CodeQL, and auto-maintain are independent of each other and run in parallel with build. **CodeQL and auto-maintain are bypass checks** — they also run on manual `release` (opening Issues / warnings on findings) but **never block the release**.
+Job dependencies: `build` / `build-skip-notice` / `codeql` / `auto-maintain` / `sync-wiki` / `vendor-*` ← `version`; `release` ← `version + build + json-quality + tools-test + encoding-check`. The quality gates, CodeQL, auto-maintain, sync-wiki, and the vendor jobs are independent of each other and run in parallel with build. **CodeQL and auto-maintain are bypass checks** — they also run on manual `release` (opening Issues / warnings on findings) but **never block the release**.
 
 | Job | Triggers | Contents |
 | --- | --- | --- |
 | `version` (change detection) | All trigger scenarios (PR / push / tag / schedule / manual) | Using the latest `v*` tag as the baseline, detects actual changes in `json/`, `src/`, `third_party/`, `CMakeLists.txt`, `CMakePresets.json` (excluding the docs-only `third_party/README.md`) and outputs `changed` for the release stage; also compares against the last successful build to output `build_changed` (see [Build Diff Detection](#build-diff-detection-build-skipping)) |
 | `json-quality` | PR / push / tag / schedule / manual auto, security, release | The `localization.json` quality gate: regex validity, structural integrity, placeholder checks, the `std::regex` incompatible-syntax blacklist, ReDoS heuristics, full-width question style for translated questions |
 | `encoding-check` | PR / push / tag / schedule / manual auto, security, release | Source encoding gate: full scan of git-tracked text files requiring UTF-8; GBK / non-UTF-8 content and unexpected BOMs fail with an explicit `::error` list; third-party dependencies excluded |
-| `tools-test` | PR / push / tag / schedule / manual auto, security, maintain, release | Auto-maintain tool syntax check + unit tests + Markdown link check (`tools/ci/md-check.py`) |
+| `tools-test` | PR / push / tag / schedule / manual auto, security, maintain, release | Auto-maintain tool syntax check + unit tests + Markdown link check (`tools/ci/md-check.py`) + single-workflow spec validation (`tools/ci/check-workflow.py`, W0-W5) |
 | `codeql` | PR (same-repo branches only — fork PRs don't run it: their token lacks security-events write permission, so upload would always fail) / push main / manual auto, security, release | C/C++ security scanning (excludes schedule to save resources; runs on a Windows runner) |
 | `build` | PR / push / tag / schedule / manual auto, build, release; skipped for unchanged schedule / push main runs (see [Build Diff Detection](#build-diff-detection-build-skipping)) | **Four-target build matrix + artifact functional tests**: Windows x64, macOS x64 / arm64 (single-arch packages, statically linked OpenSSL + strip/LTO trimming), Linux x64; `fail-fast` disabled so a single-platform failure doesn't cancel the others |
 | `build-skip-notice` | Only unchanged schedule / push main runs | Posts the skip reason in the run summary / notices / logs (skipped jobs produce no logs of their own, hence the standalone job) |
 | `auto-maintain` | push main / daily schedule / manual auto, maintain, release | Invalid-entry detection + candidate extraction, automatically creating/closing Issues labeled `auto-maintain` (see [Auto-Maintain Tool](自动维护工具.md#ci-自动维护)) |
+| `sync-wiki` | push main / manual auto, release | Mirrors `docs/wiki/**` to the GitHub Wiki after detecting changes (see [Automatic Wiki Sync](#automatic-wiki-sync)) |
+| `vendor-macos` / `vendor-linux` / `vendor-windows` | PR labeled `vendor-openssl` / manual `vendor` | Vendor OpenSSL static libraries (three-platform artifacts, retained 7 days) for maintainers to download and commit under `third_party/`; zero downloads or compilation at build time |
 | `release` | push main (with changes) / tag `v*` / schedule (with changes) / manual auto (main, with changes), release (main) | The release; see the next section |
 
 ## Release Rules
@@ -245,12 +251,12 @@ Meaningless repeat builds only burn runner resources without producing any value
 
 ## Automatic Wiki Sync
 
-After documentation pages (`docs/wiki/`) merge into `main`, [`wiki-sync.yml`](../../.github/workflows/wiki-sync.yml) mirrors them to the GitHub Wiki tab automatically:
+After documentation pages (`docs/wiki/`) merge into `main`, the main workflow's `sync-wiki` job mirrors them to the GitHub Wiki tab automatically:
 
-- **Triggers**: push to `main` with changes under `docs/wiki/**`; or manual `workflow_dispatch` as a fallback (initialization / repair / verification);
+- **Triggers**: push to `main` or manual `type=auto|release`; the job first checks whether `docs/wiki/**` changed and skips automatically when nothing changed (manual runs always count as changed, serving as an initialization / repair / verification fallback);
 - **Sync semantics**: mirror sync — `docs/wiki/` is the single source of truth; pages that no longer exist in the source are **deleted** on the Wiki (implementation: [`tools/ci/sync-wiki.sh`](../../tools/ci/sync-wiki.sh));
 - **Credentials**: the built-in `GITHUB_TOKEN` (`contents: write` is enough to push the same repository's Wiki, no PAT needed);
-- **Concurrency**: the `wiki-sync` concurrency group serializes without canceling, so consecutive doc commits queue up instead of overwriting each other.
+- **Concurrency**: shares the workflow's global `concurrency` group (serialized per ref), so it never interleaves with other runs.
 
 ## Code Signing (SignPath)
 

@@ -40,7 +40,7 @@ third_party/
 
 - **只升级、不随手换源**：新版本必须来自上表列出的官方 GitHub 仓库或其官方 Release；禁止引入镜像站、第三方预编译包。
 - **Header-only 库**：用上游官方发布内容替换 `include/` 对应子目录，替换后以版本宏核对版本，并同步更新本表。
-- **OpenSSL**：仅跟随 **LTS** 分支升级；Windows 静态库由维护者本地构建后连同头文件一起提交（构建步骤见下），macOS 静态库由 `vendor-openssl.yml` 工作流产出后提交（步骤见下）。升级后需同步更新：`third_party/openssl/`、`third_party/openssl-macos-{x64,arm64}/`、本文件版本表、`README.md`、`SECURITY.md`、`docs/wiki/编译指南.md`。
+- **OpenSSL**：仅跟随 **LTS** 分支升级；Windows 静态库由维护者本地构建后连同头文件一起提交（构建步骤见下），macOS 静态库由主工作流的 vendor 任务产出后提交（步骤见下）。升级后需同步更新：`third_party/openssl/`、`third_party/openssl-macos-{x64,arm64}/`、本文件版本表、`README.md`、`SECURITY.md`、`docs/wiki/编译指南.md`。
 - **Linux**：使用系统包管理器安装（如 `libssl-dev`）；macOS 自 v1.2.36 起同样内置静态库，不再依赖 Homebrew 或系统 OpenSSL。
 
 ## Windows OpenSSL 静态库构建步骤（维护者参考）
@@ -70,9 +70,9 @@ nmake install_sw
 
 ## macOS OpenSSL 静态库生成步骤（维护者参考）
 
-macOS 双架构静态库由仓库内工作流 [.github/workflows/vendor-openssl.yml](../.github/workflows/vendor-openssl.yml) 统一产出（手动触发，不参与日常 CI）：
+macOS 双架构静态库由主工作流 [.github/workflows/ghdesktop2chinese.yml](../.github/workflows/ghdesktop2chinese.yml) 的 **Vendor OpenSSL (macOS)** 任务统一产出（PR 打 `vendor-openssl` 标签或手动 `type=vendor` 触发，不参与日常 CI）：
 
-1. 在 GitHub Actions 页面手动运行 **Vendor OpenSSL (macOS)** 工作流（`workflow_dispatch`），版本输入默认 `3.5.9`（仅 LTS）。
+1. 在 PR 上打 `vendor-openssl` 标签（labeled 事件触发），或在 GitHub Actions 页面手动运行主工作流并选择 `type=vendor`；`openssl-version` 输入默认 `3.5.9`（仅 LTS）。
 2. 运行完成后，从两个 artifact（`openssl-macos-x64` / `openssl-macos-arm64`，保留 7 天）下载产物：
    `gh run download <run-id> -n openssl-macos-x64 -D third_party/openssl-macos-x64`（arm64 同理）。
 3. 确认 `include/openssl/ssl.h`、`lib/libssl.a`、`lib/libcrypto.a` 齐备后随仓库提交。
@@ -127,7 +127,7 @@ third_party/
 
 - **Upgrade only, never swap sources casually**: new versions must come from the official GitHub repositories listed above or their official releases; mirrors and third-party prebuilt packages are forbidden.
 - **Header-only libraries**: replace the corresponding subdirectory under `include/` with the upstream official release, verify the version via the version macros after replacing, and update the table above accordingly.
-- **OpenSSL**: follow **LTS** branches only; the Windows static libraries are built locally by a maintainer and committed together with the headers (build steps below), while the macOS static libraries are produced by the `vendor-openssl.yml` workflow and committed (steps below). After upgrading, update in sync: `third_party/openssl/`, `third_party/openssl-macos-{x64,arm64}/`, the version table in this file, `README.md`, `SECURITY.md`, and `docs/wiki/编译指南.md`.
+- **OpenSSL**: follow **LTS** branches only; the Windows static libraries are built locally by a maintainer and committed together with the headers (build steps below), while the macOS static libraries are produced by the main workflow's vendor jobs and committed (steps below). After upgrading, update in sync: `third_party/openssl/`, `third_party/openssl-macos-{x64,arm64}/`, the version table in this file, `README.md`, `SECURITY.md`, and `docs/wiki/编译指南.md`.
 - **Linux**: installs via the system package manager (e.g. `libssl-dev`); since v1.2.36 macOS also ships bundled static libraries and no longer depends on Homebrew or the system OpenSSL.
 
 ## Windows OpenSSL Static Library Build Steps (maintainer reference)
@@ -157,9 +157,9 @@ Build options and artifact conventions:
 
 ## macOS OpenSSL Static Library Generation Steps (maintainer reference)
 
-Both macOS architectures are produced by the in-repo workflow [.github/workflows/vendor-openssl.yml](../.github/workflows/vendor-openssl.yml) (manually triggered, not part of day-to-day CI):
+Both macOS architectures are produced by the **Vendor OpenSSL (macOS)** jobs of the main workflow [.github/workflows/ghdesktop2chinese.yml](../.github/workflows/ghdesktop2chinese.yml) (triggered by the `vendor-openssl` label on a PR or manual `type=vendor`, not part of day-to-day CI):
 
-1. Run the **Vendor OpenSSL (macOS)** workflow manually from the GitHub Actions page (`workflow_dispatch`); the version input defaults to `3.5.9` (LTS only).
+1. Add the `vendor-openssl` label to a PR (labeled event), or run the main workflow manually from the GitHub Actions page with `type=vendor`; the `openssl-version` input defaults to `3.5.9` (LTS only).
 2. Once the run completes, download the two artifacts (`openssl-macos-x64` / `openssl-macos-arm64`, retained for 7 days):
    `gh run download <run-id> -n openssl-macos-x64 -D third_party/openssl-macos-x64` (likewise for arm64).
 3. Verify that `include/openssl/ssl.h`, `lib/libssl.a` and `lib/libcrypto.a` are present, then commit them to the repository.
