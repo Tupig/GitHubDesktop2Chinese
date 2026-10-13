@@ -1,13 +1,20 @@
 # localization.json 数据质量校验(工作流 json-quality job 调用; 自 YAML 外置, 行为不变)
 # 检查项: 草稿占位符/节点结构/正则合法性/std::regex 不兼容黑名单/ReDoS 启发式/译文问句风格
-import json, re, sys
+import io, json, re, sys
 from pathlib import Path
 
-sys.stdout.reconfigure(encoding="utf-8")
+# 与 check-workflow.py 统一: 守卫非 TextIOWrapper 的环境(#119)
+if isinstance(sys.stdout, io.TextIOWrapper):
+    sys.stdout.reconfigure(encoding="utf-8")
 
-path = "json/localization.json"
-raw = open(path, encoding="utf-8").read()
-data = json.loads(raw)
+# 路径按脚本位置推导(tools/ci -> 仓库根), 不依赖当前工作目录(#119); 文件缺失/损坏输出可读错误而非裸 traceback
+JSON_PATH = Path(__file__).resolve().parents[2] / "json" / "localization.json"
+try:
+    raw = JSON_PATH.read_text(encoding="utf-8")
+    data = json.loads(raw)
+except (OSError, ValueError) as e:
+    print(f"::error::无法读取 localization.json ({JSON_PATH}): {e}")
+    sys.exit(2)
 
 errors = []
 warnings = []
@@ -25,15 +32,18 @@ for key in ["main", "renderer", "main_dev", "renderer_dev"]:
     elif not isinstance(data[key], list):
         errors.append(f"{key} 应为数组, 实际为 {type(data[key]).__name__}")
 
-# std::regex 不兼容语法黑名单: 与 tools/auto-maintain 共用单一事实来源
+# std::regex 不兼容语法黑名单 + ReDoS 启发式: 与 tools/auto-maintain 共用单一事实来源(#119)
 # 路径按脚本位置推导(tools/ci -> 仓库根), 不依赖当前工作目录
 BLACKLIST_PATH = Path(__file__).resolve().parents[2] / "tools" / "auto-maintain" / "regex-blacklist.json"
 try:
     with open(BLACKLIST_PATH, encoding="utf-8") as f:
-        blacklist = [(r["regex"], r["why"]) for r in json.load(f)["rules"]]
+        _bl = json.load(f)
+    blacklist = [(r["regex"], r["why"]) for r in _bl["rules"]]
+    redos_heuristic = _bl.get("redos_heuristic", {}).get("regex", "")
 except (OSError, ValueError, KeyError, TypeError) as e:
     errors.append(f"无法加载黑名单规则 {BLACKLIST_PATH}: {e}")
     blacklist = []
+    redos_heuristic = ""
 
 def check_array(name, arr):
     seen = {}
@@ -61,8 +71,8 @@ def check_array(name, arr):
             warnings.append(f"{name} 重复查找项: {pat!r} (index {seen[pat]} 与 {i})")
         else:
             seen[pat] = i
-        # ReDoS 启发式(仅告警不阻断): 嵌套量词(如 (a+)+ 、 (.*x)* )在长文本上可能灾难性回溯卡死加载器
-        if re.search(r"\([^()]*[+*][^()]*\)\s*[+*{]", pat):
+        # ReDoS 启发式(仅告警不阻断, 规则来自 regex-blacklist.json): 嵌套量词(如 (a+)+ 、 (.*x)* )在长文本上可能灾难性回溯卡死加载器
+        if redos_heuristic and re.search(redos_heuristic, pat):
             warnings.append(f"{name}[{i}] 疑似灾难性回溯(嵌套量词), 请改写该正则: {pat!r}")
         # 译文问句风格: 去掉尾部引号后以 半角? 收尾且 ? 前为汉字 → 建议全角？
         # (JS 三元/正则语法的 ? 不满足"以 ? 收尾"或 ? 前非汉字, 不会误报)

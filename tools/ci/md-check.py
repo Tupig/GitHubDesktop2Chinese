@@ -3,12 +3,15 @@
 # 跳过项: http(s)/mailto 等带 scheme 的外部链接 / 以 / 开头的站内绝对路径
 #          / 代码围栏与行内代码内的链接(不参与渲染)
 # 约定:   无扩展名目标按 GitHub Wiki 页引用处理(同目录 <名>.md 存在即有效)
+import io
 import re
 import sys
 from pathlib import Path
 from urllib.parse import unquote
 
-sys.stdout.reconfigure(encoding="utf-8")
+# 与 check-workflow.py 统一: 守卫非 TextIOWrapper 的环境(#119)
+if isinstance(sys.stdout, io.TextIOWrapper):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 # 路径按脚本位置推导(tools/ci -> 仓库根), 不依赖当前工作目录
 ROOT = Path(__file__).resolve().parents[2]
@@ -52,11 +55,16 @@ def add_anchor(anchors, anchor):
 
 def scan_markdown(path):
     """解析 markdown: 返回 (锚点集合, [(行号, 链接目标), ...])"""
+    try:
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
+    except UnicodeDecodeError:
+        # 非 UTF-8 文件由 encoding-check 负责详细报告; 此处跳过, 避免与 encoding-check 并行时先崩溃(#119)
+        print(f"::warning::{path}: 非 UTF-8 编码，跳过链接检查（详见 encoding-check 报告）")
+        return set(), []
     anchors = set()
     links = []
     fence = None        # 当前代码围栏标记('```' / '~~~'), None 表示围栏外
     in_comment = False  # HTML 注释跨行状态(注释内链接/标题不渲染)
-    lines = path.read_text(encoding="utf-8-sig").splitlines()
     for lineno, line in enumerate(lines, 1):
         stripped = line.lstrip()
         # 1) 围栏内: 只识别闭合标记(围栏优先于 HTML 注释)

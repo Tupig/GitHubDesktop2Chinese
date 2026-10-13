@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -49,7 +50,7 @@ export async function getLatestRelease() {
       if (!asset) {
         throw new Error(`未在 release ${tag} 中找到 Windows 完整包 ${ASSET_PATTERN}`);
       }
-      return { tag, version, assetName: asset.name, zipUrl: asset.browser_download_url, zipSize: asset.size };
+      return { tag, version, assetName: asset.name, zipUrl: asset.browser_download_url, zipSize: asset.size, zipDigest: asset.digest ?? null };
     } catch (e) {
       lastError = e;
       if (attempt < attempts) {
@@ -92,19 +93,52 @@ export function isZipComplete(zipPath) {
 }
 
 /**
+ * 计算文件 sha256（流式），返回 hex 小写
+ */
+export function sha256File(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('error', reject);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+/**
+ * 校验文件内容是否与 release 资产 digest（形如 "sha256:hex"）一致（#118 下载完整性）。
+ * digest 缺失或格式异常时视为通过（告警，维持 size+EOCD 基线）；不匹配返回 true。
+ */
+export async function digestMismatch(filePath, expectedDigest) {
+  if (!expectedDigest) return false;
+  const [algo, expected] = expectedDigest.split(':');
+  if (algo !== 'sha256' || !/^[0-9a-f]{64}$/.test(expected ?? '')) {
+    console.warn(`release 资产 digest 字段格式异常: ${expectedDigest}，跳过内容哈希校验`);
+    return false;
+  }
+  const got = await sha256File(filePath);
+  if (got !== expected) {
+    console.warn(`内容哈希不符: 实际 sha256=${got}，资产 digest=${expected}`);
+    return true;
+  }
+  return false;
+}
+
+/**
  * 下载 release nupkg（支持断点续传），返回文件路径
  * expectedSize 为 release 资产声明的字节数(可选): 用于复用校验与下载后尺寸核对
+ * expectedDigest 为 release 资产 digest 字段(可选, "sha256:hex"): 内容哈希校验, 弥补 EOCD 无法检出中段损坏的缺口(#118)
  */
-export async function downloadZip(url, destDir, expectedSize) {
+export async function downloadZip(url, destDir, expectedSize, expectedDigest) {
   fs.mkdirSync(destDir, { recursive: true });
   const zipPath = path.join(destDir, 'github-desktop.nupkg');
   const tmpPath = zipPath + '.part';
   const tmpUrlPath = tmpPath + '.url'; // 旁证: .part 来自哪个 URL, 防止跨版本续传拼出混合文件
 
-  // 已下载文件: 尺寸与本次 release 资产一致且 EOCD 完整才复用(版本变化后的旧缓存一律重下)
+  // 已下载文件: 尺寸与本次 release 资产一致、EOCD 完整且内容哈希一致才复用(版本变化后的旧缓存一律重下)
   if (fs.existsSync(zipPath)) {
     const sizeMatches = !expectedSize || fs.statSync(zipPath).size === expectedSize;
-    if (sizeMatches && isZipComplete(zipPath)) {
+    if (sizeMatches && isZipComplete(zipPath) && !(await digestMismatch(zipPath, expectedDigest))) {
       return zipPath;
     }
     fs.rmSync(zipPath, { force: true });
@@ -172,6 +206,12 @@ export async function downloadZip(url, destDir, expectedSize) {
     fs.rmSync(tmpPath, { force: true });
     fs.rmSync(tmpUrlPath, { force: true });
     throw new Error(`下载尺寸(${gotSize})与 release 资产(${expectedSize})不符, 已删除断点文件, 重试将从头下载`);
+  }
+  // 内容哈希校验(#118): EOCD 在文件尾部, 中段损坏/注入无法由尺寸与 EOCD 检出, 须按资产 digest 复核
+  if (await digestMismatch(tmpPath, expectedDigest)) {
+    fs.rmSync(tmpPath, { force: true });
+    fs.rmSync(tmpUrlPath, { force: true });
+    throw new Error(`下载内容 sha256 与 release 资产 digest 不符, 已删除断点文件, 重试将从头下载`);
   }
   fs.renameSync(tmpPath, zipPath);
   fs.rmSync(tmpUrlPath, { force: true });
@@ -264,7 +304,7 @@ function findAppDir(root) {
  */
 export async function fetchLatest(workDir) {
   const release = await getLatestRelease();
-  const zipPath = await downloadZip(release.zipUrl, workDir, release.zipSize);
+  const zipPath = await downloadZip(release.zipUrl, workDir, release.zipSize, release.zipDigest);
   const js = extractJs(zipPath, workDir, release.version);
   return { ...release, ...js };
 }

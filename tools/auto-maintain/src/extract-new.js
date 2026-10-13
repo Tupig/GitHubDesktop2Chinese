@@ -69,7 +69,7 @@ export function isLikelyUiText(s) {
 
 /**
  * 提取字符串字面量（双引号、单引号）。
- * 返回 [{ text, index }]，index 为字面量在原文中的起始位置（用于生成上下文）。
+ * 返回 [{ text }]。
  */
 export function extractStringLiterals(jsText) {
   const out = [];
@@ -84,7 +84,7 @@ export function extractStringLiterals(jsText) {
       Object.prototype.hasOwnProperty.call(UNESCAPES, ch) ? UNESCAPES[ch] : `\\${ch}`
     ));
     if (isLikelyUiText(t)) {
-      out.push({ text: t, index: m.index });
+      out.push({ text: t });
     }
   }
   return out;
