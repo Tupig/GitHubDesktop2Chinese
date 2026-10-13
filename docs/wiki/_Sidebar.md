@@ -19,6 +19,7 @@
 
 - [汉化原理 How It Works](汉化原理)
 - [编译指南 Build Guide](编译指南)
+- [维护操作备忘 Maintenance Notes](维护操作备忘)
 - [CI-CD](CI-CD)
 
 ---
