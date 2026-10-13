@@ -81,6 +81,58 @@
 - 未标注或版本号未命中的行不会出现在任何 Release 中，也**不阻断**发布（说明里会显示「未找到变更记录」提示）。
 - 静态的「### 程序说明」段落每次发布都会附带，无需逐版维护。
 
+## 开发工作流
+
+- **任务先行**：每项任务开工前先建 issue，提交信息与 PR 均关联该 issue 编号。
+- **分支模型**：`main` 受分支保护（禁强推、禁删除、管理员同样受限、要求 1 个 approval、对话全部解决、线性历史）；功能与修复一律走 `<type>/<短描述>` feature 分支 + PR，如 `ci/cron-beijing-0923`。
+- **提交信息**：遵循 [Conventional Commits](https://www.conventionalcommits.org/zh-hans/)——`<type>(<scope>): <subject>(#<issue>)`，`type` 取 `feat` / `fix` / `docs` / `ci` / `refactor` / `test` / `chore`，`scope` 可选。仓库根目录提供 `.gitmessage` 模板，执行 `git config commit.template .gitmessage` 后 `git commit` 自动载入。
+- **PR 必需检查**：以下三个 status checks 为合并必需（分支保护配置）：
+
+  - `localization.json 质量校验`
+  - `源码编码格式检查`
+  - `自动维护工具自检`
+
+  其余 checks（4 平台构建矩阵、CodeQL、版本解析等）须通过但不设为必需；PR 获 1 个 approve 且对话全部解决后 squash merge。
+
+## 合并后分支清理
+
+仓库已开启 `delete_branch_on_merge`，PR 合并后远端分支自动删除；本地分支按以下流程清理：
+
+```powershell
+git switch main
+git pull --ff-only
+git fetch --prune
+gh pr view <PR 编号> --json state --jq .state   # 必须输出 MERGED
+git branch -D <分支名>
+```
+
+> 本仓库使用 squash merge：squash 合并过的分支不会出现在 `git branch --merged` 中，`git branch -d` 也会拒绝删除；**必须以 `gh pr view` 确认 `MERGED` 后再用 `-D` 删除**。`main` 永远不删除。
+
+## 依赖策略
+
+构建遵循**自包含**原则（审计与实施计划见 [#98](https://github.com/Tupig/GitHubDesktop2Chinese/issues/98)）：
+
+- Windows / macOS / Linux 三平台并行编译打包，产物一致、可直接发布。
+- 所有依赖**内置仓库，或仅使用 GitHub 原生功能**（Actions、Releases、Packages、cache）；不引入外部第三方依赖服务。
+- OpenSSL 三平台统一 **3.5.9 静态链接**：Windows 与 macOS 使用内置 `third_party/` 成品库；Linux 由源码构建并经 `actions/cache` 缓存。macOS 成品库由仓库内手动 vendor 工作流（`workflow_dispatch` 触发）产出并提交，工作流保留供未来升级复用。
+- C++ 头文件依赖（CLI11、cpp-httplib、nlohmann/json、spdlog、WinReg）内置 `third_party/include/`。
+- GitHub Actions 全部使用官方 action 并以 commit SHA 固定。
+- SignPath 代码签名为唯一例外：由 secrets 门控，未配置时自动跳过，不产生外部调用。
+- **自包含断言**：macOS 产物 `otool -L` 不得出现 Homebrew OpenSSL 路径，`lipo` 确认双架构；Linux 产物 `ldd` 不得出现 `libssl` / `libcrypto`。
+
+## 标签约定
+
+| 标签 | 用途 |
+| --- | --- |
+| `ci-cd` | CI/CD 工作流与自动化 |
+| `localization` | 翻译与本地化内容 |
+| `refactor` | 代码重构与结构优化 |
+| `performance` | 性能优化 |
+| `security` | 安全问题与漏洞 |
+| `auto-maintain` | 自动维护工具 |
+
+另有 GitHub 默认标签（`bug`、`enhancement`、`documentation`、`good first issue` 等）按语义使用。
+
 ## 行为准则
 
 参与贡献即表示你同意遵守[行为准则](../.github/CODE_OF_CONDUCT.md)。交流请保持友善；安全漏洞请勿在 Issue 或 PR 中公开讨论，走[私密漏洞报告](../SECURITY.md)。
@@ -169,6 +221,58 @@ Any change to `json/`, `src/`, `third_party/`, `CMakeLists.txt` or `CMakePresets
 - Append a Chinese change line and its English companion line to the "版本更新日志 / Changelog" section, both ending with the full-width version marker of the **next release version** (check the current latest tag with `git tag --sort=-v:refname | head -1`, then +1).
 - Lines without a marker, or whose version number does not match the release, never appear in any release, and never block publishing (the notes will show a "no change record found" notice instead).
 - The static "### 程序说明" section is attached to every release as-is; no per-version maintenance is needed.
+
+## Development Workflow
+
+- **Issue first**: open an issue before starting any task, and reference its number in commits and PRs.
+- **Branching**: `main` is protected (no force push, no deletion, admins included, 1 approval required, all conversations resolved, linear history); features and fixes always go through `<type>/<short-description>` feature branches + PRs, e.g. `ci/cron-beijing-0923`.
+- **Commit messages**: follow [Conventional Commits](https://www.conventionalcommits.org/) — `<type>(<scope>): <subject>(#<issue>)`, where `type` is one of `feat` / `fix` / `docs` / `ci` / `refactor` / `test` / `chore` and `scope` is optional. A `.gitmessage` template is provided at the repo root; run `git config commit.template .gitmessage` so `git commit` loads it automatically.
+- **Required PR checks**: the following three status checks are required for merging (branch protection):
+
+  - `localization.json 质量校验`
+  - `源码编码格式检查`
+  - `自动维护工具自检`
+
+  All other checks (the 4-platform build matrix, CodeQL, version resolution, ...) must pass but are not required; after 1 approval and all conversations resolved, PRs are squash-merged.
+
+## Post-Merge Branch Cleanup
+
+`delete_branch_on_merge` is enabled, so the remote branch is deleted automatically once a PR merges. Clean up local branches as follows:
+
+```powershell
+git switch main
+git pull --ff-only
+git fetch --prune
+gh pr view <PR-number> --json state --jq .state   # must print MERGED
+git branch -D <branch-name>
+```
+
+> This repo uses squash merge: squash-merged branches never appear in `git branch --merged`, and `git branch -d` refuses to delete them; **confirm `MERGED` via `gh pr view` before deleting with `-D`**. Never delete `main`.
+
+## Dependency Policy
+
+The build is **self-contained** (audit & implementation plan: [#98](https://github.com/Tupig/GitHubDesktop2Chinese/issues/98)):
+
+- Windows / macOS / Linux are built in parallel with consistent, releasable artifacts.
+- All dependencies are **vendored in-repo or use GitHub-native features only** (Actions, Releases, Packages, cache); no external third-party services.
+- OpenSSL is statically linked at **3.5.9** on all platforms: Windows and macOS use vendored libraries under `third_party/`; Linux builds from source and caches the result via `actions/cache`. The macOS libraries are produced and committed by a manual vendor workflow (`workflow_dispatch`) kept in-repo for future upgrades.
+- C++ header dependencies (CLI11, cpp-httplib, nlohmann/json, spdlog, WinReg) are vendored in `third_party/include/`.
+- GitHub Actions uses official actions pinned by commit SHA.
+- SignPath code signing is the only exception: gated by repository secrets and skipped automatically when unconfigured, producing no external calls.
+- **Self-containment assertions**: `otool -L` on macOS artifacts must not show Homebrew OpenSSL paths and `lipo` must confirm both architectures; `ldd` on Linux artifacts must not show `libssl` / `libcrypto`.
+
+## Label Conventions
+
+| Label | Purpose |
+| --- | --- |
+| `ci-cd` | CI/CD workflows & automation |
+| `localization` | Translation & localization content |
+| `refactor` | Refactoring & structural improvements |
+| `performance` | Performance optimization |
+| `security` | Security issues & vulnerabilities |
+| `auto-maintain` | Auto-maintain tooling |
+
+GitHub's default labels (`bug`, `enhancement`, `documentation`, `good first issue`, ...) are used by semantics.
 
 ## Code of Conduct
 

@@ -1,0 +1,13 @@
+# <type>(<scope>): <subject>(#<issue>)
+#
+# Conventional Commits 提交信息模板 / Conventional Commits template
+# 启用 / enable: git config commit.template .gitmessage
+#
+# type: feat | fix | docs | ci | refactor | test | chore
+# scope（可选 / optional）: 影响范围 / affected scope，如 / e.g. config
+# subject: 简洁描述，祈使语气，结尾不加句号 / concise, imperative mood, no trailing period
+# issue: 关联 issue 编号 / related issue number，如 / e.g. (#96)
+#
+# 示例 / examples:
+#   ci: 定时构建调整为北京时间 09:23(#82)
+#   refactor(config): 硬编码治理——远程端点与魔法数字集中常量化(#94)
