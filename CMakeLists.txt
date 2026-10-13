@@ -106,8 +106,29 @@ elseif(APPLE)
     include_directories("${GHD2C_OPENSSL_ROOT}/include")
     find_package(Threads REQUIRED)
 else()
-    # ── Linux: 系统包管理器提供的 OpenSSL（如 apt install libssl-dev）──
-    find_package(OpenSSL REQUIRED)
+    # ── Linux: OpenSSL 3.5.9 LTS 静态库（随仓库提交于 third_party/openssl-linux-x64）──
+    # 库由主工作流 ghdesktop2chinese.yml 的 vendor 任务从官方源码构建（tag openssl-3.5.9，
+    # linux-x86_64 -fPIC no-shared no-tests no-apps no-zlib --libdir=lib），构建与更新
+    # 步骤见 third_party/README.md；CMake 仅做存在性校验，构建期零下载零编译。
+    # 本地自建库可通过 -DGHD2C_OPENSSL_ROOT=<目录> 覆盖查找与链接路径。
+    set(GHD2C_OPENSSL_ROOT "${PROJECT_SOURCE_DIR}/third_party/openssl-linux-x64" CACHE PATH "OpenSSL 静态库根目录（含 include/ 与 lib/）")
+
+    # 完整性校验：任一组件缺失即报错并给出恢复指引（与 Windows/macOS 分支一致）
+    set(GHD2C_OPENSSL_REQUIRED
+        "include/openssl/ssl.h"
+        "lib/libssl.a"
+        "lib/libcrypto.a")
+    foreach(_oss_comp IN LISTS GHD2C_OPENSSL_REQUIRED)
+        if(NOT EXISTS "${GHD2C_OPENSSL_ROOT}/${_oss_comp}")
+            message(FATAL_ERROR
+                "OpenSSL 静态库组件缺失: ${GHD2C_OPENSSL_ROOT}/${_oss_comp}\n"
+                "third_party/openssl-linux-x64 应随仓库提交。若被误删，请执行:\n"
+                "  git checkout -- third_party/openssl-linux-x64\n"
+                "或参考 third_party/README.md 用主工作流 vendor 任务重新产出后提交。")
+        endif()
+    endforeach()
+
+    include_directories("${GHD2C_OPENSSL_ROOT}/include")
     find_package(Threads REQUIRED)
 endif()
 
@@ -135,10 +156,14 @@ elseif(APPLE)
         ${GHD2C_OPENSSL_ROOT}/lib/libcrypto.a
         Threads::Threads)
 else()
+    # 链接内置 OpenSSL 静态库（third_party/openssl-linux-x64，配置段已校验存在；
+    # libssl 依赖 libcrypto，顺序不可颠倒；CMAKE_DL_LIBS 补齐 dlopen 动态加载
+    # 依赖（glibc < 2.34 时 dlopen 在 libdl.so 中，≥ 2.34 已并入 libc）
     target_link_libraries(GitHubDesktop2Chinese PRIVATE
-        OpenSSL::SSL
-        OpenSSL::Crypto
-        Threads::Threads)
+        ${GHD2C_OPENSSL_ROOT}/lib/libssl.a
+        ${GHD2C_OPENSSL_ROOT}/lib/libcrypto.a
+        Threads::Threads
+        ${CMAKE_DL_LIBS})
 endif()
 
 # CLI11 已内置到 third_party/include/CLI（header-only，无需额外链接）

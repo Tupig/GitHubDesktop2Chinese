@@ -436,12 +436,6 @@ jobs:
       # ── 检出 ──
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # ── 平台依赖：Linux 系统 libssl-dev（Windows/macOS OpenSSL 静态库已内置 third_party，无需安装）──
-      - name: 安装 OpenSSL (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          dpkg -s libssl-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libssl-dev; }
-
       # ── 配置：CMake 生成（失败自动重试 3 次）──
       - name: 配置 CMake（Windows x64）
         if: runner.os == 'Windows'
