@@ -1109,8 +1109,9 @@ jobs:
           tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
           cd openssl-src
           # -fPIC: 静态库须以位置无关代码链接, 与主构建 PIE 默认一致
+          # --libdir=lib: OpenSSL 3.x 在 x86_64 Linux 默认装 lib64/, 显式统一为 lib/ 布局
           ./Configure linux-x86_64 -fPIC no-shared no-tests no-apps no-zlib \
-            --prefix="$RUNNER_TEMP/openssl-linux-x64"
+            --prefix="$RUNNER_TEMP/openssl-linux-x64" --libdir=lib
           make -j"$(nproc)" build_libs
           make install_dev
 
@@ -1169,7 +1170,13 @@ jobs:
       - name: 配置 OpenSSL（VC-WIN64A）
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSPATH=%%i"
+          if not defined VSPATH (
+            echo ::error::vswhere 未找到 Visual Studio（缺少 VC 工具集）
+            exit /b 1
+          )
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
           cd /d "%RUNNER_TEMP%\openssl-src"
           perl Configure VC-WIN64A no-shared no-tests no-apps no-zlib no-asm --prefix="%RUNNER_TEMP%\openssl-windows-x64" --openssldir="%RUNNER_TEMP%\openssl-windows-x64\ssl"
           if errorlevel 1 exit /b 1
@@ -1177,7 +1184,13 @@ jobs:
       - name: 编译并安装（build_libs + install_dev）
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSPATH=%%i"
+          if not defined VSPATH (
+            echo ::error::vswhere 未找到 Visual Studio（缺少 VC 工具集）
+            exit /b 1
+          )
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 exit /b 1
           cd /d "%RUNNER_TEMP%\openssl-src"
           nmake build_libs
           if errorlevel 1 exit /b 1
