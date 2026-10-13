@@ -172,10 +172,10 @@ cmake --build build --config Release
 | 失效检测 + 候选提取 | push `main` / 定时（每日）/ 手动 auto、maintain、release | 检测失效映射、提取未翻译候选，自动创建/关闭 Issue |
 | Release 发布 | push `main`（有变更时）/ tag `v*` / 定时（有变更时）/ 手动 auto（仅 main, 有变更）、release（仅 main） | 自动升级版本号，发布多平台产物 + localization.json |
 
-> 手动触发的 `type` 仅执行对应子集；`version` 为可选覆盖——**留空即自动升级补丁号**（如 `1.2.24 → 1.2.25`），填写时须为 `x.y.z` 纯数字，否则 CI 在版本号校验处直接失败。
+> 手动触发的 `type` 仅执行对应子集；`version` 为可选覆盖——**留空即自动递增版本**（如 `0.0.1 → 0.0.2`，patch 满 100 进位 minor），填写时须为 `x.y.z` 纯数字，否则 CI 在版本号校验处直接失败。
 
 > [!TIP]
-> 手动触发 `type=auto` 会跑完整链路（构建 → 检查 → 维护 → 发布），版本号自动升级补丁号（如 `1.2.4 → 1.2.5`）；也可在 `version` 输入框手动指定（`x.y.z` 格式）。
+> 手动触发 `type=auto` 会跑完整链路（构建 → 检查 → 维护 → 发布），版本号自动递增（如 `0.0.1 → 0.0.2`）；也可在 `version` 输入框手动指定（`x.y.z` 格式）。
 
 自动维护工具位于 [`tools/auto-maintain`](tools/auto-maintain)，基于 **Windows 版** GitHub Desktop 的 `main.js` / `renderer.js` 检测；本地运行：
 
@@ -486,10 +486,10 @@ This repository uses a single unified workflow, [`ghdesktop2chinese.yml`](.githu
 | Invalid-entry detection + candidate extraction | push `main` / scheduled (daily) / manual auto, maintain, release | Detect broken mappings, extract untranslated candidates, auto-create/close issues |
 | Release | push `main` (when changed) / tag `v*` / scheduled (when changed) / manual auto (main only, when changed), release (main only) | Auto-bump the version number and publish multi-platform artifacts + localization.json |
 
-> A manual `type` runs only the corresponding subset; `version` is an optional override — **leave it empty to auto-bump the patch number** (e.g. `1.2.24 → 1.2.25`); if filled in it must be plain `x.y.z` digits, otherwise CI fails at the version validation step.
+> A manual `type` runs only the corresponding subset; `version` is an optional override — **leave it empty to auto-increment the version** (e.g. `0.0.1 → 0.0.2`; a full patch of 100 carries into minor); if filled in it must be plain `x.y.z` digits, otherwise CI fails at the version validation step.
 
 > [!TIP]
-> Manual `type=auto` runs the full pipeline (build → checks → maintenance → release) and auto-bumps the patch number (e.g. `1.2.4 → 1.2.5`); you can also specify `version` in the input box (`x.y.z` format).
+> Manual `type=auto` runs the full pipeline (build → checks → maintenance → release) and auto-increments the version (e.g. `0.0.1 → 0.0.2`); you can also specify `version` in the input box (`x.y.z` format).
 
 The auto-maintain tool lives in [`tools/auto-maintain`](tools/auto-maintain) and detects against the **Windows** build of GitHub Desktop's `main.js` / `renderer.js`; run it locally with:
 

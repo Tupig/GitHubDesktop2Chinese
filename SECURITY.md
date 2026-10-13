@@ -4,11 +4,11 @@
 
 ## 支持的版本
 
-仅**最新发布版本**（自 `v1.2.30` 起）接收安全修复；更早版本不再维护，请先升级。
+仅**最新发布版本**（自 `v0.0.1` 起）接收安全修复；更早版本不再维护，请先升级。
 
 | 版本 | 支持 |
 | --- | --- |
-| `v1.2.30` 及以后 | ✅ |
+| `v0.0.1` 及以后 | ✅ |
 | 更早版本 | ❌ |
 
 ## 报告漏洞
@@ -53,11 +53,11 @@
 
 ## Supported Versions
 
-Only the **latest release** (since `v1.2.30`) receives security fixes; earlier versions are no longer maintained — please upgrade first.
+Only the **latest release** (since `v0.0.1`) receives security fixes; earlier versions are no longer maintained — please upgrade first.
 
 | Version | Supported |
 | --- | --- |
-| `v1.2.30` and later | ✅ |
+| `v0.0.1` and later | ✅ |
 | Earlier versions | ❌ |
 
 ## Reporting a Vulnerability

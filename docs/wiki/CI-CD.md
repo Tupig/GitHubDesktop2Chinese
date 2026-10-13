@@ -23,7 +23,7 @@
 | `security` | 质量校验 + 工具自检 + CodeQL |
 | `maintain` | 仅自动维护（失效检测 + 候选提取 + Issue） |
 
-`version` 为可选覆盖：**留空即自动升级补丁号**（如 `1.2.24 → 1.2.25`）；填写时不带 `v` 前缀（如 `1.2.5`），必须为 `x.y.z` 纯数字，否则 CI 在版本号校验处直接失败；仅对 build / auto / release 的产物命名与发布生效。
+`version` 为可选覆盖：**留空即自动递增版本**（如 `0.0.1 → 0.0.2`，patch 满 100 进位 minor 并重置为 1）；填写时不带 `v` 前缀（如 `0.0.2`），必须为 `x.y.z` 纯数字，否则 CI 在版本号校验处直接失败；仅对 build / auto / release 的产物命名与发布生效。
 
 并发控制：同一 ref 的重复触发会取消进行中的旧运行（PR 场景 `cancel-in-progress`），避免排队堆积。
 
@@ -49,10 +49,10 @@ Job 依赖关系：`build` / `build-skip-notice` ← `version`；`release` ← `
 
 **版本号**：
 
-- 自动模式：补丁号 +1（`1.2.24 → 1.2.25`）；
+- 自动模式：patch +1（`0.0.1 → 0.0.2`）；patch 满 100 进位 minor 并重置为 1（`0.0.100 → 0.1.1`），minor 满 100 进位 major 并重置为 0（`0.100.100 → 1.0.1`）；无 tag 时自 `v0.0.0` 起步；
 - 手动 `version` 输入：覆盖为指定 `x.y.z`；
 - 版本号格式校验失败会在发布前直接 fail，不产生半成品版本；
-- **版本漂移检查**：发布前核对最新 tag 是否为待发版本的上一补丁号（`v<x.y.(z-1)>`）。并发排队等场景导致不一致时仅输出 `::warning` 告警并记录实际对应关系，**不阻断**发布。
+- **版本漂移检查**：发布前按进位规则核对最新 tag 是否为待发版本的前驱（`v0.0.1` 无前驱；`v0.1.1` 的前驱为 `v0.0.100`）。并发排队等场景导致不一致时仅输出 `::warning` 告警并记录实际对应关系，**不阻断**发布。
 
 **条件发布**：
 
@@ -65,7 +65,7 @@ Job 依赖关系：`build` / `build-skip-notice` ← `version`；`release` ← `
 - `localization.json`（用户可单独下载映射）；
 - 每个产物的**构建溯源证明**（SLSA provenance），可用 `gh attestation verify <文件> --repo Tupig/GitHubDesktop2Chinese` 校验；
 - Windows 产物的代码签名：配置 SignPath 凭据后自动签名（当前休眠——Foundation 申请未获批，见[代码签名](#代码签名signpath)）；
-- Release 说明：从 [`docs/ReleaseBody.md`](../ReleaseBody.md) 提取**行尾含全角版本标记**（如 `（v1.2.25）`）的变更行拼接（变更行中英成对标注时一并纳入），再附静态的「### 程序说明」段落。未标注或版本号未命中的行不会出现（显示「未找到变更记录」提示），也**不阻断**发布。
+- Release 说明：从 [`docs/ReleaseBody.md`](../ReleaseBody.md) 提取**行尾含全角版本标记**（如 `（v0.0.2）`）的变更行拼接（变更行中英成对标注时一并纳入），再附静态的「### 程序说明」段落。未标注或版本号未命中的行不会出现（显示「未找到变更记录」提示），也**不阻断**发布。
 
 **发布前置门禁**：`release` job 强制依赖 json-quality、encoding-check 与 tools-test 通过——质量门挂了就不会发版；CodeQL 与失效检测在手动 release 时为**旁路执行**（发现问题时告警/开 Issue，不阻塞发布）；Release 创建失败有自动自愈重试。
 
@@ -185,7 +185,7 @@ Execution scope per `type` for manual (`workflow_dispatch`) runs:
 | `security` | Quality validation + tool self-tests + CodeQL |
 | `maintain` | Maintenance only (invalid detection + candidate extraction + Issues) |
 
-`version` is an optional override: **leave it empty to auto-bump the patch number** (e.g. `1.2.24 → 1.2.25`); when provided, omit the `v` prefix (e.g. `1.2.5`) and it must be plain digits `x.y.z`, otherwise CI fails at version validation; it only affects artifact naming and releases for build / auto / release.
+`version` is an optional override: **leave it empty to auto-increment the version** (e.g. `0.0.1 → 0.0.2`; a full patch of 100 carries into minor, resetting it to 1); when provided, omit the `v` prefix (e.g. `0.0.2`) and it must be plain digits `x.y.z`, otherwise CI fails at version validation; it only affects artifact naming and releases for build / auto / release.
 
 Concurrency: repeated triggers for the same ref cancel older in-progress runs (`cancel-in-progress` in the PR scenario), avoiding queue pile-ups.
 
@@ -211,10 +211,10 @@ Job dependencies: `build` / `build-skip-notice` ← `version`; `release` ← `ve
 
 **Version numbers**:
 
-- Auto mode: patch +1 (`1.2.24 → 1.2.25`);
+- Auto mode: patch +1 (`0.0.1 → 0.0.2`); a full patch of 100 carries into minor resetting it to 1 (`0.0.100 → 0.1.1`), and a full minor of 100 carries into major resetting it to 0 (`0.100.100 → 1.0.1`); with no tags, numbering starts from `v0.0.0`;
 - Manual `version` input: overrides with the given `x.y.z`;
 - A malformed version fails before publishing — no half-baked versions;
-- **Version drift check**: before publishing, verifies that the latest tag is the previous patch of the version being released (`v<x.y.(z-1)>`). On mismatch (e.g. queued concurrent runs) it only emits a `::warning` recording the actual correspondence and **does not block** the release.
+- **Version drift check**: before publishing, verifies per the carry rule that the latest tag is the predecessor of the version being released (`v0.0.1` has none; the predecessor of `v0.1.1` is `v0.0.100`). On mismatch (e.g. queued concurrent runs) it only emits a `::warning` recording the actual correspondence and **does not block** the release.
 
 **Conditional release**:
 
@@ -227,7 +227,7 @@ Job dependencies: `build` / `build-skip-notice` ← `version`; `release` ← `ve
 - `localization.json` (users can download the mapping separately);
 - A **build provenance attestation** (SLSA provenance) for every artifact, verifiable with `gh attestation verify <file> --repo Tupig/GitHubDesktop2Chinese`;
 - Code signing for the Windows artifact: signed automatically once SignPath credentials are configured (currently dormant — the Foundation application was not approved; see [Code Signing](#代码签名signpath));
-- Release notes: change lines extracted from [`docs/ReleaseBody.md`](../ReleaseBody.md) whose **line ends carry the full-width version marker** (e.g. `（v1.2.25）`) are joined (paired Chinese/English changelog lines are included together), followed by the static "### 程序说明" section. Unmarked lines or versions with no hits simply don't appear (a "no changelog found" notice is shown instead) and **never block** the release.
+- Release notes: change lines extracted from [`docs/ReleaseBody.md`](../ReleaseBody.md) whose **line ends carry the full-width version marker** (e.g. `（v0.0.2）`) are joined (paired Chinese/English changelog lines are included together), followed by the static "### 程序说明" section. Unmarked lines or versions with no hits simply don't appear (a "no changelog found" notice is shown instead) and **never block** the release.
 
 **Release gates**: the `release` job hard-depends on json-quality, encoding-check, and tools-test — a failed quality gate means no release; CodeQL and invalid-entry detection are **bypass checks** on manual releases (warnings/Issues on findings, no blocking); Release creation has automatic self-healing retries.
 

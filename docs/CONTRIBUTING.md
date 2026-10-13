@@ -75,9 +75,9 @@
 
 ## 发布说明（docs/ReleaseBody.md）
 
-`json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 任一变更都会在 push main / 每日定时 / 手动 `auto` 时自动触发新版本发布（补丁号 +1）。CI 发布时从 `docs/ReleaseBody.md` 中提取**行尾含全角版本标记**（如 `（v1.2.23）`）的变更行拼进 Release 说明：
+`json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 任一变更都会在 push main / 每日定时 / 手动 `auto` 时自动触发新版本发布（版本号按进位规则自动递增）。CI 发布时从 `docs/ReleaseBody.md` 中提取**行尾含全角版本标记**（如 `（v0.0.2）`）的变更行拼进 Release 说明：
 
-- 在「版本更新日志」区域追加一行中文变更描述与一行对应英文翻译，两行行尾均标注**下一个发布版本**的全角括号标记（用 `git tag --sort=-v:refname | head -1` 查当前最新 tag，版本号 +1）。
+- 在「版本更新日志」区域追加一行中文变更描述与一行对应英文翻译，两行行尾均标注**下一个发布版本**的全角括号标记（用 `git tag --sort=-v:refname | head -1` 查当前最新 tag，按进位规则递增：patch +1，满 100 进位 minor 并重置为 1）。
 - 未标注或版本号未命中的行不会出现在任何 Release 中，也**不阻断**发布（说明里会显示「未找到变更记录」提示）。
 - 静态的「### 程序说明」段落每次发布都会附带，无需逐版维护。
 
@@ -216,9 +216,9 @@ Thanks for contributing translations to GitHubDesktop2Chinese! Before adding or 
 
 ## Release Notes (docs/ReleaseBody.md)
 
-Any change to `json/`, `src/`, `third_party/`, `CMakeLists.txt` or `CMakePresets.json` automatically publishes a new version (patch number +1) on push to main, on the daily schedule, or on manual `auto`. When publishing, CI extracts the change lines from `docs/ReleaseBody.md` whose **line ends with the full-width version marker** (e.g. `（v1.2.23）`) and assembles them into the release notes:
+Any change to `json/`, `src/`, `third_party/`, `CMakeLists.txt` or `CMakePresets.json` automatically publishes a new version (the version auto-increments per the carry rule) on push to main, on the daily schedule, or on manual `auto`. When publishing, CI extracts the change lines from `docs/ReleaseBody.md` whose **line ends with the full-width version marker** (e.g. `（v0.0.2）`) and assembles them into the release notes:
 
-- Append a Chinese change line and its English companion line to the "版本更新日志 / Changelog" section, both ending with the full-width version marker of the **next release version** (check the current latest tag with `git tag --sort=-v:refname | head -1`, then +1).
+- Append a Chinese change line and its English companion line to the "版本更新日志 / Changelog" section, both ending with the full-width version marker of the **next release version** (check the current latest tag with `git tag --sort=-v:refname | head -1`, then increment per the carry rule: patch +1, carrying into minor at 100 and resetting to 1).
 - Lines without a marker, or whose version number does not match the release, never appear in any release, and never block publishing (the notes will show a "no change record found" notice instead).
 - The static "### 程序说明" section is attached to every release as-is; no per-version maintenance is needed.
 

@@ -1,4 +1,4 @@
-### 1.2.30 起的修复与更新 / Fixes & Updates since 1.2.30
+### 修复与更新 / Fixes & Updates
 
 #### 版本更新日志 / Changelog:
 - 版本策略重置: 自 v1.2.30 起仅维护最新版本, 历史变更条目不再保留; 映射 `minversion` 提升至 1.2.30, 旧版加载器加载新映射时将提示需升级（v1.2.30）
@@ -19,6 +19,10 @@
   - Code governance: remote endpoints and magic numbers centralized into named constants — scattered hardcoded URLs/values (GitHub API/RAW endpoints, the EOCD search window, UI-text length thresholds, etc.) are now managed in one place, so adjusting an endpoint or threshold takes a single edit (#94)（v1.2.35）
 - 依赖统一: macOS 切换为仓库内置 OpenSSL 3.5.9 静态库(双架构随仓库提交, 由 vendor 工作流产出), 构建期不再依赖 Homebrew 探测、源码编译与 Actions 缓存, 三平台统一为“克隆即可离线构建” (#98)（v1.2.36）
   - Dependency unification: macOS now builds against OpenSSL 3.5.9 static libraries bundled in the repo (both architectures committed, produced by the vendor workflow) — builds no longer depend on Homebrew probing, source compilation or Actions caches; all three platforms are now “clone and build offline” (#98)（v1.2.36）
+- 版本体系重置: 版本号自 v0.0.1 重新计数, 旧 v1.2.x 的 Release 与 tag 已全部清理; 递增规则改为 patch 满 100 进位 minor 并重置为 1、minor 满 100 进位 major 并重置为 0（0.0.100 → 0.1.1, 0.100.100 → 1.0.1）; 映射 `minversion` 随加载器版本同步调整（v0.0.1）
+  - Version scheme reset: version numbers restart from v0.0.1 — the old v1.2.x releases and tags have all been removed; the increment rule now carries a full patch (100) into minor resetting to 1, and a full minor (100) into major resetting to 0 (0.0.100 → 0.1.1, 0.100.100 → 1.0.1); the mapping `minversion` follows the loader version accordingly（v0.0.1）
+- 隐私修复: 随仓 Windows OpenSSL 静态库改为 CI 环境构建并重新提交, 消除库文件与发布产物中内嵌的本地构建路径信息（v0.0.1）
+  - Privacy fix: the bundled Windows OpenSSL static libraries are rebuilt in CI and re-committed, removing local build-path information embedded in the libraries and release artifacts（v0.0.1）
 
 <!--
 #### 修复BUG:
