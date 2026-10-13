@@ -401,75 +401,11 @@ jobs:
       # ── 检出 ──
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # ── 平台依赖：Linux 系统 libssl-dev / macOS 双架构静态 OpenSSL（带缓存, 两个单架构包共用）──
+      # ── 平台依赖：Linux 系统 libssl-dev（Windows/macOS OpenSSL 静态库已内置 third_party，无需安装）──
       - name: 安装 OpenSSL (Linux)
         if: runner.os == 'Linux'
         run: |
           dpkg -s libssl-dev >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y libssl-dev; }
-
-      - name: 读取 OpenSSL 版本 (macOS)
-        if: runner.os == 'macOS'
-        id: osslver
-        shell: bash
-        run: |
-          set -euo pipefail
-          VER="$(brew info --json=v2 openssl@3 | jq -r '.formulae[0].versions.stable')"
-          [[ "$VER" =~ ^3\.[0-9]+\.[0-9]+$ ]] || { echo "::error::OpenSSL 版本号异常: $VER"; exit 1; }
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "静态库构建使用 OpenSSL $VER 源码"
-
-      - name: 还原 macOS 静态 OpenSSL 缓存 (x64 + arm64)
-        if: runner.os == 'macOS'
-        id: ossl-restore
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          # path/key 与下方「保存」步骤共用 YAML 锚点（单一维护点，防两处漂移）
-          path: &ossl_cache_paths |
-            ~/ossl-x64
-            ~/ossl-arm64
-          key: &ossl_cache_key openssl-static-${{ steps.osslver.outputs.version }}-${{ runner.arch }}
-
-      - name: 构建 macOS 静态 OpenSSL (双架构, 缓存未命中时)
-        id: ossl-build
-        if: runner.os == 'macOS' && steps.ossl-restore.outputs.cache-hit != 'true'
-        shell: bash
-        env:
-          OSSL_VER: ${{ steps.osslver.outputs.version }}
-        run: |
-          set -euo pipefail
-          URL="https://github.com/openssl/openssl/releases/download/openssl-${OSSL_VER}/openssl-${OSSL_VER}.tar.gz"
-          TMP="$(mktemp -d)"
-          echo "下载 $URL"
-          curl -fsSL --retry 3 --retry-delay 5 -o "$TMP/openssl.tar.gz" "$URL"
-          # arm64 产物最低支持 macOS 11; 双架构部署目标一致, 保证通用二进制最低版本统一
-          export MACOSX_DEPLOYMENT_TARGET=11.0
-          build_ossl() {
-            local arch="$1" target="$2"
-            local src="$TMP/openssl-${OSSL_VER}-$arch" prefix="$HOME/ossl-$arch"
-            mkdir -p "$src"
-            # 每个架构独立解压源码树, 避免异构配置产物互相污染(perlasm 生成的汇编按架构不同)
-            tar -xzf "$TMP/openssl.tar.gz" -C "$src" --strip-components=1
-            (
-              cd "$src"
-              # no-zlib: 静态链接后不引入 zlib 依赖(仅影响已废弃的 TLS 压缩, 不影响正常 HTTPS)
-              ./Configure "$target" no-shared no-tests no-apps no-zlib --prefix="$prefix" --openssldir="$prefix/ssl"
-              make -j"$(sysctl -n hw.ncpu)" build_libs
-              make install_dev
-            )
-            [[ -f "$prefix/lib/libssl.a" && -f "$prefix/lib/libcrypto.a" ]] || { echo "::error::OpenSSL $arch 静态库缺失"; exit 1; }
-            echo "OpenSSL $arch 完成: $prefix"
-          }
-          build_ossl x64 darwin64-x86_64-cc
-          build_ossl arm64 darwin64-arm64-cc
-
-      - name: 保存 macOS 静态 OpenSSL 缓存
-        # always(): 后续步骤(功能测试等)失败时也保住已构建的静态库, 避免下次运行重复 8 分钟构建;
-        # 仅当本次确实执行且成功构建时保存(命中缓存或构建失败则不存)
-        if: always() && runner.os == 'macOS' && steps.ossl-build.outcome == 'success'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: *ossl_cache_paths
-          key: *ossl_cache_key
 
       # ── 配置：CMake 生成（失败自动重试 3 次）──
       - name: 配置 CMake（Windows x64）
@@ -496,15 +432,14 @@ jobs:
           VER="${VER:-ci-${GITHUB_SHA}}"
           EXTRA=()
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            # 单架构包(x64/arm64 由矩阵 arch 指定): 交叉编译 + 静态链接对应架构 OpenSSL, 产物自包含不依赖 brew;
+            # 单架构包(x64/arm64 由矩阵 arch 指定): 交叉编译; OpenSSL 3.5.9 静态库已内置仓库
+            # (third_party/openssl-macos-*, CMake 按架构自动选择), 配置期零下载零编译;
             # 部署目标 11.0 为 arm64 产物下限; LTO 与打包后 strip 进一步压缩体积
             ARCH="${{ matrix.arch }}"
             CMAKE_ARCH="$ARCH"
             if [[ "$ARCH" == "x64" ]]; then CMAKE_ARCH="x86_64"; fi
             EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=$CMAKE_ARCH")
             EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0")
-            EXTRA+=("-DOPENSSL_ROOT_DIR=$HOME/ossl-$ARCH")
-            EXTRA+=("-DOPENSSL_USE_STATIC_LIBS=TRUE")
             EXTRA+=("-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=TRUE")
           fi
           for attempt in 1 2 3; do

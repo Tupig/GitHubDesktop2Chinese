@@ -17,6 +17,8 @@
   - Build hygiene: removed the deprecated codecvt wide-narrow conversion (clears the macOS build warning); third-party headers are now included as SYSTEM and MSVC LNK4099 (third-party libs ship no PDBs) is suppressed; a leftover CMake debug comment was cleaned up — aiming for zero build warnings on all four platforms（v1.2.34）
 - 代码治理: 远程端点与魔法数字集中常量化, 消除散落各调用点的硬编码 URL/数值(GitHub API/RAW 端点、EOCD 搜索窗口、UI 文案长度阈值等), 调整端点或阈值只需改一处 (#94)（v1.2.35）
   - Code governance: remote endpoints and magic numbers centralized into named constants — scattered hardcoded URLs/values (GitHub API/RAW endpoints, the EOCD search window, UI-text length thresholds, etc.) are now managed in one place, so adjusting an endpoint or threshold takes a single edit (#94)（v1.2.35）
+- 依赖统一: macOS 切换为仓库内置 OpenSSL 3.5.9 静态库(双架构随仓库提交, 由 vendor 工作流产出), 构建期不再依赖 Homebrew 探测、源码编译与 Actions 缓存, 三平台统一为“克隆即可离线构建” (#98)（v1.2.36）
+  - Dependency unification: macOS now builds against OpenSSL 3.5.9 static libraries bundled in the repo (both architectures committed, produced by the vendor workflow) — builds no longer depend on Homebrew probing, source compilation or Actions caches; all three platforms are now “clone and build offline” (#98)（v1.2.36）
 
 <!--
 #### 修复BUG:
