@@ -237,8 +237,8 @@ private:
                     continue;
                 }
                 if (IsDigit(*v)) {
-                    if (major > MAX_VERSION_COMPONENT) { overflow = true; break; }
                     major = major * 10 + (*v - '0');
+                    if (major > MAX_VERSION_COMPONENT) { overflow = true; break; }
                     v++;
                     continue;
                 }
@@ -259,8 +259,8 @@ private:
                     continue;
                 }
                 if (IsDigit(*v)) {
-                    if (minor > MAX_VERSION_COMPONENT) { overflow = true; break; }
                     minor = minor * 10 + (*v - '0');
+                    if (minor > MAX_VERSION_COMPONENT) { overflow = true; break; }
                     v++;
                     ret = true;
                     continue;
@@ -293,6 +293,9 @@ private:
                         }
                         continue;
                     }
+                    // 未知后缀(如 -rc1): 结束解析并保留已识别部分,
+                    // 防止后缀中的数字被并入版本号(如 "1.2-rc1" 被解析为 1.21, #120)
+                    break;
                 }
                 v++;
                 continue;
@@ -305,8 +308,8 @@ private:
                     continue;
                 }
                 if (IsDigit(*v)) {
-                    if (revision > MAX_VERSION_COMPONENT) { overflow = true; break; }
                     revision = revision * 10 + (*v - '0');
+                    if (revision > MAX_VERSION_COMPONENT) { overflow = true; break; }
                     v++;
                     continue;
                 }
@@ -338,6 +341,9 @@ private:
                         }
                         continue;
                     }
+                    // 未知后缀(如 -4/-rc1): 结束解析并保留已识别部分,
+                    // 防止后缀中的数字被并入版本号(如 "1.2.3-4" 中的 4 被静默丢弃, #120)
+                    break;
                 }
                 v++;
                 continue;
@@ -349,9 +355,9 @@ private:
                     break;
                 }
                 if (IsDigit(*v)) {
-                    if (betaversion > MAX_VERSION_COMPONENT) { overflow = true; break; }
                     if (status == Status::Release && ((*v - '0') != 0)) status = Status::Beta;
                     betaversion = betaversion * 10 + (*v - '0');
+                    if (betaversion > MAX_VERSION_COMPONENT) { overflow = true; break; }
                     v++;
                     continue;
                 }
