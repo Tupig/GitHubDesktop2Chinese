@@ -169,3 +169,10 @@ endif()
 # CLI11 已内置到 third_party/include/CLI（header-only，无需额外链接）
 
 set_property(TARGET GitHubDesktop2Chinese PROPERTY CXX_STANDARD 20)
+
+# ── 单元测试(#123): Version 表驱动解析/比较测试, 无外部依赖 ──
+# 构建: cmake --build . --target version_test;  运行: ctest --output-on-failure
+enable_testing()
+add_executable(version_test tests/version_test.cpp)
+set_property(TARGET version_test PROPERTY CXX_STANDARD 20)
+add_test(NAME version_test COMMAND version_test)

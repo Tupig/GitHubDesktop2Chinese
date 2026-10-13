@@ -271,7 +271,9 @@ namespace utils {
      * @brief 校验临时文件: 文件大小与发布资产声明的 SHA256; 失败时删除临时文件
      * @param tmp_file 临时文件路径
      * @param max_size 预期文件大小（0 表示不校验大小）
-     * @param expected_digest 发布资产声明的摘要（形如 "sha256:<hex>"），为空则跳过内容校验
+     * @param expected_digest 发布资产声明的摘要（形如 "sha256:<hex>"）
+     *        自更新链路 fail-closed(#120): 摘要缺失/格式无法识别/计算失败一律拒绝替换,
+     *        不再放行(GitHub API 对 release assets 始终提供 sha256 摘要)
      */
     inline auto VerifyDownloadedFile(const fs::path& tmp_file, int64_t max_size, const std::string& expected_digest) -> bool {
         // 大小校验, 防止不完整的文件被替换进程序目录
@@ -285,19 +287,25 @@ namespace utils {
 
         // 内容摘要校验, 防止被篡改或不完整的资产被替换执行
         if(expected_digest.empty()) {
-            spdlog::debug("发布资产未提供SHA256摘要, 跳过完整性校验");
-            return true;
+            spdlog::error("发布资产未提供SHA256摘要, 拒绝替换(fail-closed)");
+            std::error_code ec;
+            fs::remove(tmp_file, ec);
+            return false;
         }
         const std::string prefix = "sha256:";
         if(expected_digest.rfind(prefix, 0) != 0) {
-            spdlog::warn("发布资产摘要格式无法识别({}), 跳过完整性校验", expected_digest);
-            return true;
+            spdlog::error("发布资产摘要格式无法识别({}), 拒绝替换(fail-closed)", expected_digest);
+            std::error_code ec;
+            fs::remove(tmp_file, ec);
+            return false;
         }
         const std::string want = expected_digest.substr(prefix.size());
         const std::string got = ComputeFileSha256(tmp_file);
         if(got.empty()) {
-            spdlog::warn("计算下载文件摘要失败, 跳过完整性校验");
-            return true;
+            spdlog::error("计算下载文件摘要失败, 拒绝替换(fail-closed)");
+            std::error_code ec;
+            fs::remove(tmp_file, ec);
+            return false;
         }
         bool same = want.size() == got.size();
         for(size_t i = 0; same && i < want.size(); i++) {
@@ -394,7 +402,8 @@ namespace utils {
      * @param Self 当前可执行文件路径
      * @param max_size 预期文件大小（0 表示不校验）
      * @param proxy 代理 host:port
-     * @param expected_digest 发布资产声明的摘要（形如 "sha256:<hex>"），为空则跳过内容校验
+     * @param expected_digest 发布资产声明的摘要（形如 "sha256:<hex>"），必须提供且格式正确，
+     *                        否则拒绝替换（fail-closed，#120）
      * @return 是否成功（成功后调用方应立即退出等待替换）
      */
     inline auto UpdateProgram(std::string url_host, std::string params, fs::path Self, int64_t max_size, std::pair<std::string, int> proxy, std::string expected_digest = "") -> bool {
