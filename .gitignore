@@ -28,3 +28,5 @@ _deps
 credentials*
 id_rsa*
 id_ed25519*
+# Python 缓存（tools/ci/ 校验脚本运行产物）
+__pycache__/

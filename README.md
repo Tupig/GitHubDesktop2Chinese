@@ -123,7 +123,7 @@ cmake --build build --config Release
 ```
 
 > [!NOTE]
-> OpenSSL 依赖：Windows 静态库与头文件随仓库提交（`third_party/openssl/`，无需预装或联网下载；版本与更新方式见 [`third_party/README.md`](third_party/README.md)）；Linux 安装 `libssl-dev`、macOS 执行 `brew install openssl` 后由 `find_package(OpenSSL)` 自动发现（本机开发可行）。CI 发布的 **macOS 产物按架构拆分（`macos-x64` / `macos-arm64`）、静态链接 OpenSSL 并 strip/LTO 裁剪**，自包含无额外依赖。
+> OpenSSL 依赖：三平台静态库与头文件均随仓库提交（Windows `third_party/openssl/`、macOS `third_party/openssl-macos-{x64,arm64}/`、Linux `third_party/openssl-linux-x64/`，无需预装或联网下载；版本与更新方式见 [`third_party/README.md`](third_party/README.md)）。CI 发布的 **macOS 产物按架构拆分（`macos-x64` / `macos-arm64`），各平台静态链接 OpenSSL，macOS 产物另经 strip/LTO 裁剪**，自包含无额外依赖。
 
 ## 👕 怎么贡献汉化
 
@@ -207,9 +207,11 @@ npm run all        # 失效检测 + 未翻译候选提取, 报告写入系统临
 │   │   ├── http.hpp              # HTTP / TLS 校验 / 自动更新
 │   │   └── input.hpp             # 交互输入
 │   └── version/Version.hpp       # 版本号解析（自研代码）
-├── third_party/                  # 第三方依赖（随仓库提交，含预编译 OpenSSL x64 静态库）
+├── third_party/                  # 第三方依赖（随仓库提交，含预编译 OpenSSL 三平台静态库）
 │   ├── include/                  # CLI11、cpp-httplib、nlohmann/json、spdlog、WinReg
-│   ├── openssl/                  # OpenSSL 3.5.9 头文件与预编译静态库
+│   ├── openssl/                  # OpenSSL 3.5.9 头文件与 Windows 预编译静态库
+│   ├── openssl-macos-{x64,arm64}/ # OpenSSL 3.5.9 macOS 预编译静态库（按架构）
+│   ├── openssl-linux-x64/        # OpenSSL 3.5.9 Linux 预编译静态库（-fPIC）
 │   └── README.md                 # 三方组件版本清单与本地构建/更新说明
 ├── json/
 │   └── localization.json         # 汉化映射（核心数据；路径为已发布程序的公共契约，不可移动）
@@ -437,7 +439,7 @@ cmake --build build --config Release
 ```
 
 > [!NOTE]
-> OpenSSL dependency: on Windows the static libraries and headers are committed to the repository (`third_party/openssl/`; no preinstall or download needed — see [`third_party/README.md`](third_party/README.md) for versions and update instructions). On Linux install `libssl-dev`; on macOS run `brew install openssl`; `find_package(OpenSSL)` then picks them up (sufficient for local development). **CI-released macOS artifacts are split per architecture (`macos-x64` / `macos-arm64`), statically linked against OpenSSL, and trimmed with strip/LTO** — self-contained with no extra dependencies.
+> OpenSSL dependency: the static libraries and headers are committed to the repository on all three platforms (Windows `third_party/openssl/`, macOS `third_party/openssl-macos-{x64,arm64}/`, Linux `third_party/openssl-linux-x64/`; no preinstall or download needed — see [`third_party/README.md`](third_party/README.md) for versions and update instructions). **CI-released macOS artifacts are split per architecture (`macos-x64` / `macos-arm64`); OpenSSL is statically linked on every platform, with the macOS artifacts additionally trimmed via strip/LTO** — self-contained with no extra dependencies.
 
 ## 👕 How to contribute translations
 
@@ -521,9 +523,11 @@ Architecture overview: a C++ main program (`src/`, loader + localizer, producing
 │   │   ├── http.hpp              # HTTP / TLS validation / auto-update
 │   │   └── input.hpp             # Interactive input
 │   └── version/Version.hpp       # Version parsing (self-written code)
-├── third_party/                  # Third-party dependencies (committed to the repo, incl. prebuilt OpenSSL x64 static libs)
+├── third_party/                  # Third-party dependencies (committed to the repo, incl. prebuilt OpenSSL static libs for all platforms)
 │   ├── include/                  # CLI11, cpp-httplib, nlohmann/json, spdlog, WinReg
-│   ├── openssl/                  # OpenSSL 3.5.9 headers and prebuilt static libraries
+│   ├── openssl/                  # OpenSSL 3.5.9 headers and Windows prebuilt static libraries
+│   ├── openssl-macos-{x64,arm64}/ # OpenSSL 3.5.9 macOS prebuilt static libraries (per architecture)
+│   ├── openssl-linux-x64/        # OpenSSL 3.5.9 Linux prebuilt static libraries (-fPIC)
 │   └── README.md                 # Third-party version list and local build/update instructions
 ├── json/
 │   └── localization.json         # Localization mapping (core data; the path is a public contract of released binaries and must not move)

@@ -23,6 +23,10 @@
   - Version scheme reset: version numbers restart from v0.0.1 — the old v1.2.x releases and tags have all been removed; the increment rule now carries a full patch (100) into minor resetting to 1, and a full minor (100) into major resetting to 0 (0.0.100 → 0.1.1, 0.100.100 → 1.0.1); the mapping `minversion` follows the loader version accordingly（v0.0.1）
 - 隐私修复: 随仓 Windows OpenSSL 静态库改为 CI 环境构建并重新提交, 消除库文件与发布产物中内嵌的本地构建路径信息（v0.0.1）
   - Privacy fix: the bundled Windows OpenSSL static libraries are rebuilt in CI and re-committed, removing local build-path information embedded in the libraries and release artifacts（v0.0.1）
+- 依赖统一(补全): Linux 同步切换为仓库内置 OpenSSL 3.5.9 静态库(x64, -fPIC, 由主工作流 vendor 任务产出并随仓库提交), 构建不再依赖 libssl-dev, 三平台全部统一为“克隆即可离线构建” (#98)（v0.0.1）
+  - Dependency unification (completed): Linux now also builds against the OpenSSL 3.5.9 static library bundled in the repo (x64, -fPIC, produced by the main workflow's vendor jobs and committed) instead of libssl-dev — all three platforms are now uniformly “clone and build offline” (#98)（v0.0.1）
+- CI 单工作流化: wiki 同步与 OpenSSL 产库任务并入主工作流, 删除独立工作流文件; 新增单工作流规范校验器(连通性/无循环/无孤立任务等)与 20 用例测试防回归 (#98)（v0.0.1）
+  - Single-workflow CI: the wiki-sync and OpenSSL vendor jobs are merged into the main workflow and the standalone workflow files are removed; a single-workflow lint (connectivity / no cycles / no orphan jobs) plus 20 test cases guard against regressions (#98)（v0.0.1）
 
 <!--
 #### 修复BUG:

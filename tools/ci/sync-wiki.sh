@@ -2,7 +2,7 @@
 # =====================================================================
 # sync-wiki.sh — 同步 docs/wiki/ 到 GitHub Wiki 仓库（镜像语义）
 #
-# 用法（CI 内由 .github/workflows/wiki-sync.yml 调用；本地亦可手动运行）:
+# 用法（CI 内由 .github/workflows/ghdesktop2chinese.yml 的 sync-wiki 任务调用；本地亦可手动运行）:
 #   GH_TOKEN=<token> bash tools/ci/sync-wiki.sh
 #
 # 语义:
