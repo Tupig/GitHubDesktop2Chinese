@@ -114,7 +114,7 @@ git branch -D <分支名>
 
 - Windows / macOS / Linux 三平台并行编译打包，产物一致、可直接发布。
 - 所有依赖**内置仓库，或仅使用 GitHub 原生功能**（Actions、Releases、Packages、cache）；不引入外部第三方依赖服务。
-- OpenSSL 三平台统一 **3.5.9 静态链接**：Windows 与 macOS 使用内置 `third_party/` 成品库；Linux 由源码构建并经 `actions/cache` 缓存。macOS 成品库由仓库内手动 vendor 工作流（`workflow_dispatch` 触发）产出并提交，工作流保留供未来升级复用。
+- OpenSSL 三平台统一 **3.5.9 静态链接**：Windows / macOS / Linux 均使用内置 `third_party/` 成品库，克隆即可离线构建；成品库由主工作流的产库（vendor）任务在 GitHub Actions 上构建并提交，供未来升级复用。
 - C++ 头文件依赖（CLI11、cpp-httplib、nlohmann/json、spdlog、WinReg）内置 `third_party/include/`。
 - GitHub Actions 全部使用官方 action 并以 commit SHA 固定。
 - SignPath 代码签名为唯一例外：由 secrets 门控，未配置时自动跳过，不产生外部调用。
@@ -255,7 +255,7 @@ The build is **self-contained** (audit & implementation plan: [#98](https://gith
 
 - Windows / macOS / Linux are built in parallel with consistent, releasable artifacts.
 - All dependencies are **vendored in-repo or use GitHub-native features only** (Actions, Releases, Packages, cache); no external third-party services.
-- OpenSSL is statically linked at **3.5.9** on all platforms: Windows and macOS use vendored libraries under `third_party/`; Linux builds from source and caches the result via `actions/cache`. The macOS libraries are produced and committed by a manual vendor workflow (`workflow_dispatch`) kept in-repo for future upgrades.
+- OpenSSL is statically linked at **3.5.9** on all platforms: Windows / macOS / Linux all use the vendored libraries under `third_party/` — clone and build offline; the libraries are built and committed by the main workflow's vendor jobs on GitHub Actions, reusable for future upgrades.
 - C++ header dependencies (CLI11, cpp-httplib, nlohmann/json, spdlog, WinReg) are vendored in `third_party/include/`.
 - GitHub Actions uses official actions pinned by commit SHA.
 - SignPath code signing is the only exception: gated by repository secrets and skipped automatically when unconfigured, producing no external calls.
