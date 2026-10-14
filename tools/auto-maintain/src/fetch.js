@@ -40,7 +40,11 @@ export async function getLatestRelease() {
         signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
       });
       if (!res.ok) {
-        throw new Error(`获取 GitHub Desktop 最新 release 失败: HTTP ${res.status}`);
+        const err = new Error(`获取 GitHub Desktop 最新 release 失败: HTTP ${res.status}`);
+        // #132: 限流(403/429)时遵守 Retry-After(上限 90s), 固定 5s 重试在限流场景必败
+        const retryAfter = Number(res.headers.get('retry-after'));
+        err.waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 90) * 1000 : undefined;
+        throw err;
       }
       const data = await res.json();
       const tag = data.tag_name; // 形如 release-3.6.6
@@ -54,8 +58,9 @@ export async function getLatestRelease() {
     } catch (e) {
       lastError = e;
       if (attempt < attempts) {
-        console.warn(`获取 release 信息失败(第 ${attempt}/${attempts} 次): ${e.message}，5 秒后重试`);
-        await sleep(5_000);
+        const waitMs = e.waitMs ?? 5_000;
+        console.warn(`获取 release 信息失败(第 ${attempt}/${attempts} 次): ${e.message}，${Math.round(waitMs / 1000)} 秒后重试`);
+        await sleep(waitMs);
       }
     }
   }
