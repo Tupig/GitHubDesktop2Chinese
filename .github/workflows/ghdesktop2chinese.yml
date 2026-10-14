@@ -537,7 +537,9 @@ jobs:
           printf '// fixture main\n' > "$FIXTURE/main.js"
           printf '// fixture renderer\n' > "$FIXTURE/renderer.js"
           set +e
-          OUT="$(echo "" | "$BIN" -g "$FIXTURE" --nopause 2>&1)"
+          # CI 构建版本为 ci-<sha> 占位符(解析为 0.0.0, 低于映射文件 minversion):
+          # --nopause 下默认中止, 加 --force 显式继续并顺带覆盖该强制执行路径
+          OUT="$(echo "" | "$BIN" -g "$FIXTURE" --nopause --force 2>&1)"
           CODE=$?
           set -e
           if [[ $CODE -ne 0 ]]; then
