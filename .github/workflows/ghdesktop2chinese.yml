@@ -175,7 +175,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -278,7 +279,7 @@ jobs:
   #    触发：push main|tag / PR / 定时 / 手动(auto|build|release)
   # ═════════════════════════════════════════════════
   Build:
-    name: Matrix build (${{ matrix.name }})
+    name: 多平台构建 (${{ matrix.name }})
     needs: Version
     # build_changed=false(与上次成功构建无差异)时跳过整个矩阵, 由 CodeqlScan 的构建跳过说明块输出说明(#81)
     if: |
@@ -319,7 +320,8 @@ jobs:
       CI_SHA: ${{ github.sha }}
     steps:
       # ── 检出 ──
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # ── 配置：CMake 生成（失败自动重试 3 次）──
       - name: 配置 CMake（Windows x64）
@@ -509,7 +511,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 深度校验 localization.json
         run: python tools/ci/check-localization.py
@@ -520,7 +523,8 @@ jobs:
       - name: 全量扫描源码编码（UTF-8 无 BOM）
         run: python tools/ci/check-encoding.py --config tools/ci/encoding-check.json
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      - name: 安装 Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
 
@@ -577,7 +581,8 @@ jobs:
     steps:
       # fetch-depth: 2 —— Wiki 同步需要 before(HEAD 的父)做 docs/wiki diff 基准;
       # 多 commit 一次 push 时 before 缺失 → fail-safe 视为有变更, 同步幂等无害
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 2
 
@@ -591,28 +596,28 @@ jobs:
         shell: bash
         run: echo "enabled=true" >> "$GITHUB_OUTPUT"
 
-      - name: Initialize CodeQL
+      - name: 初始化 CodeQL
         if: steps.codeql_gate.outputs.enabled == 'true'
         uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           languages: c-cpp
           build-mode: manual
 
-      - name: Configure CMake (x64)
+      - name: 配置 CMake (x64)
         if: steps.codeql_gate.outputs.enabled == 'true'
         shell: pwsh
         run: |
           chcp 65001 | Out-Null
           cmake -B build -A x64 -DFILE_VERSION="codeql"
 
-      - name: Build for CodeQL
+      - name: 为 CodeQL 构建
         if: steps.codeql_gate.outputs.enabled == 'true'
         shell: pwsh
         run: |
           chcp 65001 | Out-Null
           cmake --build build --config Release
 
-      - name: Perform CodeQL Analysis
+      - name: 执行 CodeQL 分析
         if: steps.codeql_gate.outputs.enabled == 'true'
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
@@ -626,7 +631,8 @@ jobs:
         shell: bash
         run: echo "enabled=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      - name: 安装 Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         if: steps.maintain_gate.outputs.enabled == 'true'
         with:
           node-version: 24
@@ -787,7 +793,8 @@ jobs:
     env:
       OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 编译 OpenSSL（x64）
         run: |
@@ -851,7 +858,8 @@ jobs:
     env:
       OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 下载并解压 OpenSSL 源码
         shell: bash
@@ -949,7 +957,8 @@ jobs:
       # inputs 上下文仅 dispatch 事件可用 → 统一经 github.event.inputs 读取, PR 事件回退默认值
       OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 编译 OpenSSL（arm64 ≈8 分钟）
         run: |
@@ -1017,7 +1026,8 @@ jobs:
       # inputs 上下文仅 dispatch 事件可用 → 统一经 github.event.inputs 读取, PR 事件回退默认值
       OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 编译 OpenSSL（x64 ≈8 分钟）
         run: |
@@ -1098,7 +1108,8 @@ jobs:
       SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
       SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 校验版本号
         run: |
