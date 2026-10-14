@@ -25,11 +25,13 @@
 #        移除后重加标签可重新产库
 #   注6: 手动 vendor 经 openssl-version 输入指定版本(默认 3.5.9), 与常规运行共享
 #        concurrency 组(产库期间 push main 排队)
+#   注7: 产库版本强制跟随 openssl/openssl 官方最新 Release(供应链): 四连全部成功后
+#        OpensslVendorPR 校验所产版本 == 官方最新 Release, 否则拒绝开入库 PR
 #   防重复: push 仅绑定 main 与 tag → PR 分支的推送不会二次触发(PR 由 pull_request 单路径负责);
 #           同一 PR 连续推送由 concurrency 取消陈旧运行
 #   边界:   发布类(auto/release)仅限 main 触发(防特性分支误发布); 其他 ref 可跑 build/security/maintain/vendor 排查
 #
-# ── jobs 总览与依赖（9 任务, PascalCase 命名）────────────────
+# ── jobs 总览与依赖（10 任务, PascalCase 命名）────────────────
 #   0. Version            解析版本号与变更检测（构建/发布类任务的前置）;
 #                         构建差异检测: 与上次成功构建对比, 无差异时输出 build_changed=false
 #   1. Build              构建矩阵(三平台四目标) Matrix build + 产物功能测试（无差异时跳过, 见注4）
@@ -45,12 +47,16 @@
 #   5. OpensslWin         产库 OpenSSL（windows x64 .lib; 同上触发, 产物用于替换内置库）
 #   6. OpensslMacosArm64  产库 OpenSSL（macOS arm64 交叉编译; 同上触发, 原 vendor-macos 矩阵拆分）
 #   7. OpensslMacosX64    产库 OpenSSL（macOS x64 交叉编译; 同上触发, 原 vendor-macos 矩阵拆分）
-#   8. Release            汇总产物并发布
+#   8. OpensslVendorPR    产库自动开 PR（四连全部成功后组装 third_party 并自动开入库 PR,
+#                         版本须为官方最新 Release 见注7; GITHUB_TOKEN PR 不触发 CI,
+#                         由维护者按 PR 内审查清单确认后合并）
+#   9. Release            汇总产物并发布
 #
 #   job 依赖: Version 为根; Build/JsonCheck ← Version; CodeqlScan ← Version+JsonCheck
 #             (Version 直连为读其 outputs —— GitHub 仅直接 needs 可访问 outputs, 间接依赖不传递);
 #             产库四连串行: OpensslLinux ← CodeqlScan → OpensslWin → OpensslMacosArm64 → OpensslMacosX64,
 #             以 always() + 原 vendor 触发条件串联(不受上游 skip/失败传导, 保持原独立产库语义与低频);
+#             OpensslVendorPR ← 产库四连(四 result 全 success 才开 PR);
 #             Release ← Version+Build+JsonCheck+CodeqlScan(Version 直连同上; 其余三门为发布质量门)
 #   图约束: 全图以 Version 为根连通, 无孤立/不连通任务、无循环、无悬空 needs —— 由 JsonCheck 的
 #           单工作流规范校验（tools/ci/check-workflow.py, W0-W5）强制
@@ -63,7 +69,8 @@
 #             Linux: build/GitHubDesktop2Chinese（单配置生成器）
 #   Artifact  GitHubDesktop2Chinese-<平台>-<版本号|SHA>
 #   产库产物  openssl-linux-x64 / openssl-windows-x64 / openssl-macos-arm64 / openssl-macos-x64
-#             （产库四连任务产出, 仅 include/+lib/, 保留 7 天, 供人工下载后提交 third_party/）
+#             （产库四连任务产出, 仅 include/+lib/, 保留 7 天; 由 OpensslVendorPR 自动下载组装
+#              third_party/ 并开入库 PR, 不再人工下载提交）
 #   发布资产  GitHubDesktop2Chinese.exe        — Windows x64（保留历史文件名，向后兼容）
 #             GitHubDesktop2Chinese-macos-x64   — macOS Intel（x64）
 #             GitHubDesktop2Chinese-macos-arm64 — macOS Apple Silicon（M 系列）
@@ -804,11 +811,15 @@ jobs:
     timeout-minutes: 30
     env:
       OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
+    outputs:
+      # 源码包 SHA256: 供 OpensslVendorPR 做四平台独立下载一致性溯源
+      tarball_sha256: ${{ steps.build.outputs.tarball_sha256 }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 编译 OpenSSL（x64）
+        id: build
         run: |
           set -euo pipefail
           if ! printf '%s' "$OSSL_VER" | grep -qE '^3\.[0-9]+\.[0-9]+$'; then
@@ -834,6 +845,8 @@ jobs:
             --prefix="$RUNNER_TEMP/openssl-linux-x64" --libdir=lib
           make -j"$(nproc)" build_libs
           make install_dev
+          # 记录源码包 SHA256(溯源): 经官方 .sha256 校验的同一 tar.gz
+          echo "tarball_sha256=$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: 校验产物齐备
         run: |
@@ -869,11 +882,15 @@ jobs:
     timeout-minutes: 40
     env:
       OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
+    outputs:
+      # 源码包 SHA256: 供 OpensslVendorPR 做四平台独立下载一致性溯源
+      tarball_sha256: ${{ steps.src.outputs.tarball_sha256 }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 下载并解压 OpenSSL 源码
+        id: src
         shell: bash
         run: |
           set -euo pipefail
@@ -893,6 +910,8 @@ jobs:
           sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
           mkdir -p openssl-src
           tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
+          # 记录源码包 SHA256(溯源): 经官方 .sha256 校验的同一 tar.gz
+          echo "tarball_sha256=$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: 配置 OpenSSL（VC-WIN64A）
         shell: cmd
@@ -968,11 +987,15 @@ jobs:
     env:
       # inputs 上下文仅 dispatch 事件可用 → 统一经 github.event.inputs 读取, PR 事件回退默认值
       OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
+    outputs:
+      # 源码包 SHA256: 供 OpensslVendorPR 做四平台独立下载一致性溯源
+      tarball_sha256: ${{ steps.build.outputs.tarball_sha256 }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 编译 OpenSSL（arm64 ≈8 分钟）
+        id: build
         run: |
           set -euo pipefail
           TARGET=darwin64-arm64-cc
@@ -999,6 +1022,8 @@ jobs:
             --prefix="$RUNNER_TEMP/openssl-macos-arm64"
           make -j"$(sysctl -n hw.ncpu)" build_libs
           make install_dev
+          # 记录源码包 SHA256(溯源): 经官方 .sha256 校验的同一 tar.gz
+          echo "tarball_sha256=$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: 校验产物齐备
         run: |
@@ -1037,11 +1062,15 @@ jobs:
     env:
       # inputs 上下文仅 dispatch 事件可用 → 统一经 github.event.inputs 读取, PR 事件回退默认值
       OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
+    outputs:
+      # 源码包 SHA256: 供 OpensslVendorPR 做四平台独立下载一致性溯源
+      tarball_sha256: ${{ steps.build.outputs.tarball_sha256 }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 编译 OpenSSL（x64 ≈8 分钟）
+        id: build
         run: |
           set -euo pipefail
           TARGET=darwin64-x86_64-cc
@@ -1068,6 +1097,8 @@ jobs:
             --prefix="$RUNNER_TEMP/openssl-macos-x64"
           make -j"$(sysctl -n hw.ncpu)" build_libs
           make install_dev
+          # 记录源码包 SHA256(溯源): 经官方 .sha256 校验的同一 tar.gz
+          echo "tarball_sha256=$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: 校验产物齐备
         run: |
@@ -1089,7 +1120,173 @@ jobs:
           if-no-files-found: error
 
   # ═════════════════════════════════════════════════
-  # 8. 发布 Release（push main 有变更 / tag v* / 手动 auto|release / 定时且有变更）
+  # 8. 产库自动开 PR（四连全部成功后组装 third_party 并自动开入库 PR, 由维护者审查合并）
+  #    GITHUB_TOKEN 创建的 PR 不触发 CI(GitHub 防递归), 审查清单见 PR 描述;
+  #    所产版本强制等于 openssl/openssl 官方最新 Release(注7), 防止产旧版本入库
+  # ═════════════════════════════════════════════════
+  OpensslVendorPR:
+    name: 产库自动开 PR
+    needs: [OpensslLinux, OpensslWin, OpensslMacosArm64, OpensslMacosX64]
+    # 四连全部成功才开 PR: 部分失败不开, 避免提交不完整的四平台库
+    if: |
+      always() && (
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'vendor-openssl') ||
+      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor')) &&
+      needs.OpensslLinux.result == 'success' &&
+      needs.OpensslWin.result == 'success' &&
+      needs.OpensslMacosArm64.result == 'success' &&
+      needs.OpensslMacosX64.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # 权限最小化: 仅本 job 授予开 PR 所需写权限, 其余 job 保持工作流级只读
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # third_party 是 main 的构建依赖, 入库 PR 分支一律基于 main
+          ref: main
+
+      - name: 校验所产版本为官方最新 Release
+        run: |
+          set -euo pipefail
+          # 最新版本强制(供应链, 注7): 查询走 openssl/openssl 官方仓库(符合来源政策), 防止产旧版本入库
+          LATEST_TAG="$(curl --fail --location --retry 3 --retry-delay 5 -sS \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/openssl/openssl/releases/latest" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')"
+          LATEST_VER="${LATEST_TAG#openssl-}"
+          echo "官方最新 Release: $LATEST_VER（$LATEST_TAG）"
+          if [[ "$OSSL_VER" != "$LATEST_VER" ]]; then
+            echo "::error::所产版本 $OSSL_VER 非官方最新 Release（最新为 $LATEST_VER）。产库必须跟随最新版本, 请以最新版本重新触发"
+            exit 1
+          fi
+
+      - name: 下载四平台产库产物
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          path: vendor-staging
+          pattern: openssl-*
+          merge-multiple: false
+
+      - name: 校验产物并组装 third_party
+        id: assemble
+        run: |
+          set -euo pipefail
+          # 四平台源码包 SHA256 一致性(供应链): 四连各自独立下载同一 release 资产, 哈希必须一致
+          H_LINUX="${{ needs.OpensslLinux.outputs.tarball_sha256 }}"
+          H_WIN="${{ needs.OpensslWin.outputs.tarball_sha256 }}"
+          H_ARM="${{ needs.OpensslMacosArm64.outputs.tarball_sha256 }}"
+          H_X64="${{ needs.OpensslMacosX64.outputs.tarball_sha256 }}"
+          if [[ -z "$H_LINUX" || "$H_LINUX" != "$H_WIN" || "$H_LINUX" != "$H_ARM" || "$H_LINUX" != "$H_X64" ]]; then
+            echo "::error::四平台源码包 SHA256 不一致或缺失（供应链异常）:"
+            echo "  linux=$H_LINUX windows=$H_WIN macos-arm64=$H_ARM macos-x64=$H_X64"
+            exit 1
+          fi
+          # artifact 名 -> third_party 目录映射(Windows 产物目录名为 openssl/)
+          declare -A DST=(
+            [openssl-linux-x64]="third_party/openssl-linux-x64"
+            [openssl-windows-x64]="third_party/openssl"
+            [openssl-macos-arm64]="third_party/openssl-macos-arm64"
+            [openssl-macos-x64]="third_party/openssl-macos-x64"
+          )
+          for art in "${!DST[@]}"; do
+            src="vendor-staging/$art"
+            dst="${DST[$art]}"
+            [[ -f "$src/include/openssl/ssl.h" ]] || { echo "::error::artifact $art 缺少 include/openssl/ssl.h"; exit 1; }
+            # 版本宏一致性: 四平台产物的 OPENSSL_VERSION_STR 必须全部等于所产版本
+            ver="$(sed -n 's/^# *define *OPENSSL_VERSION_STR "\(.*\)".*/\1/p' "$src/include/openssl/opensslv.h" | head -n1)"
+            [[ "$ver" == "$OSSL_VER" ]] || { echo "::error::artifact $art 版本宏为 '$ver', 与所产版本 $OSSL_VER 不一致"; exit 1; }
+            # 库文件齐备(Windows 为 .lib, 其余为 .a)
+            if [[ "$art" == "openssl-windows-x64" ]]; then
+              [[ -f "$src/lib/libssl.lib" && -f "$src/lib/libcrypto.lib" ]] || { echo "::error::artifact $art 缺少 libssl.lib/libcrypto.lib"; exit 1; }
+            else
+              [[ -f "$src/lib/libssl.a" && -f "$src/lib/libcrypto.a" ]] || { echo "::error::artifact $art 缺少 libssl.a/libcrypto.a"; exit 1; }
+            fi
+            rm -rf "$dst/include" "$dst/lib"
+            mkdir -p "$dst"
+            cp -a "$src/include" "$src/lib" "$dst/"
+          done
+          echo "四平台产物组装完成, 版本宏一致: $OSSL_VER"
+          # 同版本跳过: 仓库现有版本与所产版本相同则不开 PR(重复产库无意义)
+          cur="$(sed -n 's/^# *define *OPENSSL_VERSION_STR "\(.*\)".*/\1/p' third_party/openssl/include/openssl/opensslv.h | head -n1)"
+          echo "cur_ver=$cur" >> "$GITHUB_OUTPUT"
+          if [[ "$cur" == "$OSSL_VER" ]]; then
+            echo "::notice::仓库 third_party 已是 $OSSL_VER, 跳过开 PR"
+            echo "skip_pr=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 生成 PR 描述
+        run: |
+          set -euo pipefail
+          [[ "${{ steps.assemble.outputs.skip_pr }}" != "true" ]] || { echo "跳过: 仓库已是 $OSSL_VER"; exit 0; }
+          CUR="${{ steps.assemble.outputs.cur_ver }}"
+          {
+            echo "## 产库自动 PR：OpenSSL $OSSL_VER 四平台静态库入库"
+            echo ""
+            echo "由产库四连任务全部成功后自动创建。**GITHUB_TOKEN 创建的 PR 不触发 CI**（GitHub 防递归机制），请维护者按下方审查清单逐项确认后合并。"
+            echo ""
+            echo "### 溯源"
+            echo ""
+            echo "- 触发运行：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "- 上游源码包：\`openssl-$OSSL_VER.tar.gz\`（[官方 Release](https://github.com/openssl/openssl/releases/tag/openssl-$OSSL_VER)）"
+            echo "- 源码包 SHA256（四平台产库任务各自独立下载并经官方 \`.sha256\` 校验，已验证四值一致）：\`${{ needs.OpensslLinux.outputs.tarball_sha256 }}\`"
+            echo "- 官方最新 Release 校验：所产版本已核验为 openssl/openssl 最新 Release"
+            echo ""
+            echo "### 产物清单与 SHA256"
+            echo ""
+            echo "| 平台 | 仓库目录 | 库文件 | SHA256 |"
+            echo "| --- | --- | --- | --- |"
+            for d in third_party/openssl third_party/openssl-linux-x64 third_party/openssl-macos-arm64 third_party/openssl-macos-x64; do
+              for f in "$d"/lib/*; do
+                [[ -f "$f" ]] || continue
+                echo "| $(basename "$d") | \`$d\` | \`$(basename "$f")\` | \`$(sha256sum "$f" | cut -d' ' -f1)\` |"
+              done
+            done
+            echo ""
+            echo "### 审查清单（合并前逐项确认）"
+            echo ""
+            echo "- [ ] 四个产库任务全部成功（见上方运行链接）"
+            echo "- [ ] 源码包 SHA256 与 [openssl.org/source](https://www.openssl.org/source/) 公示值交叉核对"
+            echo "- [ ] 检出本 PR 分支本地构建通过（Windows：CMake 构建 + version_test + 冒烟）"
+            echo "- [ ] 同步更新文档版本号：\`third_party/README.md\`、\`README.md\`、\`SECURITY.md\`、\`docs/wiki/编译指南.md\`"
+            echo "- [ ] 按 \`--squash\` 合并并删除分支"
+            echo ""
+            echo "### 变更范围"
+            echo ""
+            echo "- 仅 \`third_party/openssl*\` 四目录二进制替换（版本 $CUR → $OSSL_VER）"
+          } > pr-body.md
+          echo "--- PR 描述已生成 ---"
+          cat pr-body.md
+
+      - name: 创建入库 PR
+        run: |
+          set -euo pipefail
+          [[ "${{ steps.assemble.outputs.skip_pr }}" != "true" ]] || { echo "跳过: 仓库已是 $OSSL_VER"; exit 0; }
+          CUR="${{ steps.assemble.outputs.cur_ver }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          BRANCH="vendor/openssl-$OSSL_VER-r$GITHUB_RUN_ID"
+          # 重跑防御: 同一 run 的分支已存在则跳过, 防重复开 PR
+          if git ls-remote --heads origin "$BRANCH" | grep -q .; then
+            echo "::notice::分支 $BRANCH 已存在（本次运行疑似重跑），跳过重复开 PR"
+            exit 0
+          fi
+          git checkout -b "$BRANCH"
+          git add third_party
+          git commit -m "vendor: OpenSSL $OSSL_VER 四平台静态库入库（产库自动 PR）" \
+            -m "版本: $CUR -> $OSSL_VER（官方最新 Release）; 产物: linux-x64 / windows-x64 / macos-arm64 / macos-x64; 溯源与审查清单见 PR 描述"
+          git push origin "$BRANCH"
+          gh pr create --title "vendor: OpenSSL $OSSL_VER 四平台静态库入库" --body-file pr-body.md
+
+  # ═════════════════════════════════════════════════
+  # 9. 发布 Release（push main 有变更 / tag v* / 手动 auto|release / 定时且有变更）
   #    依赖 build 产物与 version 版本号
   # ═════════════════════════════════════════════════
   Release:
