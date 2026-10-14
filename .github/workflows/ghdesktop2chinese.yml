@@ -23,7 +23,7 @@
 #   注5: PR 打 vendor-openssl 标签触发 labeled 事件, 单次产库四连串行产库;
 #        labeled 运行取消同 PR 进行中的常规运行, 完成后重跑 PR 常规检查;
 #        移除后重加标签可重新产库
-#   注6: 手动 vendor 经 openssl-version 输入指定版本(默认 3.5.9), 与常规运行共享
+#   注6: 手动 vendor 经 openssl-version 输入指定版本(留空自动取官方最新 Release, 注7), 与常规运行共享
 #        concurrency 组(产库期间 push main 排队)
 #   注7: 产库版本强制跟随 openssl/openssl 官方最新 Release(供应链): 四连全部成功后
 #        OpensslVendorPR 校验所产版本 == 官方最新 Release, 否则拒绝开入库 PR
@@ -138,9 +138,9 @@ on:
           - vendor
           - release
       openssl-version:
-        description: "OpenSSL 产库版本（不带 v 前缀, 如 3.5.9; 仅 type=vendor 生效; 留空用默认 3.5.9）"
+        description: "OpenSSL 产库版本（不带 v/openssl- 前缀, 如 3.5.9; 仅 type=vendor 生效; 留空自动取官方最新 Release）"
         required: false
-        default: "3.5.9"
+        default: ""
         type: string
       version:
         description: "版本号（不带 v 前缀, 如 0.0.2; 留空自动递增版本; 仅对 build/auto/release 的产物命名与发布生效）"
@@ -809,23 +809,43 @@ jobs:
     needs: CodeqlScan
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    env:
-      OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
     outputs:
       # 源码包 SHA256: 供 OpensslVendorPR 做四平台独立下载一致性溯源
       tarball_sha256: ${{ steps.build.outputs.tarball_sha256 }}
+      # 实际解析版本(指定输入或自动取最新): 供 OpensslVendorPR 做四平台一致性校验
+      resolved_ver: ${{ steps.resolve.outputs.ossl_ver }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: 解析产库版本
+        id: resolve
+        run: |
+          set -euo pipefail
+          INPUT_VER="${{ github.event.inputs.openssl-version }}"
+          if [[ -n "$INPUT_VER" ]]; then
+            OSSL_VER="$INPUT_VER"
+          else
+            # 留空自动取官方最新 Release(注7): 与 OpensslVendorPR 校验同源
+            LATEST_TAG="$(curl --fail --location --retry 3 --retry-delay 5 -sS \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/openssl/openssl/releases/latest" \
+              | grep -oE '"tag_name": *"[^"]+"' | sed -E 's/^"tag_name": *"([^"]+)"$/\1/')"
+            OSSL_VER="${LATEST_TAG#openssl-}"
+            echo "未指定 openssl-version, 自动取官方最新 Release: $OSSL_VER（$LATEST_TAG）"
+          fi
+          if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::openssl-version 格式非法: $OSSL_VER（应为 X.Y.Z, 不带 v/openssl- 前缀）"
+            exit 1
+          fi
+          echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
+          echo "ossl_ver=$OSSL_VER" >> "$GITHUB_OUTPUT"
 
       - name: 编译 OpenSSL（x64）
         id: build
         run: |
           set -euo pipefail
-          if ! printf '%s' "$OSSL_VER" | grep -qE '^3\.[0-9]+\.[0-9]+$'; then
-            echo "::error::openssl-version 格式非法: $OSSL_VER（应为 3.x.y）"
-            exit 1
-          fi
           cd "$RUNNER_TEMP"
           rm -rf openssl-src "openssl-$OSSL_VER.tar.gz" "openssl-$OSSL_VER.tar.gz.sha256"
           curl --fail --location --retry 3 --retry-delay 5 \
@@ -880,24 +900,45 @@ jobs:
     needs: OpensslLinux
     runs-on: windows-2025
     timeout-minutes: 40
-    env:
-      OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
     outputs:
       # 源码包 SHA256: 供 OpensslVendorPR 做四平台独立下载一致性溯源
       tarball_sha256: ${{ steps.src.outputs.tarball_sha256 }}
+      # 实际解析版本(指定输入或自动取最新): 供 OpensslVendorPR 做四平台一致性校验
+      resolved_ver: ${{ steps.resolve.outputs.ossl_ver }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: 解析产库版本
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT_VER="${{ github.event.inputs.openssl-version }}"
+          if [[ -n "$INPUT_VER" ]]; then
+            OSSL_VER="$INPUT_VER"
+          else
+            # 留空自动取官方最新 Release(注7): 与 OpensslVendorPR 校验同源
+            LATEST_TAG="$(curl --fail --location --retry 3 --retry-delay 5 -sS \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/openssl/openssl/releases/latest" \
+              | grep -oE '"tag_name": *"[^"]+"' | sed -E 's/^"tag_name": *"([^"]+)"$/\1/')"
+            OSSL_VER="${LATEST_TAG#openssl-}"
+            echo "未指定 openssl-version, 自动取官方最新 Release: $OSSL_VER（$LATEST_TAG）"
+          fi
+          if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::openssl-version 格式非法: $OSSL_VER（应为 X.Y.Z, 不带 v/openssl- 前缀）"
+            exit 1
+          fi
+          echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
+          echo "ossl_ver=$OSSL_VER" >> "$GITHUB_OUTPUT"
 
       - name: 下载并解压 OpenSSL 源码
         id: src
         shell: bash
         run: |
           set -euo pipefail
-          if ! printf '%s' "$OSSL_VER" | grep -qE '^3\.[0-9]+\.[0-9]+$'; then
-            echo "::error::openssl-version 格式非法: $OSSL_VER（应为 3.x.y）"
-            exit 1
-          fi
           cd "$RUNNER_TEMP"
           rm -rf openssl-src "openssl-$OSSL_VER.tar.gz" "openssl-$OSSL_VER.tar.gz.sha256"
           curl --fail --location --retry 3 --retry-delay 5 \
@@ -984,25 +1025,44 @@ jobs:
     needs: OpensslWin
     runs-on: macos-15-intel
     timeout-minutes: 40
-    env:
-      # inputs 上下文仅 dispatch 事件可用 → 统一经 github.event.inputs 读取, PR 事件回退默认值
-      OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
     outputs:
       # 源码包 SHA256: 供 OpensslVendorPR 做四平台独立下载一致性溯源
       tarball_sha256: ${{ steps.build.outputs.tarball_sha256 }}
+      # 实际解析版本(指定输入或自动取最新): 供 OpensslVendorPR 做四平台一致性校验
+      resolved_ver: ${{ steps.resolve.outputs.ossl_ver }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: 解析产库版本
+        id: resolve
+        run: |
+          set -euo pipefail
+          INPUT_VER="${{ github.event.inputs.openssl-version }}"
+          if [[ -n "$INPUT_VER" ]]; then
+            OSSL_VER="$INPUT_VER"
+          else
+            # 留空自动取官方最新 Release(注7): 与 OpensslVendorPR 校验同源
+            LATEST_TAG="$(curl --fail --location --retry 3 --retry-delay 5 -sS \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/openssl/openssl/releases/latest" \
+              | grep -oE '"tag_name": *"[^"]+"' | sed -E 's/^"tag_name": *"([^"]+)"$/\1/')"
+            OSSL_VER="${LATEST_TAG#openssl-}"
+            echo "未指定 openssl-version, 自动取官方最新 Release: $OSSL_VER（$LATEST_TAG）"
+          fi
+          if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::openssl-version 格式非法: $OSSL_VER（应为 X.Y.Z, 不带 v/openssl- 前缀）"
+            exit 1
+          fi
+          echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
+          echo "ossl_ver=$OSSL_VER" >> "$GITHUB_OUTPUT"
 
       - name: 编译 OpenSSL（arm64 ≈8 分钟）
         id: build
         run: |
           set -euo pipefail
           TARGET=darwin64-arm64-cc
-          if ! printf '%s' "$OSSL_VER" | grep -qE '^3\.[0-9]+\.[0-9]+$'; then
-            echo "::error::openssl-version 格式非法: $OSSL_VER（应为 3.x.y）"
-            exit 1
-          fi
           # 与主构建一致的部署目标, 防止 SDK 差异引入更高系统版本依赖
           export MACOSX_DEPLOYMENT_TARGET=11.0
           cd "$RUNNER_TEMP"
@@ -1059,25 +1119,44 @@ jobs:
     needs: OpensslMacosArm64
     runs-on: macos-15-intel
     timeout-minutes: 40
-    env:
-      # inputs 上下文仅 dispatch 事件可用 → 统一经 github.event.inputs 读取, PR 事件回退默认值
-      OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
     outputs:
       # 源码包 SHA256: 供 OpensslVendorPR 做四平台独立下载一致性溯源
       tarball_sha256: ${{ steps.build.outputs.tarball_sha256 }}
+      # 实际解析版本(指定输入或自动取最新): 供 OpensslVendorPR 做四平台一致性校验
+      resolved_ver: ${{ steps.resolve.outputs.ossl_ver }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: 解析产库版本
+        id: resolve
+        run: |
+          set -euo pipefail
+          INPUT_VER="${{ github.event.inputs.openssl-version }}"
+          if [[ -n "$INPUT_VER" ]]; then
+            OSSL_VER="$INPUT_VER"
+          else
+            # 留空自动取官方最新 Release(注7): 与 OpensslVendorPR 校验同源
+            LATEST_TAG="$(curl --fail --location --retry 3 --retry-delay 5 -sS \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/openssl/openssl/releases/latest" \
+              | grep -oE '"tag_name": *"[^"]+"' | sed -E 's/^"tag_name": *"([^"]+)"$/\1/')"
+            OSSL_VER="${LATEST_TAG#openssl-}"
+            echo "未指定 openssl-version, 自动取官方最新 Release: $OSSL_VER（$LATEST_TAG）"
+          fi
+          if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::openssl-version 格式非法: $OSSL_VER（应为 X.Y.Z, 不带 v/openssl- 前缀）"
+            exit 1
+          fi
+          echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
+          echo "ossl_ver=$OSSL_VER" >> "$GITHUB_OUTPUT"
 
       - name: 编译 OpenSSL（x64 ≈8 分钟）
         id: build
         run: |
           set -euo pipefail
           TARGET=darwin64-x86_64-cc
-          if ! printf '%s' "$OSSL_VER" | grep -qE '^3\.[0-9]+\.[0-9]+$'; then
-            echo "::error::openssl-version 格式非法: $OSSL_VER（应为 3.x.y）"
-            exit 1
-          fi
           # 与主构建一致的部署目标, 防止 SDK 差异引入更高系统版本依赖
           export MACOSX_DEPLOYMENT_TARGET=11.0
           cd "$RUNNER_TEMP"
@@ -1143,7 +1222,8 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
+      # 实产版本取自产库四连解析结果(指定输入或自动取最新), 与产物同源
+      OSSL_VER: ${{ needs.OpensslLinux.outputs.resolved_ver }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: 检出仓库
@@ -1155,6 +1235,15 @@ jobs:
       - name: 校验所产版本为官方最新 Release
         run: |
           set -euo pipefail
+          # 四平台解析版本一致性(供应链): 四连必须同版本(产库期间官方 latest 变动时此校验兜底)
+          V_WIN="${{ needs.OpensslWin.outputs.resolved_ver }}"
+          V_ARM="${{ needs.OpensslMacosArm64.outputs.resolved_ver }}"
+          V_X64="${{ needs.OpensslMacosX64.outputs.resolved_ver }}"
+          if [[ -z "$OSSL_VER" || "$OSSL_VER" != "$V_WIN" || "$OSSL_VER" != "$V_ARM" || "$OSSL_VER" != "$V_X64" ]]; then
+            echo "::error::四平台解析版本不一致或缺失（供应链异常）:"
+            echo "  linux=$OSSL_VER windows=$V_WIN macos-arm64=$V_ARM macos-x64=$V_X64"
+            exit 1
+          fi
           # 最新版本强制(供应链, 注7): 查询走 openssl/openssl 官方仓库(符合来源政策), 防止产旧版本入库
           LATEST_TAG="$(curl --fail --location --retry 3 --retry-delay 5 -sS \
             -H "Authorization: Bearer $GH_TOKEN" \
