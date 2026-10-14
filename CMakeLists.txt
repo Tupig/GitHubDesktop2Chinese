@@ -174,11 +174,17 @@ if(WIN32)
     endif()
 elseif(APPLE)
     # 链接内置 OpenSSL 静态库（third_party/openssl-macos-*，配置段已按架构选定；
-    # libssl 依赖 libcrypto，顺序不可颠倒）
+    # libssl 依赖 libcrypto，顺序不可颠倒；
+    # cpp-httplib 0.61 起 SSLClient::load_certs() 在 macOS 经 Security/CoreFoundation
+    # 从钥匙串读取系统根证书，需链接这两个系统框架）
+    find_library(COREFOUNDATION_FW CoreFoundation REQUIRED)
+    find_library(SECURITY_FW Security REQUIRED)
     target_link_libraries(GitHubDesktop2Chinese PRIVATE
         ${GHD2C_OPENSSL_ROOT}/lib/libssl.a
         ${GHD2C_OPENSSL_ROOT}/lib/libcrypto.a
-        Threads::Threads)
+        Threads::Threads
+        ${COREFOUNDATION_FW}
+        ${SECURITY_FW})
 else()
     # 链接内置 OpenSSL 静态库（third_party/openssl-linux-x64，配置段已校验存在；
     # libssl 依赖 libcrypto，顺序不可颠倒；CMAKE_DL_LIBS 补齐 dlopen 动态加载
