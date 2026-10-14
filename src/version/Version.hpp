@@ -35,7 +35,9 @@ public:
 	}
 
     Version(int major, int minor, int revision, Status status = Status::Release, int betaversion = 0)
-    : major(major), minor(minor), revision(revision), status(status), betaversion(betaversion)
+    // #134: 初始化列表顺序须与成员声明顺序一致(-Wreorder/-Wreorder-ctor):
+    // betaversion(L20) 声明在 status(L21) 之前
+    : major(major), minor(minor), revision(revision), betaversion(betaversion), status(status)
     {
         valid = true;
     }

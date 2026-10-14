@@ -11,15 +11,36 @@ endif()
 
 project ("GitHubDesktop2Chinese")
 
+# ── #134: 裸 cmake 无 preset 时兜底 Release（否则得到无优化无 NDEBUG 的裸构建）──
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "构建类型" FORCE)
+endif()
+
 # ── MSVC 专用编译/链接选项（必须在 project() 之后：GCC/Clang 会把 /xxx 当输入文件，不能无条件加）──
 if(MSVC)
     # 中文源码与执行字符集按 UTF-8 处理
     add_compile_options(/utf-8)
-    # Debug 需要 /bigobj；Release 生成 PDB 并启用链接器调试信息
-    add_compile_options($<$<CONFIG:Debug>:/bigobj> $<$<CONFIG:Release>:/Zi>)
+    # #134: 标准一致性模式（两阶段名字查找等诊断开启，模板重库误用更易暴露）
+    add_compile_options(/permissive-)
+    # #134: fmt 9.1(spdlog 1.11 bundled) 在 _SECURE_SCL=1 时启用 stdext::checked_array_iterator，
+    # 而 VS2026 STL 已将其移除、yvals.h 在 Debug 下默认 _SECURE_SCL=1 → Debug 必然编译失败。
+    # 预定义 0 让 fmt 走裸指针分支(= fmt 10+ 行为)；_ITERATOR_DEBUG_LEVEL 由
+    # _HAS_ITERATOR_DEBUGGING 推导不受影响，Debug 迭代器校验完整保留
+    add_compile_definitions(_SECURE_SCL=0)
+    # #134: 提升告警级别；/external:W0 将 SYSTEM 头(third_party/openssl)降回 W0 不刷屏
+    add_compile_options(/W4 /external:W0)
+    # #134: /bigobj 全配置（Release 模板实例化膨胀同样可能触发 C1169）；Release 生成 PDB
+    add_compile_options(/bigobj $<$<CONFIG:Release>:/Zi>)
     add_link_options($<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF>)
     # OpenSSL 静态库不含 PDB，LNK4099 为已知噪音：显式忽略，保证构建零告警（#92）
     add_link_options(/ignore:4099)
+else()
+    # #134: GCC/Clang 高告警级别（third_party SYSTEM 头按 -isystem 抑制）
+    add_compile_options(-Wall -Wextra)
+    # #134: fmt 9.1(spdlog 1.11 bundled) 继承 C++17 弃用的 std::iterator，
+    # clang 在用户 TU 实例化点仍会报 deprecated（-isystem 不挡实例化诊断）。
+    # 降级为普通警告（非 error）保持 CI 可过；升级 spdlog 后移除
+    add_compile_options(-Wno-error=deprecated-declarations)
 endif()
 
 # 本项目仅支持 64 位架构（x64 / arm64 / x86_64 均可，指针宽度为 8）。
@@ -35,10 +56,6 @@ add_definitions(-DFILEVERSION="${FILE_VERSION}")
 else()
 add_definitions(-DFILEVERSION="0.0.0-Dev.0")
 endif()
-
-include_directories(src)
-# SYSTEM：第三方头文件（spdlog/fmt/CLI11）告警不归本仓管控，GCC/Clang 按 -isystem 抑制（#92）
-include_directories(SYSTEM third_party/include)
 
 if(WIN32)
     # ── Windows: OpenSSL 3.5.9 LTS 静态库（随仓库提交于 third_party/openssl/{include,lib}）──
@@ -65,8 +82,6 @@ if(WIN32)
         endif()
     endforeach()
 
-    # 包含 openssl 的头文件
-    include_directories("${GHD2C_OPENSSL_ROOT}/include")
 elseif(APPLE)
     # ── macOS: OpenSSL 3.5.9 LTS 静态库（随仓库提交于 third_party/openssl-macos-{x64,arm64}）──
     # 库由主工作流 ghdesktop2chinese.yml 的 vendor 任务从官方源码构建（tag openssl-3.5.9，
@@ -103,7 +118,6 @@ elseif(APPLE)
         endif()
     endforeach()
 
-    include_directories("${GHD2C_OPENSSL_ROOT}/include")
     find_package(Threads REQUIRED)
 else()
     # ── Linux: OpenSSL 3.5.9 LTS 静态库（随仓库提交于 third_party/openssl-linux-x64）──
@@ -128,13 +142,20 @@ else()
         endif()
     endforeach()
 
-    include_directories("${GHD2C_OPENSSL_ROOT}/include")
     find_package(Threads REQUIRED)
 endif()
 
 # 将源代码添加到此项目的可执行文件。
 add_executable (GitHubDesktop2Chinese "src/GitHubDesktop2Chinese.cpp")
 
+# ── #134: include 全部 target 级（原 include_directories 目录级会污染后续 target）──
+# 私有源码目录
+target_include_directories(GitHubDesktop2Chinese PRIVATE ${PROJECT_SOURCE_DIR}/src)
+# SYSTEM：第三方头（spdlog/fmt/CLI11/openssl）告警不归本仓管控；
+# MSVC 按 /external:I + /external:W0、GCC/Clang 按 -isystem 抑制（#92/#134）
+target_include_directories(GitHubDesktop2Chinese SYSTEM PRIVATE
+    ${PROJECT_SOURCE_DIR}/third_party/include
+    "${GHD2C_OPENSSL_ROOT}/include")
 
 if(WIN32)
     # 链接OpenSSL静态库（third_party/openssl 仓库内 x64 静态库）
@@ -180,6 +201,7 @@ set_property(TARGET GitHubDesktop2Chinese PROPERTY CXX_STANDARD 20)
 enable_testing()
 add_executable(version_test tests/version_test.cpp)
 set_property(TARGET version_test PROPERTY CXX_STANDARD 20)
+target_include_directories(version_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
 add_test(NAME version_test COMMAND version_test)
 
 # ── 替换引擎等价性测试(#129): 字面量快路径/单遍正则 与 regex_replace 逐字节等价 ──

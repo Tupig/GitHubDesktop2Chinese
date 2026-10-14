@@ -353,8 +353,9 @@ jobs:
           chcp 65001 | Out-Null
           $ver = if ($env:RELEASE_VERSION) { "v$env:RELEASE_VERSION" } else { "ci-$env:CI_SHA" }
           # CMake 配置无需联网（OpenSSL 静态库随仓库提交），环境抖动时自动重试
+          # #134: CI 告警即错（/W4/-Wall -Wextra 基础上），本地构建不加以降低摩擦
           for ($attempt = 1; $attempt -le 3; $attempt++) {
-            cmake -B build -A x64 "-DFILE_VERSION=$ver"
+            cmake -B build -A x64 "-DFILE_VERSION=$ver" -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
             if ($LASTEXITCODE -eq 0) { break }
             if ($attempt -ge 3) { Write-Error "CMake 配置连续失败 3 次"; exit 1 }
             Write-Warning "CMake 配置失败(第 $attempt 次)，15 秒后重试"
@@ -380,6 +381,8 @@ jobs:
             EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0")
             EXTRA+=("-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=TRUE")
           fi
+          # #134: CI 告警即错（-Wall -Wextra 基础上），本地构建不加以降低摩擦
+          EXTRA+=("-DCMAKE_COMPILE_WARNING_AS_ERROR=ON")
           for attempt in 1 2 3; do
             if cmake -B build -DCMAKE_BUILD_TYPE="$BUILD_TYPE" "-DFILE_VERSION=$VER" ${EXTRA[@]+"${EXTRA[@]}"}; then
               break
