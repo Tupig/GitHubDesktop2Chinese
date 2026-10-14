@@ -71,9 +71,9 @@ def check_array(name, arr):
             warnings.append(f"{name} 重复查找项: {pat!r} (index {seen[pat]} 与 {i})")
         else:
             seen[pat] = i
-        # ReDoS 启发式(仅告警不阻断, 规则来自 regex-blacklist.json): 嵌套量词(如 (a+)+ 、 (.*x)* )在长文本上可能灾难性回溯卡死加载器
+        # ReDoS 启发式(命中阻断, #128): 嵌套量词(如 (a+)+ 、 (.*x)* )在长文本上可能灾难性回溯卡死加载器, 阻止合入
         if redos_heuristic and re.search(redos_heuristic, pat):
-            warnings.append(f"{name}[{i}] 疑似灾难性回溯(嵌套量词), 请改写该正则: {pat!r}")
+            errors.append(f"{name}[{i}] 疑似灾难性回溯(嵌套量词), 请改写该正则: {pat!r}")
         # 译文问句风格: 去掉尾部引号后以 半角? 收尾且 ? 前为汉字 → 建议全角？
         # (JS 三元/正则语法的 ? 不满足"以 ? 收尾"或 ? 前非汉字, 不会误报)
         t = item[1].rstrip("\"'")
@@ -107,8 +107,26 @@ else:
         # 应用侧按字面量精确匹配这两个取值, 其它值整条 select 不生效(静默跳过)
         if isinstance(sel.get("replaceFile"), str) and sel["replaceFile"] not in ("main.js", "renderer.js"):
             errors.append(f"select[{si}] replaceFile 取值非法: {sel['replaceFile']!r}（仅允许 'main.js' / 'renderer.js'）")
+        # select[].replace 的正则与主映射数组同等校验(#128): 应用侧 ApplySelectForFile 同样消费这些 pattern
         if not isinstance(sel.get("replace"), list):
             errors.append(f"select[{si}] replace 应为数组")
+        else:
+            for ri, row in enumerate(sel["replace"]):
+                if not isinstance(row, list) or len(row) < 2 or not all(isinstance(x, str) for x in row):
+                    errors.append(f"select[{si}].replace[{ri}] 应为至少 2 个字符串的数组")
+                    continue
+                pat = row[0]
+                if not pat or pat == '""':
+                    continue
+                for rx, why in blacklist:
+                    if re.search(rx, pat):
+                        errors.append(f"select[{si}].replace[{ri}] std::regex 不兼容语法({why}): {pat!r}")
+                try:
+                    re.compile(pat)
+                except re.error as e:
+                    errors.append(f"select[{si}].replace[{ri}] 非法正则: {pat!r} -> {e}")
+                if redos_heuristic and re.search(redos_heuristic, pat):
+                    errors.append(f"select[{si}].replace[{ri}] 疑似灾难性回溯(嵌套量词), 请改写该正则: {pat!r}")
 
 print(f"映射项统计: main={len(data.get('main', []))} renderer={len(data.get('renderer', []))}")
 if warnings:

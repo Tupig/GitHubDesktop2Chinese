@@ -26,7 +26,8 @@ const _BLACKLIST_JSON = JSON.parse(
   fs.readFileSync(new URL('../regex-blacklist.json', import.meta.url), 'utf8'),
 );
 const STD_REGEX_BLACKLIST = _BLACKLIST_JSON.rules.map((r) => ({ re: new RegExp(r.regex), why: r.why }));
-// ReDoS 启发式(仅告警不阻断): 规则与 CI 的 tools/ci/check-localization.py 共用 regex-blacklist.json 单一事实来源(#119)
+// ReDoS 启发式(报告语义, 不参与 ok 判定; CI json-quality 侧已升级为命中阻断 #128):
+// 规则与 CI 的 tools/ci/check-localization.py 共用 regex-blacklist.json 单一事实来源(#119)
 const REDOS_HEURISTIC = _BLACKLIST_JSON.redos_heuristic?.regex
   ? new RegExp(_BLACKLIST_JSON.redos_heuristic.regex)
   : null;
