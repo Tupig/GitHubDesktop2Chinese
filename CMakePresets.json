@@ -42,7 +42,8 @@
             "displayName": "x64 Debug + ASan",
             "inherits": "x64-debug",
             "cacheVariables": {
-                "CMAKE_CXX_FLAGS": "/fsanitize=address"
+                "CMAKE_CXX_FLAGS": "/EHsc /GR /fsanitize=address",
+                "CMAKE_MSVC_DEBUG_INFORMATION_FORMAT": "ProgramDatabase"
             }
         }
     ],

@@ -39,9 +39,9 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 --------------------------------------------------------------------------------
-2. cpp-httplib 0.15.3 — MIT
+2. cpp-httplib 0.61.0 — MIT
 --------------------------------------------------------------------------------
-Copyright (c) 2024 Yuji Hirose
+Copyright (c) 2026 Yuji Hirose
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
