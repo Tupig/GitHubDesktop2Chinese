@@ -45,7 +45,7 @@ Job 依赖关系：`json-quality` / `encoding-check` / `tools-test` / `codeql` /
 | `sync-wiki` | push main / 手动 auto、release | 检测 `docs/wiki/**` 变更后将文档镜像同步到 GitHub Wiki（见[Wiki 自动同步](#wiki-自动同步)） |
 | `build` | PR / push / tag / 定时 / 手动 auto、build、release；无差异的定时 / push main 跳过（见[构建差异检测](#构建差异检测构建跳过)） | **四目标构建矩阵 + 产物功能测试**：Windows x64、macOS x64 / arm64（单架构包，静态链接 OpenSSL + strip/LTO 裁剪）、Linux x64；`fail-fast` 关闭，单平台失败不取消其余平台 |
 | `build-skip-notice` | 仅无差异的定时 / push main | 在 Run 摘要 / notice / 日志中输出跳过原因（skipped job 自身无日志，故设独立 job 说明） |
-| `vendor-macos` / `vendor-linux` / `vendor-windows` | PR 打 `vendor-openssl` 标签 / 手动 `vendor` | 产库 OpenSSL 静态库（三平台 artifact，保留 7 天），供维护者下载后提交 `third_party/`，构建期零下载零编译 |
+| `vendor-linux` / `vendor-windows` / `vendor-macos` | PR 打 `vendor-openssl` 标签 / 手动 `vendor` | 产库 OpenSSL 静态库（三平台 artifact，保留 7 天），供维护者下载后提交 `third_party/`，构建期零下载零编译 |
 | `release` | push main（有变更）/ tag `v*` / 定时（有变更）/ 手动 auto（main，有变更）、release（main） | 发布，见下节 |
 
 ## 发布规则
@@ -210,7 +210,7 @@ Job dependencies: `json-quality` / `encoding-check` / `tools-test` / `codeql` / 
 | `sync-wiki` | push main / manual auto, release | Mirrors `docs/wiki/**` to the GitHub Wiki after detecting changes (see [Automatic Wiki Sync](#automatic-wiki-sync)) |
 | `build` | PR / push / tag / schedule / manual auto, build, release; skipped for unchanged schedule / push main runs (see [Build Diff Detection](#build-diff-detection-build-skipping)) | **Four-target build matrix + artifact functional tests**: Windows x64, macOS x64 / arm64 (single-arch packages, statically linked OpenSSL + strip/LTO trimming), Linux x64; `fail-fast` disabled so a single-platform failure doesn't cancel the others |
 | `build-skip-notice` | Only unchanged schedule / push main runs | Posts the skip reason in the run summary / notices / logs (skipped jobs produce no logs of their own, hence the standalone job) |
-| `vendor-macos` / `vendor-linux` / `vendor-windows` | PR labeled `vendor-openssl` / manual `vendor` | Vendor OpenSSL static libraries (three-platform artifacts, retained 7 days) for maintainers to download and commit under `third_party/`; zero downloads or compilation at build time |
+| `vendor-linux` / `vendor-windows` / `vendor-macos` | PR labeled `vendor-openssl` / manual `vendor` | Vendor OpenSSL static libraries (three-platform artifacts, retained 7 days) for maintainers to download and commit under `third_party/`; zero downloads or compilation at build time |
 | `release` | push main (with changes) / tag `v*` / schedule (with changes) / manual auto (main, with changes), release (main) | The release; see the next section |
 
 ## Release Rules
