@@ -30,3 +30,6 @@ id_rsa*
 id_ed25519*
 # Python 缓存（tools/ci/ 校验脚本运行产物）
 __pycache__/
+
+# 本地交接文档（禁止推送 GitHub：仅存于本地分支 local/handoff 与工作区副本）
+docs/HANDOFF.md
