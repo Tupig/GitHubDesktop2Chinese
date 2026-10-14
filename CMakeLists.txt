@@ -176,3 +176,10 @@ enable_testing()
 add_executable(version_test tests/version_test.cpp)
 set_property(TARGET version_test PROPERTY CXX_STANDARD 20)
 add_test(NAME version_test COMMAND version_test)
+
+# ── 替换引擎等价性测试(#129): 字面量快路径/单遍正则 与 regex_replace 逐字节等价 ──
+# 内嵌用例无外部依赖(CI 必跑); 真实数据对比可选传 argv[1]=json argv[2]=js 本地运行
+add_executable(replace_engine_test tests/replace_engine_test.cpp)
+set_property(TARGET replace_engine_test PROPERTY CXX_STANDARD 20)
+target_include_directories(replace_engine_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
+add_test(NAME replace_engine_test COMMAND replace_engine_test)
