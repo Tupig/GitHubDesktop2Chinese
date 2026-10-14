@@ -168,13 +168,19 @@ namespace utils {
     }
 
     /**
-     * @brief 带瞬时错误重试的 GET(单一代理配置)
+     * @brief 带瞬时错误重试的 GET(单一代理配置), 可选流式响应体上限
      *        瞬时性错误(连接失败/403 限流/429/5xx)自动重试: GitHub API 与资产 CDN 在共享 IP 下偶发
      *        限流场景遵守服务端指示(#132): Retry-After 决定下一轮等待(上限 90s);
      *        primary 限流(匿名 60 次/时)提示配额重置时刻, 避免错误排查方向
-     * @return 最终结果(可能为 nullptr = 连接层失败)
+     * @param body_out 非空时启用流式接收: 响应体经 ContentReceiver 逐块累计到 *body_out,
+     *                 配合 max_bytes 在收满上限时立即断开连接, 不再全量缓冲后检查(#139);
+     *                 为空时保持旧全量行为(res->body 持有响应体)
+     * @param max_bytes 流式模式下的响应体上限(body_out 非空时生效, 应 > 0)
+     * @param oversized 流式模式下超限中止时置 true(出参, 可为空)
+     * @return 最终结果(可能为 nullptr = 连接层失败/流式中止)
      */
-    inline auto GetWithRetry(const std::string& url_host, const std::string& params, const std::pair<std::string, int>& proxy) -> httplib::Result {
+    inline auto GetWithRetry(const std::string& url_host, const std::string& params, const std::pair<std::string, int>& proxy,
+                             std::string* body_out = nullptr, size_t max_bytes = 0, bool* oversized = nullptr) -> httplib::Result {
         httplib::Client cli = MakeHttpClient(url_host, proxy);
         httplib::Result res;
         int wait_sec = kHttpRetryDelaySec;
@@ -184,7 +190,32 @@ namespace utils {
                 spdlog::warn("请求 {}{} 失败(第 {} 次), {} 秒后重试", url_host, params, attempt - 1, wait_sec);
                 std::this_thread::sleep_for(std::chrono::seconds(wait_sec));
             }
-            res = cli.Get(params);
+            if(body_out != nullptr) {
+                // 流式接收(#139): 每轮重试重置累计状态, 超限立即返回 false 断开连接
+                body_out->clear();
+                if(oversized != nullptr) {
+                    *oversized = false;
+                }
+                uint64_t received_bytes = 0;
+                res = cli.Get(params, httplib::Headers{},
+                [&](const char* data, size_t data_length) {
+                    received_bytes += data_length;
+                    if(max_bytes > 0 && received_bytes > max_bytes) {
+                        if(oversized != nullptr) {
+                            *oversized = true;
+                        }
+                        return false;
+                    }
+                    body_out->append(data, data_length);
+                    return true;
+                });
+                if(oversized != nullptr && *oversized) {
+                    break; // 超限为确定性失败, 重试必然同样超限
+                }
+            }
+            else {
+                res = cli.Get(params);
+            }
             if(res && res->status == httplib::StatusCode::OK_200) break;
             if(res && res->status != 403 && res->status != 429 && res->status < 500) break; // 非瞬时性错误, 不重试
             if(res) {
@@ -214,25 +245,34 @@ namespace utils {
      * @return 是否成功
      */
     inline auto ReadHttpDataString(std::string url_host, std::string params, std::string& out, std::pair<std::string, int> proxy = {}) -> bool {
-        httplib::Result res = GetWithRetry(url_host, params, proxy);
+        // 流式响应体上限(#139): 经 ContentReceiver 逐块累计, 收满 32MB 立即断开连接,
+        // 不再让恶意/受损代理把任意大 body 全量灌入内存后才拒绝(原收后检查的缺口)
+        std::string body;
+        bool oversized = false;
+        httplib::Result res = GetWithRetry(url_host, params, proxy, &body, kMaxResponseBytes, &oversized);
+
+        // 超限为服务端/代理侧确定性异常, 不触发代理降级(直连同样会被服务端超限拒绝)
+        if(oversized) {
+            spdlog::warn("请求 {}{} 响应体超过上限({} bytes), 已断开并拒绝", url_host, params, kMaxResponseBytes);
+            out.clear();
+            return false;
+        }
 
         // 失效代理直连降级(#133): 代理进程退出后的系统/环境变量代理残留(中文用户高频场景)
         // 会让经代理请求全部连接层失败, 最坏阻塞数分钟; 此时自动降级直连重试
         if(proxy.second && !res) {
             spdlog::warn("经代理 {}:{} 请求失败(代理不可达), 已尝试直连", proxy.first, proxy.second);
-            res = GetWithRetry(url_host, params, {});
+            res = GetWithRetry(url_host, params, {}, &body, kMaxResponseBytes, &oversized);
+            if(oversized) {
+                spdlog::warn("请求 {}{} 响应体超过上限({} bytes), 已断开并拒绝", url_host, params, kMaxResponseBytes);
+                out.clear();
+                return false;
+            }
         }
 
         if (res) {
             if (res->status == httplib::StatusCode::OK_200) {
-                // 响应体上限: 防御异常/恶意服务端返回超大内容(正常 API/文本响应远小于此);
-                // 注: httplib 已在内存接收响应, 此处为接受边界而非下载防线
-                if(res->body.size() > kMaxResponseBytes) {
-                    spdlog::warn("请求 {}{} 响应体过大({} bytes), 已拒绝", url_host, params, res->body.size());
-                    out.clear();
-                    return false;
-                }
-                out = res->body;
+                out = std::move(body);
                 return true;
             }
             spdlog::warn("请求 {}{} 返回状态码 {}", url_host, params, res->status);
