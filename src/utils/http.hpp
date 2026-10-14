@@ -12,11 +12,14 @@
 #include <cstdint>
 #include <cctype>
 #include <cstdlib>
+#include <ctime>
+#include <algorithm>
 #include <thread>
 #include <chrono>
 #include <memory>
 #ifdef _WIN32
 #include <windows.h>
+#include <shellapi.h> // ShellExecuteW(LaunchReplaceAndRestart): 显式包含, 不依赖 windows.h 恰好间接拉入
 #else
 #include <unistd.h>
 #include <fcntl.h>
@@ -41,8 +44,10 @@ namespace utils {
     inline constexpr size_t kHashBufferSize = 64 * 1024;
     // 瞬时性错误(连接失败/403/429/5xx)自动重试次数上限
     inline constexpr int kHttpRetryLimit = 4;
-    // 瞬时性错误重试间隔(秒)
+    // 瞬时性错误重试间隔(秒); 服务端 Retry-After 更大时以其为准
     inline constexpr int kHttpRetryDelaySec = 2;
+    // 遵守服务端 Retry-After 的等待上限(秒): 防服务端异常值把交互卡死数分钟(#132)
+    inline constexpr int kRetryAfterCapSec = 90;
     // 下载失败重试次数上限
     inline constexpr int kDownloadRetryLimit = 3;
     // 下载失败重试间隔(秒)
@@ -118,6 +123,50 @@ namespace utils {
         return hex;
     }
 
+    // Retry-After 等待上限内的解析结果(#132): -1 表示头缺失或不可解析
+    inline auto ParseRetryAfter(const httplib::Response& resp) -> int {
+        if(!resp.has_header("Retry-After")) {
+            return -1;
+        }
+        const std::string raw = resp.get_header_value("Retry-After");
+        // 仅接受纯秒数(GitHub 限流响应的格式); HTTP-date 形式走默认间隔
+        char* end = nullptr;
+        const long v = std::strtol(raw.c_str(), &end, 10);
+        if(end == nullptr || end == raw.c_str() || *end != '\0' || v <= 0) {
+            return -1;
+        }
+        return static_cast<int>(std::min<long>(v, kRetryAfterCapSec));
+    }
+
+    // 解析 X-RateLimit-Reset(unix 秒)为本地 HH:MM 字符串; 失败返回空串(#132)
+    inline auto FormatRateLimitReset(const httplib::Response& resp) -> std::string {
+        if(!resp.has_header("X-RateLimit-Reset")) {
+            return "";
+        }
+        const std::string raw = resp.get_header_value("X-RateLimit-Reset");
+        char* end = nullptr;
+        const long long v = std::strtoll(raw.c_str(), &end, 10);
+        if(end == nullptr || end == raw.c_str() || *end != '\0' || v <= 0) {
+            return "";
+        }
+        const std::time_t t = static_cast<std::time_t>(v);
+        std::tm tm_buf{};
+#ifdef _WIN32
+        if(localtime_s(&tm_buf, &t) != 0) {
+            return "";
+        }
+#else
+        if(localtime_r(&t, &tm_buf) == nullptr) {
+            return "";
+        }
+#endif
+        char buf[16] = {};
+        if(std::strftime(buf, sizeof(buf), "%H:%M", &tm_buf) == 0) {
+            return "";
+        }
+        return buf;
+    }
+
     /**
      * @brief 从网络上读取数据
      * @param url_host 网络主机
@@ -129,15 +178,34 @@ namespace utils {
         httplib::Client cli = MakeHttpClient(url_host, proxy);
 
         // 瞬时性错误(连接失败/403 限流/429/5xx)自动重试: GitHub API 与资产 CDN 在共享 IP 下偶发此类错误
+        // 限流场景遵守服务端指示(#132): Retry-After 决定下一轮等待(上限 90s);
+        // primary 限流(匿名 60 次/时)提示配额重置时刻, 避免错误排查方向
         httplib::Result res;
+        int wait_sec = kHttpRetryDelaySec;
+        std::string rate_limit_reset;
         for(int attempt = 1; attempt <= kHttpRetryLimit; attempt++) {
             if(attempt > 1) {
-                spdlog::warn("请求 {}{} 失败(第 {} 次), {} 秒后重试", url_host, params, attempt - 1, kHttpRetryDelaySec);
-                std::this_thread::sleep_for(std::chrono::seconds(kHttpRetryDelaySec));
+                spdlog::warn("请求 {}{} 失败(第 {} 次), {} 秒后重试", url_host, params, attempt - 1, wait_sec);
+                std::this_thread::sleep_for(std::chrono::seconds(wait_sec));
             }
             res = cli.Get(params);
             if(res && res->status == httplib::StatusCode::OK_200) break;
             if(res && res->status != 403 && res->status != 429 && res->status < 500) break; // 非瞬时性错误, 不重试
+            if(res) {
+                const int retry_after = ParseRetryAfter(*res);
+                if(retry_after > 0) {
+                    wait_sec = retry_after;
+                }
+                rate_limit_reset = FormatRateLimitReset(*res);
+                if(!rate_limit_reset.empty()) {
+                    spdlog::warn("GitHub API 配额已耗尽, 将于 {} 重置(匿名限额 60 次/时)", rate_limit_reset);
+                }
+            }
+        }
+
+        // 限流导致的失败在最终错误中附加重置时刻, 纠正"检查网络和代理"的误导排查方向
+        if(res && res->status != httplib::StatusCode::OK_200 && !rate_limit_reset.empty()) {
+            spdlog::warn("请求 {}{} 因 GitHub API 配额限流失败, 配额将于 {} 重置", url_host, params, rate_limit_reset);
         }
 
         if (res) {
