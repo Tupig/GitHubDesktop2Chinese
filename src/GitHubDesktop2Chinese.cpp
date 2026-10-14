@@ -64,10 +64,11 @@ constexpr const char kReleasesPageUrl[] = "https://github.com/Tupig/GitHubDeskto
 constexpr const char kRepoApiPath[] = "/repos/Tupig/GitHubDesktop2Chinese";                            // 本仓库信息
 constexpr const char kLatestReleaseApiPath[] = "/repos/Tupig/GitHubDesktop2Chinese/releases/latest";   // 本仓库最新 Release
 constexpr const char kContributorsApiPath[] = "/repos/Tupig/GitHubDesktop2Chinese/contributors";       // 本仓库贡献者列表
-constexpr const char kDesktopLatestReleaseApiPath[] = "/repos/desktop/desktop/releases/latest";        // GitHub Desktop 上游最新 Release
+// #134: 以下两常量仅 _WIN32 注册表分支使用, macOS/Linux 下未用(-Wunused-const-variable)
+[[maybe_unused]] constexpr const char kDesktopLatestReleaseApiPath[] = "/repos/desktop/desktop/releases/latest";        // GitHub Desktop 上游最新 Release
 constexpr const char kLocalizationJsonRawPath[] = "/Tupig/GitHubDesktop2Chinese/main/json/localization.json"; // 远程汉化映射文件
 constexpr int kMaxContributorsShown = 10;                          // 贡献者列表展示条数上限(完整获取, 仅限展示)
-constexpr std::size_t kDesktopTagPrefixLen = 8;                    // GitHub Desktop 官方 tag 前缀 "release-" 的长度
+[[maybe_unused]] constexpr std::size_t kDesktopTagPrefixLen = 8;                    // GitHub Desktop 官方 tag 前缀 "release-" 的长度
 
 versionparse::Version FileVer{0,0,0};
 
