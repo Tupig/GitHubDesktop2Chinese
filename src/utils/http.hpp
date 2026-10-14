@@ -168,18 +168,14 @@ namespace utils {
     }
 
     /**
-     * @brief 从网络上读取数据
-     * @param url_host 网络主机
-     * @param params 请求链接后缀
-     * @param out 成功后输出读取到的数据
-     * @return 是否成功
+     * @brief 带瞬时错误重试的 GET(单一代理配置)
+     *        瞬时性错误(连接失败/403 限流/429/5xx)自动重试: GitHub API 与资产 CDN 在共享 IP 下偶发
+     *        限流场景遵守服务端指示(#132): Retry-After 决定下一轮等待(上限 90s);
+     *        primary 限流(匿名 60 次/时)提示配额重置时刻, 避免错误排查方向
+     * @return 最终结果(可能为 nullptr = 连接层失败)
      */
-    inline auto ReadHttpDataString(std::string url_host, std::string params, std::string& out, std::pair<std::string, int> proxy = {}) -> bool {
+    inline auto GetWithRetry(const std::string& url_host, const std::string& params, const std::pair<std::string, int>& proxy) -> httplib::Result {
         httplib::Client cli = MakeHttpClient(url_host, proxy);
-
-        // 瞬时性错误(连接失败/403 限流/429/5xx)自动重试: GitHub API 与资产 CDN 在共享 IP 下偶发此类错误
-        // 限流场景遵守服务端指示(#132): Retry-After 决定下一轮等待(上限 90s);
-        // primary 限流(匿名 60 次/时)提示配额重置时刻, 避免错误排查方向
         httplib::Result res;
         int wait_sec = kHttpRetryDelaySec;
         std::string rate_limit_reset;
@@ -206,6 +202,25 @@ namespace utils {
         // 限流导致的失败在最终错误中附加重置时刻, 纠正"检查网络和代理"的误导排查方向
         if(res && res->status != httplib::StatusCode::OK_200 && !rate_limit_reset.empty()) {
             spdlog::warn("请求 {}{} 因 GitHub API 配额限流失败, 配额将于 {} 重置", url_host, params, rate_limit_reset);
+        }
+        return res;
+    }
+
+    /**
+     * @brief 从网络上读取数据
+     * @param url_host 网络主机
+     * @param params 请求链接后缀
+     * @param out 成功后输出读取到的数据
+     * @return 是否成功
+     */
+    inline auto ReadHttpDataString(std::string url_host, std::string params, std::string& out, std::pair<std::string, int> proxy = {}) -> bool {
+        httplib::Result res = GetWithRetry(url_host, params, proxy);
+
+        // 失效代理直连降级(#133): 代理进程退出后的系统/环境变量代理残留(中文用户高频场景)
+        // 会让经代理请求全部连接层失败, 最坏阻塞数分钟; 此时自动降级直连重试
+        if(proxy.second && !res) {
+            spdlog::warn("经代理 {}:{} 请求失败(代理不可达), 已尝试直连", proxy.first, proxy.second);
+            res = GetWithRetry(url_host, params, {});
         }
 
         if (res) {
@@ -524,6 +539,19 @@ namespace utils {
                 std::this_thread::sleep_for(std::chrono::seconds(kDownloadRetryDelaySec));
             }
             downloaded = DownloadToFile(url_host, params, proxy, tmp_file, max_size);
+        }
+
+        // 失效代理直连降级(#133): 经代理下载全部失败时降级直连重试一轮
+        // (与 ReadHttpDataString 的降级策略对应; 代理进程退出后的配置残留场景)
+        if(!downloaded && proxy.second) {
+            spdlog::warn("经代理 {}:{} 下载失败(代理不可达), 已尝试直连", proxy.first, proxy.second);
+            for(int attempt = 1; attempt <= kDownloadRetryLimit && !downloaded; attempt++) {
+                if(attempt > 1) {
+                    spdlog::warn("直连下载失败, {} 秒后自动重试(第 {}/{} 次)", kDownloadRetryDelaySec, attempt - 1, kDownloadRetryLimit);
+                    std::this_thread::sleep_for(std::chrono::seconds(kDownloadRetryDelaySec));
+                }
+                downloaded = DownloadToFile(url_host, params, {}, tmp_file, max_size);
+            }
         }
         if(!downloaded) {
             return false;
