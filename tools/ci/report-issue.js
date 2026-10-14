@@ -33,16 +33,23 @@ module.exports = async ({ github, context, core }) => {
     ].join('\n');
 
     // 正文超长防护: GitHub Issue body 上限 65536 字符, 超限会导致创建/更新失败(恰在最需要报告时丢失)
+    // 截断按 code unit 计数(与 API 限制同口径), 但切点落在 UTF-16 代理对中间会产生孤立代理、
+    // 致 GitHub API 422 拒绝(#143), 故切点为高位代理时回退一位按码点边界截断
     const MAX_BODY = 60000;
-    const finalBody = body.length > MAX_BODY
-      ? body.slice(0, MAX_BODY) + '\n\n> ⚠️ 报告过长，已截断；完整内容见工作流日志。\n'
-      : body;
+    let finalBody = body;
+    if (body.length > MAX_BODY) {
+      const lastUnit = body.charCodeAt(MAX_BODY - 1);
+      const cut = (lastUnit >= 0xD800 && lastUnit <= 0xDBFF) ? MAX_BODY - 1 : MAX_BODY;
+      finalBody = body.slice(0, cut) + '\n\n> ⚠️ 报告过长，已截断；完整内容见工作流日志。\n';
+    }
 
+    // 不按 label 过滤(#144): 旧单 label 被人工移除后, labels 过滤会漏查导致重复开单;
+    // 改为列出 open issue 按标题前缀识别(该前缀仅本脚本使用, 误匹配面可控)
     const { data: issues } = await github.rest.issues.listForRepo({
       owner: context.repo.owner,
       repo: context.repo.repo,
       state: 'open',
-      labels: ['auto-maintain'],
+      per_page: 100,
     });
 
     const existing = issues.find(i => i.title.startsWith('[自动维护]'));
