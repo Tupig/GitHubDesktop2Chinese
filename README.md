@@ -621,6 +621,13 @@ Thanks to these excellent open-source projects:
 | WinReg | Windows registry access | [GiovanniDicanio/WinReg](https://github.com/GiovanniDicanio/WinReg) |
 | OpenSSL | SSL/TLS support | [openssl/openssl](https://github.com/openssl/openssl) |
 
+### ⚖️ Third-party license notices
+
+Each Release ships [`THIRD_PARTY_NOTICES.txt`](THIRD_PARTY_NOTICES.txt)
+(copyright lines and license terms for all bundled libraries, as required by
+BSD-3-Clause / Apache-2.0 / MIT for binary redistribution). The same file is
+also available in the repository root.
+
 ## 🏘 Credits
 
 ![Contributors](https://contrib.rocks/image?repo=Tupig/GitHubDesktop2Chinese)
