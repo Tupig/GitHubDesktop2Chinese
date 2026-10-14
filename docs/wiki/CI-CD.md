@@ -32,7 +32,7 @@
 
 ## Job 矩阵
 
-Job 依赖关系：`build` / `build-skip-notice` / `codeql` / `auto-maintain` / `sync-wiki` / `vendor-*` ← `version`；`release` ← `version + build + json-quality + tools-test + encoding-check`。质量门、CodeQL、auto-maintain、sync-wiki 与 vendor 任务相互独立，与 build 并行。**CodeQL 与 auto-maintain 是旁路校验**——手动 `release` 时也会执行（发现问题出 Issue / 告警），但**不阻塞发布**。
+Job 依赖关系：`json-quality` / `encoding-check` / `tools-test` / `codeql` / `auto-maintain` / `sync-wiki` / `build` / `build-skip-notice` / `vendor-*` 均 ← `version`；`release` ← `version + build + json-quality + tools-test + encoding-check`。六个检查/维护类任务（质量校验、编码检查、工具自检、CodeQL、失效检测、Wiki 同步）与构建矩阵同在解析版本号之后执行，定义顺序位于构建产物之前。**CodeQL 与 auto-maintain 是旁路校验**——手动 `release` 时也会执行（发现问题出 Issue / 告警），但**不阻塞发布**。
 
 | Job | 触发 | 内容 |
 | --- | --- | --- |
@@ -41,10 +41,10 @@ Job 依赖关系：`build` / `build-skip-notice` / `codeql` / `auto-maintain` / 
 | `encoding-check` | PR / push / tag / 定时 / 手动 auto、security、release | 源码编码格式门：全量扫描 git 跟踪文本文件要求 UTF-8；GBK / 非 UTF-8 与意外 BOM 以 `::error` 清单 + 非零退出码失败；第三方依赖排除 |
 | `tools-test` | PR / push / tag / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 + Markdown 链接检查（`tools/ci/md-check.py`）+ 单工作流规范校验（`tools/ci/check-workflow.py`，W0-W5） |
 | `codeql` | PR（仅同仓分支，fork PR 不跑——其令牌无 security-events 写权限，上传必失败）/ push main / 手动 auto、security、release | C/C++ 安全扫描（不含定时，节省资源；运行于 Windows runner） |
-| `build` | PR / push / tag / 定时 / 手动 auto、build、release；无差异的定时 / push main 跳过（见[构建差异检测](#构建差异检测构建跳过)） | **四目标构建矩阵 + 产物功能测试**：Windows x64、macOS x64 / arm64（单架构包，静态链接 OpenSSL + strip/LTO 裁剪）、Linux x64；`fail-fast` 关闭，单平台失败不取消其余平台 |
-| `build-skip-notice` | 仅无差异的定时 / push main | 在 Run 摘要 / notice / 日志中输出跳过原因（skipped job 自身无日志，故设独立 job 说明） |
 | `auto-maintain` | push main / 每日定时 / 手动 auto、maintain、release | 失效检测 + 候选提取，自动创建/关闭带 `auto-maintain` 标签的 Issue（详见[自动维护工具](自动维护工具.md#ci-自动维护)） |
 | `sync-wiki` | push main / 手动 auto、release | 检测 `docs/wiki/**` 变更后将文档镜像同步到 GitHub Wiki（见[Wiki 自动同步](#wiki-自动同步)） |
+| `build` | PR / push / tag / 定时 / 手动 auto、build、release；无差异的定时 / push main 跳过（见[构建差异检测](#构建差异检测构建跳过)） | **四目标构建矩阵 + 产物功能测试**：Windows x64、macOS x64 / arm64（单架构包，静态链接 OpenSSL + strip/LTO 裁剪）、Linux x64；`fail-fast` 关闭，单平台失败不取消其余平台 |
+| `build-skip-notice` | 仅无差异的定时 / push main | 在 Run 摘要 / notice / 日志中输出跳过原因（skipped job 自身无日志，故设独立 job 说明） |
 | `vendor-macos` / `vendor-linux` / `vendor-windows` | PR 打 `vendor-openssl` 标签 / 手动 `vendor` | 产库 OpenSSL 静态库（三平台 artifact，保留 7 天），供维护者下载后提交 `third_party/`，构建期零下载零编译 |
 | `release` | push main（有变更）/ tag `v*` / 定时（有变更）/ 手动 auto（main，有变更）、release（main） | 发布，见下节 |
 
@@ -68,7 +68,7 @@ Job 依赖关系：`build` / `build-skip-notice` / `codeql` / `auto-maintain` / 
 - `localization.json`（用户可单独下载映射）；
 - 每个产物的**构建溯源证明**（SLSA provenance），可用 `gh attestation verify <文件> --repo Tupig/GitHubDesktop2Chinese` 校验；
 - Windows 产物的代码签名：配置 SignPath 凭据后自动签名（当前休眠——Foundation 申请未获批，见[代码签名](#代码签名signpath)）；
-- Release 说明：从 [`docs/ReleaseBody.md`](../ReleaseBody.md) 提取**行尾含全角版本标记**（如 `（v0.0.2）`）的变更行拼接（变更行中英成对标注时一并纳入），再附静态的「### 程序说明」段落。未标注或版本号未命中的行不会出现（显示「未找到变更记录」提示），也**不阻断**发布。
+- Release 说明：优先从 [`docs/ReleaseBody.md`](../ReleaseBody.md) 提取**行尾含全角版本标记**（如 `（v0.0.2）`）的变更行拼接（变更行中英成对标注时一并纳入）；当前版本未预置条目时，发布流程**自动提取上一发布版本以来的提交标题**生成变更条目，写入 `docs/ReleaseBody.md` 的 Changelog 段后纳入说明（Release 页会标注「自动提取」）。两者皆未命中才显示「未找到变更记录」提示，均**不阻断**发布。最后附静态的「### 程序说明」段落。
 
 **发布前置门禁**：`release` job 强制依赖 json-quality、encoding-check 与 tools-test 通过——质量门挂了就不会发版；CodeQL 与失效检测在手动 release 时为**旁路执行**（发现问题时告警/开 Issue，不阻塞发布）；Release 创建失败有自动自愈重试。
 
@@ -197,7 +197,7 @@ Scoped permissions: `contents: read`, `issues: write`, `security-events: write` 
 
 ## The Job Matrix
 
-Job dependencies: `build` / `build-skip-notice` / `codeql` / `auto-maintain` / `sync-wiki` / `vendor-*` ← `version`; `release` ← `version + build + json-quality + tools-test + encoding-check`. The quality gates, CodeQL, auto-maintain, sync-wiki, and the vendor jobs are independent of each other and run in parallel with build. **CodeQL and auto-maintain are bypass checks** — they also run on manual `release` (opening Issues / warnings on findings) but **never block the release**.
+Job dependencies: `json-quality` / `encoding-check` / `tools-test` / `codeql` / `auto-maintain` / `sync-wiki` / `build` / `build-skip-notice` / `vendor-*` all ← `version`; `release` ← `version + build + json-quality + tools-test + encoding-check`. The six check/maintenance jobs (quality gate, encoding gate, tool self-test, CodeQL, invalid-entry detection, wiki sync) run after version parsing alongside the build matrix, ordered before the build jobs in the workflow definition. **CodeQL and auto-maintain are bypass checks** — they also run on manual `release` (opening Issues / warnings on findings) but **never block the release**.
 
 | Job | Triggers | Contents |
 | --- | --- | --- |
@@ -206,10 +206,10 @@ Job dependencies: `build` / `build-skip-notice` / `codeql` / `auto-maintain` / `
 | `encoding-check` | PR / push / tag / schedule / manual auto, security, release | Source encoding gate: full scan of git-tracked text files requiring UTF-8; GBK / non-UTF-8 content and unexpected BOMs fail with an explicit `::error` list; third-party dependencies excluded |
 | `tools-test` | PR / push / tag / schedule / manual auto, security, maintain, release | Auto-maintain tool syntax check + unit tests + Markdown link check (`tools/ci/md-check.py`) + single-workflow spec validation (`tools/ci/check-workflow.py`, W0-W5) |
 | `codeql` | PR (same-repo branches only — fork PRs don't run it: their token lacks security-events write permission, so upload would always fail) / push main / manual auto, security, release | C/C++ security scanning (excludes schedule to save resources; runs on a Windows runner) |
-| `build` | PR / push / tag / schedule / manual auto, build, release; skipped for unchanged schedule / push main runs (see [Build Diff Detection](#build-diff-detection-build-skipping)) | **Four-target build matrix + artifact functional tests**: Windows x64, macOS x64 / arm64 (single-arch packages, statically linked OpenSSL + strip/LTO trimming), Linux x64; `fail-fast` disabled so a single-platform failure doesn't cancel the others |
-| `build-skip-notice` | Only unchanged schedule / push main runs | Posts the skip reason in the run summary / notices / logs (skipped jobs produce no logs of their own, hence the standalone job) |
 | `auto-maintain` | push main / daily schedule / manual auto, maintain, release | Invalid-entry detection + candidate extraction, automatically creating/closing Issues labeled `auto-maintain` (see [Auto-Maintain Tool](自动维护工具.md#ci-自动维护)) |
 | `sync-wiki` | push main / manual auto, release | Mirrors `docs/wiki/**` to the GitHub Wiki after detecting changes (see [Automatic Wiki Sync](#automatic-wiki-sync)) |
+| `build` | PR / push / tag / schedule / manual auto, build, release; skipped for unchanged schedule / push main runs (see [Build Diff Detection](#build-diff-detection-build-skipping)) | **Four-target build matrix + artifact functional tests**: Windows x64, macOS x64 / arm64 (single-arch packages, statically linked OpenSSL + strip/LTO trimming), Linux x64; `fail-fast` disabled so a single-platform failure doesn't cancel the others |
+| `build-skip-notice` | Only unchanged schedule / push main runs | Posts the skip reason in the run summary / notices / logs (skipped jobs produce no logs of their own, hence the standalone job) |
 | `vendor-macos` / `vendor-linux` / `vendor-windows` | PR labeled `vendor-openssl` / manual `vendor` | Vendor OpenSSL static libraries (three-platform artifacts, retained 7 days) for maintainers to download and commit under `third_party/`; zero downloads or compilation at build time |
 | `release` | push main (with changes) / tag `v*` / schedule (with changes) / manual auto (main, with changes), release (main) | The release; see the next section |
 
@@ -233,7 +233,7 @@ Job dependencies: `build` / `build-skip-notice` / `codeql` / `auto-maintain` / `
 - `localization.json` (users can download the mapping separately);
 - A **build provenance attestation** (SLSA provenance) for every artifact, verifiable with `gh attestation verify <file> --repo Tupig/GitHubDesktop2Chinese`;
 - Code signing for the Windows artifact: signed automatically once SignPath credentials are configured (currently dormant — the Foundation application was not approved; see [Code Signing](#代码签名signpath));
-- Release notes: change lines extracted from [`docs/ReleaseBody.md`](../ReleaseBody.md) whose **line ends carry the full-width version marker** (e.g. `（v0.0.2）`) are joined (paired Chinese/English changelog lines are included together), followed by the static "### 程序说明" section. Unmarked lines or versions with no hits simply don't appear (a "no changelog found" notice is shown instead) and **never block** the release.
+- Release notes: change lines extracted from [`docs/ReleaseBody.md`](../ReleaseBody.md) whose **line ends carry the full-width version marker** (e.g. `（v0.0.2）`) are joined (paired Chinese/English changelog lines are included together); when no entry is pre-written for the current version, the release flow **auto-extracts commit subjects since the previous release**, writes them into the `docs/ReleaseBody.md` changelog section and includes them (marked "auto-extracted" on the release page). Only when both miss does the "no changelog found" notice appear — neither case **blocks** the release. The static "### 程序说明" section is appended last.
 
 **Release gates**: the `release` job hard-depends on json-quality, encoding-check, and tools-test — a failed quality gate means no release; CodeQL and invalid-entry detection are **bypass checks** on manual releases (warnings/Issues on findings, no blocking); Release creation has automatic self-healing retries.
 
