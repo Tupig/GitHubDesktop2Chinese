@@ -47,10 +47,11 @@
 #   7. OpensslMacosX64    产库 OpenSSL（macOS x64 交叉编译; 同上触发, 原 vendor-macos 矩阵拆分）
 #   8. Release            汇总产物并发布
 #
-#   job 依赖: Version 为根; Build/JsonCheck ← Version; CodeqlScan ← JsonCheck;
+#   job 依赖: Version 为根; Build/JsonCheck ← Version; CodeqlScan ← Version+JsonCheck
+#             (Version 直连为读其 outputs —— GitHub 仅直接 needs 可访问 outputs, 间接依赖不传递);
 #             产库四连串行: OpensslLinux ← CodeqlScan → OpensslWin → OpensslMacosArm64 → OpensslMacosX64,
 #             以 always() + 原 vendor 触发条件串联(不受上游 skip/失败传导, 保持原独立产库语义与低频);
-#             Release ← Build+JsonCheck+CodeqlScan(质量门: 发布前强制过构建/质量/安全门)
+#             Release ← Version+Build+JsonCheck+CodeqlScan(Version 直连同上; 其余三门为发布质量门)
 #   图约束: 全图以 Version 为根连通, 无孤立/不连通任务、无循环、无悬空 needs —— 由 JsonCheck 的
 #           单工作流规范校验（tools/ci/check-workflow.py, W0-W5）强制
 #   链路保证: changed=true(有变更待发版)时 build_changed 恒为 true(强制构建),
@@ -549,7 +550,9 @@ jobs:
   # ═════════════════════════════════════════════════
   CodeqlScan:
     name: CodeQL 安全扫描
-    needs: JsonCheck
+    # 显式直连 Version: GitHub 仅直接 needs 可访问其 outputs(说明块的 build_changed/build_base、
+    # 任务级 if 的 tag 空跑分支), 经 JsonCheck 间接依赖不传递 outputs
+    needs: [Version, JsonCheck]
     # 任务级条件为四块触发并集: 保证相应事件下壳运行, 块内步骤再按各自原条件细分;
     # tag push 时四块条件均不满足 → 空跑成功, 不阻断 Release 的 needs
     if: |
@@ -744,7 +747,7 @@ jobs:
         if: ${{ !cancelled() && needs.Version.outputs.build_changed == 'false' }}
         shell: bash
         env:
-          BUILD_BASE: ${{ needs.version.outputs.build_base }}
+          BUILD_BASE: ${{ needs.Version.outputs.build_base }}
         run: |
           BASE_SHORT="${BUILD_BASE:0:7}"
           {
@@ -1071,7 +1074,9 @@ jobs:
     name: 发布 Release
     # Build/JsonCheck/CodeqlScan 与 Release 同属任务门: 发布前强制过构建/质量/安全门
     # (三者 if 已覆盖发布相关分支, 不会出现 needs 悬空)
-    needs: [Build, JsonCheck, CodeqlScan]
+    # 显式直连 Version: GitHub 仅直接 needs 可访问其 outputs(发布判断 changed / 版本号 / build_base),
+    # 经 Build/JsonCheck/CodeqlScan 间接依赖不传递 outputs
+    needs: [Version, Build, JsonCheck, CodeqlScan]
     # 发布边界: push main 仅在存在构建相关变更时自动补丁发版; 手动 auto/release 仅限 main(防特性分支误发布)
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||

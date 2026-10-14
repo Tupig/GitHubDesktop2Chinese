@@ -32,7 +32,7 @@
 
 ## Job 矩阵
 
-Job 依赖关系：`Build` / `JsonCheck` ← `Version`；`CodeqlScan` ← `JsonCheck`；产库四连 `OpensslLinux` ← `CodeqlScan` → `OpensslWin` → `OpensslMacosArm64` → `OpensslMacosX64`（以 `always()` + 产库触发条件串联，不受上游跳过/失败传导，保持低频独立产库）；`Release` ← `Build + JsonCheck + CodeqlScan`。全图以 `Version` 为根连通、无孤立任务、无循环、无悬空 needs，由单工作流规范校验（`tools/ci/check-workflow.py`，W0-W5）强制。`CodeqlScan` 内四个功能块按各自触发判定独立执行，CodeQL 块失败不阻断后续维护块（`!cancelled()`），但**整个 job 失败会阻断 `Release`**。
+Job 依赖关系：`Build` / `JsonCheck` ← `Version`；`CodeqlScan` ← `Version` + `JsonCheck`；产库四连 `OpensslLinux` ← `CodeqlScan` → `OpensslWin` → `OpensslMacosArm64` → `OpensslMacosX64`（以 `always()` + 产库触发条件串联，不受上游跳过/失败传导，保持低频独立产库）；`Release` ← `Version` + `Build` + `JsonCheck` + `CodeqlScan`。`Version` 的直连边为读取其 outputs（GitHub 仅直接 `needs` 可访问 outputs，间接依赖不传递）；全图以 `Version` 为根连通、无孤立任务、无循环、无悬空 needs，由单工作流规范校验（`tools/ci/check-workflow.py`，W0-W5）强制。`CodeqlScan` 内四个功能块按各自触发判定独立执行，CodeQL 块失败不阻断后续维护块（`!cancelled()`），但**整个 job 失败会阻断 `Release`**。
 
 | Job | 触发 | 内容 |
 | --- | --- | --- |
@@ -195,7 +195,7 @@ Scoped permissions: `contents: read`, `issues: write`, `security-events: write` 
 
 ## The Job Matrix
 
-Job dependencies: `Build` / `JsonCheck` ← `Version`; `CodeqlScan` ← `JsonCheck`; the vendoring chain `OpensslLinux` ← `CodeqlScan` → `OpensslWin` → `OpensslMacosArm64` → `OpensslMacosX64` (chained with `always()` + the vendor trigger conditions, immune to upstream skips/failures, keeping vendoring rare and independent); `Release` ← `Build + JsonCheck + CodeqlScan`. The whole graph is rooted at `Version`, connected, cycle-free, with no orphaned jobs or dangling needs — enforced by the single-workflow spec validation (`tools/ci/check-workflow.py`, W0-W5). The four function blocks inside `CodeqlScan` run independently per their trigger gates; a CodeQL-block failure doesn't stop the maintenance block (`!cancelled()`), but **a failure of the whole job blocks `Release`**.
+Job dependencies: `Build` / `JsonCheck` ← `Version`; `CodeqlScan` ← `Version` + `JsonCheck`; the vendoring chain `OpensslLinux` ← `CodeqlScan` → `OpensslWin` → `OpensslMacosArm64` → `OpensslMacosX64` (chained with `always()` + the vendor trigger conditions, immune to upstream skips/failures, keeping vendoring rare and independent); `Release` ← `Version` + `Build` + `JsonCheck` + `CodeqlScan`. The direct `Version` edges exist to read its outputs (GitHub only exposes outputs to direct `needs`, not transitive ones); the whole graph is rooted at `Version`, connected, cycle-free, with no orphaned jobs or dangling needs — enforced by the single-workflow spec validation (`tools/ci/check-workflow.py`, W0-W5). The four function blocks inside `CodeqlScan` run independently per their trigger gates; a CodeQL-block failure doesn't stop the maintenance block (`!cancelled()`), but **a failure of the whole job blocks `Release`**.
 
 | Job | Triggers | Contents |
 | --- | --- | --- |
