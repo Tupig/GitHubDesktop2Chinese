@@ -9,7 +9,7 @@
     { "regex": "\\(\\?[a-zA-Z]+[):]", "why": "内联 flag (?i:...)" }
   ],
   "redos_heuristic": {
-    "comment": "ReDoS 启发式（仅告警不阻断）：嵌套量词在长文本上可能灾难性回溯；check-invalid.js 与 check-localization.py 共用（#119 单一事实来源）",
+    "comment": "ReDoS 启发式（#128 CI 侧命中即阻断；check-invalid.js 侧保持报告语义）：嵌套量词在长文本上可能灾难性回溯；check-invalid.js 与 check-localization.py 共用（#119 单一事实来源）",
     "regex": "\\([^()]*[+*][^()]*\\)\\s*[+*{]",
     "why": "疑似灾难性回溯(嵌套量词)"
   }

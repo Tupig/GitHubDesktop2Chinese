@@ -164,10 +164,72 @@ enum PlaceholderFillResult {
     kPlaceholderPatternMiss = 0, // 第三参数在全文未命中 → 调用方跳过该条
     kPlaceholderLeftover = 1,    // 回填后仍残留 #{n} → 调用方跳过该条
     kPlaceholderFilled = 2,      // 回填成功
+    kPlaceholderUnsafe = 3,      // 第三参数命中 ReDoS 防护 → 调用方跳过该条(#128)
 };
+
+// ReDoS 嵌套量词静态启发式(#128): 与 CI regex-blacklist.json 的
+// \([^()]*[+*][^()]*\)\s*[+*{] 语义对齐 —— 无嵌套括号的组内含 +/* 字符
+// 且组结束后紧跟量词字符(+ * {)即疑似灾难性回溯(保守: 转义量词同样命中, 与 CI 侧一致)
+static bool LooksLikeNestedQuantifier(const std::string& pat) {
+    const size_t n = pat.size();
+    for(size_t i = 0; i < n; i++) {
+        if(pat[i] != '(') {
+            continue;
+        }
+        size_t j = i + 1;
+        bool group_has_quantifier = false;
+        while(j < n && pat[j] != ')' && pat[j] != '(') {
+            if(pat[j] == '+' || pat[j] == '*') {
+                group_has_quantifier = true;
+            }
+            j++;
+        }
+        // 未闭合 / 组内含嵌套括号 / 组内无量词字符: 不构成启发式形态
+        if(j >= n || pat[j] != ')' || !group_has_quantifier) {
+            continue;
+        }
+        size_t k = j + 1; // \s*
+        while(k < n && (pat[k] == ' ' || pat[k] == '\t' || pat[k] == '\n' ||
+                        pat[k] == '\r' || pat[k] == '\f' || pat[k] == '\v')) {
+            k++;
+        }
+        if(k < n && (pat[k] == '+' || pat[k] == '*' || pat[k] == '{')) {
+            return true;
+        }
+        i = j;
+    }
+    return false;
+}
+
+// ReDoS 防护(#128): 映射来自远程下载或本地 -j, 无哈希/签名校验(仅 TLS),
+// std::regex 回溯引擎无超时, 嵌套量词模式可致 CPU 100% 假死 —— 编译前静态拒绝
+// 返回 nullopt 表示安全; 有值为拒绝原因(调用方跳过该条并告警, 不中止整个文件)
+static std::optional<std::string> PatternSafetyRejection(const std::string& pat) {
+    constexpr size_t kMaxPatternLen = 4096;
+    if(pat.size() > kMaxPatternLen) {
+        return "长度超过 " + std::to_string(kMaxPatternLen) + " 上限";
+    }
+    if(LooksLikeNestedQuantifier(pat)) {
+        return "疑似灾难性回溯(嵌套量词)";
+    }
+    return std::nullopt;
+}
+
+// 超长替换文本防护(#128): 防止超长 replacement 经千条量级映射放大造成输出膨胀
+static std::optional<std::string> ReplacementSafetyRejection(const std::string& rep) {
+    constexpr size_t kMaxReplacementLen = 16384;
+    if(rep.size() > kMaxReplacementLen) {
+        return "替换文本超过 " + std::to_string(kMaxReplacementLen) + " 上限";
+    }
+    return std::nullopt;
+}
 
 // 在全文查找第三参数(pattern3)首个匹配, 用捕获组逐字面回填 translation 中的 #{%d}; 返回回填状态
 static int FillPlaceholders(const std::string& js_str, const std::string& pattern3_str, std::string& translation) {
+    if(const auto reject = PatternSafetyRejection(pattern3_str)) {
+        spdlog::warn("跳过疑似 ReDoS 的第三参数正则({}): {}", *reject, pattern3_str);
+        return kPlaceholderUnsafe;
+    }
     std::regex pattern3(pattern3_str, std::regex::optimize);
     std::sregex_iterator it = std::sregex_iterator(js_str.begin(), js_str.end(), pattern3);
     if(it == std::sregex_iterator()) {
@@ -228,6 +290,11 @@ static void ApplySelectForFile(const char* logTag, const json& sel, const std::s
             // 构造正则: invalidcheck 模式下非法正则本身就是待检测对象, 计入失效项继续;
             // 正常替换模式 rethrow 交由外层(ProcessJsFile)走"中止并从备份恢复"路径
             std::optional<std::regex> pattern_opt;
+            if(const auto reject = PatternSafetyRejection(rege)) {
+                spdlog::warn("[select {}] 跳过疑似 ReDoS 正则({}): {}", logTag, *reject, rege);
+                invalid_count++;
+                continue;
+            }
             try {
                 pattern_opt.emplace(rege, std::regex::optimize);
             }
@@ -243,6 +310,11 @@ static void ApplySelectForFile(const char* logTag, const json& sel, const std::s
             }
             //如果二层数组字符串有三项
             if(v_item.size() >= 3) {
+                if(const auto reject = PatternSafetyRejection(v_item[2])) {
+                    spdlog::warn("[select {} 3] 跳过疑似 ReDoS 正则({}): {}", logTag, *reject, v_item[2]);
+                    invalid_count++;
+                    continue;
+                }
                 try {
                     std::regex pattern3(v_item[2], std::regex::optimize);
                     // 搜索第三项是否存在
@@ -272,6 +344,10 @@ static void ApplySelectForFile(const char* logTag, const json& sel, const std::s
                 if(rege.empty() || rege == "\"\"") {
                     continue;
                 }
+                if(const auto reject = PatternSafetyRejection(rege)) {
+                    spdlog::warn("[select {}] 跳过疑似 ReDoS 正则({}): {}", logTag, *reject, rege);
+                    continue;
+                }
                 std::regex pattern(rege, std::regex::optimize);
                 // 如果有第三个字符串
                 if(v_item.size() >= 3) {
@@ -286,7 +362,14 @@ static void ApplySelectForFile(const char* logTag, const json& sel, const std::s
                         spdlog::warn("[select {}] 替换文本存在未回填的占位符, 此项将跳过: {}", logTag, v_item[2]);
                         continue;
                     }
+                    if(fill == kPlaceholderUnsafe) {
+                        continue; // ReDoS 防护拒绝, FillPlaceholders 内已告警(#128)
+                    }
                     v_item[1] = std::move(translation);
+                }
+                if(const auto reject = ReplacementSafetyRejection(v_item[1])) {
+                    spdlog::warn("[select {}] 跳过超长替换文本({}) 条目: {}", logTag, *reject, rege);
+                    continue;
                 }
                 // 最终替换: 先预检命中再替换, 避免零匹配时对全文做无谓的整串复制
                 // (std::regex_replace 零匹配也返回完整副本; 输出与预检前逐字节一致)
@@ -338,6 +421,13 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
             // 构造正则: invalidcheck 模式下非法正则本身就是待检测对象(README 功能定义),
             // 计入失效项并继续; 正常替换模式 rethrow 交由外层 catch 走"中止并从备份恢复"路径
             std::optional<std::regex> pattern_opt;
+            if(const auto reject = PatternSafetyRejection(rege)) {
+                spdlog::warn("[{}] 跳过疑似 ReDoS 正则({}): {}", logTag, *reject, rege);
+                if(_debug_invalid_check_mode) {
+                    invalid_count++;
+                }
+                continue;
+            }
             try {
                 pattern_opt.emplace(rege, std::regex::optimize);
             }
@@ -362,6 +452,11 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
                     // 与正常路径一致的非字符串防御: 畸形第三元素跳过而不是抛异常中止整个检测
                     if(item.value()[2].is_string()) {
                         const std::string rege3 = item.value()[2].get<std::string>();
+                        if(const auto reject = PatternSafetyRejection(rege3)) {
+                            spdlog::warn("[{}] 跳过疑似 ReDoS 正则({}): {}", logTag, *reject, rege3);
+                            invalid_count++;
+                            continue;
+                        }
                         try {
                             std::regex pattern3(rege3, std::regex::optimize);
                             found = std::regex_search(js_str, pattern3);
@@ -394,12 +489,19 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
                     if(fill == kPlaceholderPatternMiss) {
                         spdlog::warn("[{}] 出现一处失效项,此项将跳过: {}", logTag, regex_str);
                     }
+                    else if(fill == kPlaceholderUnsafe) {
+                        // ReDoS 防护拒绝, FillPlaceholders 内已告警(#128)
+                    }
                     else {
                         spdlog::warn("[{}] 替换文本存在未回填的占位符, 此项将跳过: {}", logTag, regex_str);
                     }
                     continue;
                 }
                 item.value()[1] = std::move(translation);
+            }
+            if(const auto reject = ReplacementSafetyRejection(item.value()[1].get<std::string>())) {
+                spdlog::warn("[{}] 跳过超长替换文本({}) 条目 {}", logTag, *reject, item.key());
+                continue;
             }
 
             // 替换: 先预检命中再替换, 避免零匹配时对全文做无谓的整串复制
