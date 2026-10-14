@@ -36,6 +36,7 @@
 #include <regex>
 
 #include "spdlog/spdlog.h"          // 日志式输出库
+#include "spdlog/sinks/rotating_file_sink.h"  // #130: 轮转文件日志 sink(崩溃可报告性)
 #include "nlohmann/json.hpp"        // JSON读取本地配置库
 #ifdef _WIN32
 #include "WinReg/WinReg.hpp"        // 注册表操作库(仅 Windows)
@@ -632,15 +633,23 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
     if(process_failed) {
         // E1: 异常时不写入半成品, 从备份恢复目标文件, 与 README"汉化异常后从备份恢复"一致
         spdlog::error("{} 处理异常, 已中止且不写入部分汉化结果", fileTag);
-        if(!_debug_invalid_check_mode && !_debug_no_replace_res && fs::exists(bak)) {
-            std::error_code ec;
-            // 原子恢复: 中断不产生半截目标文件(#166)
-            utils::AtomicCopyFile(bak, target, ec);
-            if(ec) {
-                spdlog::error("从备份恢复 {} 失败: {}", fileTag, ec.message());
+        if(!_debug_invalid_check_mode && !_debug_no_replace_res) {
+            // exists 用 error_code 重载(#130): 异常善后路径不可再抛(底层 ACL/IO 错误时抛掷重载会逃逸)
+            std::error_code bak_exists_ec;
+            if(fs::exists(bak, bak_exists_ec)) {
+                std::error_code ec;
+                // 原子恢复: 中断不产生半截目标文件(#166)
+                utils::AtomicCopyFile(bak, target, ec);
+                if(ec) {
+                    spdlog::error("从备份恢复 {} 失败: {}", fileTag, ec.message());
+                }
+                else {
+                    spdlog::info("{} 已从备份恢复", fileTag);
+                }
             }
             else {
-                spdlog::info("{} 已从备份恢复", fileTag);
+                spdlog::error("备份 {} 不可用({}), 无法自动恢复", bak.string(),
+                              bak_exists_ec ? bak_exists_ec.message() : std::string("不存在"));
             }
         }
         return 1;
@@ -908,8 +917,12 @@ static bool ResolveBaseDirectory(const std::pair<std::string, int>& proxy) {
 static int PerformRollback() {
     int restore_fail = 0;
     auto restore_one = [&](const fs::path& bak, const fs::path& dst) {
-        if(!fs::exists(bak)) {
-            spdlog::warn("{} 回滚失败, {} 文件不存在", dst.string().c_str(), bak.string().c_str());
+        // exists 用 error_code 重载(#130): 回滚善后路径不可再抛, 检查失败按回滚失败处理
+        std::error_code exists_ec;
+        if(!fs::exists(bak, exists_ec)) {
+            spdlog::warn("{} 回滚失败, {} {}",
+                dst.string().c_str(), bak.string().c_str(),
+                exists_ec ? "检查失败: " + exists_ec.message() : std::string("文件不存在"));
             restore_fail++;
             return;
         }
@@ -1112,7 +1125,9 @@ static bool EnsureJsFilesAndBackups() {
     // 仅在备份文件不存在时备份
     for(const char* name : { "main.js", "renderer.js" }) {
         const std::string bak_name = std::string(name) + ".bak";
-        if(fs::exists(Base / bak_name)) {
+        // exists 用 error_code 重载(#130): 备份善后路径不可再抛; 检查失败按不存在处理, 由后续拷贝的失败提示兜底
+        std::error_code bak_exists_ec;
+        if(fs::exists(Base / bak_name, bak_exists_ec)) {
             continue;
         }
         std::error_code ec;
@@ -1211,6 +1226,58 @@ static void ShowContributors(const std::pair<std::string, int>& proxy) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// #130 崩溃可报告性: 轮转文件日志 + 顶层异常兜底
+// ---------------------------------------------------------------------------
+// 入口薄壳拆分(定义在下方): wmain/main 转换参数后经 GuardedMain 顶层兜底进入 RunMain
+static int GuardedMain(int argc, char** argv, const fs::path& self_path);
+static int RunMain(int argc, char** argv, const fs::path& self_path);
+
+// 日志文件路径(InitFileLogging 成功后非空, 供崩溃提示)
+static fs::path g_log_file;
+
+// 附加轮转文件 sink(1MB×3)到默认 logger: Windows %TEMP%\GitHubDesktop2Chinese\app.log,
+// POSIX $TMPDIR(缺省 /tmp)/GitHubDesktop2Chinese/app.log
+// 初始化自身绝不抛出: 目录创建/文件打开失败时降级为仅控制台日志, 不影响主流程
+static void InitFileLogging()
+{
+    try {
+        fs::path log_dir;
+#ifdef _WIN32
+        if(const wchar_t* tmp = _wgetenv(L"TEMP")) {
+            log_dir = fs::path(tmp) / "GitHubDesktop2Chinese";
+        }
+#else
+        if(const char* tmp = std::getenv("TMPDIR")) {
+            log_dir = fs::path(tmp) / "GitHubDesktop2Chinese";
+        }
+        else {
+            log_dir = fs::path("/tmp") / "GitHubDesktop2Chinese";
+        }
+#endif
+        std::error_code ec;
+        fs::create_directories(log_dir, ec);
+        if(ec) {
+            return; // 降级: 仅控制台
+        }
+        g_log_file = log_dir / "app.log";
+#ifdef _WIN32
+        // SPDLOG_WCHAR_FILENAMES(CMake 定义): 中文用户名的 %TEMP% 路径无损
+        auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+            g_log_file.wstring(), 1024 * 1024, 3);
+#else
+        auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+            g_log_file.string(), 1024 * 1024, 3);
+#endif
+        spdlog::default_logger()->sinks().push_back(file_sink);
+        // err 及以上立即刷盘: 崩溃/强关前最后一条错误日志不因进程终止而丢失
+        spdlog::flush_on(spdlog::level::err);
+    }
+    catch(...) {
+        // 日志初始化失败降级为仅控制台
+    }
+}
+
 #ifdef _WIN32
 // wmain: 使用宽字符命令行, 避免非UTF-8代码页(如中文GBK)下参数在CLI11内部转换时崩溃
 int wmain(int argc, wchar_t* wargv[])
@@ -1228,6 +1295,9 @@ int wmain(int argc, wchar_t* wargv[])
         }
     }
 
+    // #130: 尽早附加文件日志, 命令行转换/解析任何阶段的错误都可留痕
+    InitFileLogging();
+
     // 自身可执行文件路径(宽字符, 非ASCII安装目录下无损)
     fs::path self_path(wargv[0]);
     // 宽字符命令行 -> UTF-8 供CLI11解析; 转换完成前不修改wargv, 转换后字符串不再变动以保证char*稳定
@@ -1241,15 +1311,47 @@ int wmain(int argc, wchar_t* wargv[])
     for(auto& arg : utf8_args) {
         argv.push_back(arg.data());
     }
+    return GuardedMain(argc, argv.data(), self_path);
+}
 #else
 // POSIX 入口: argv 本身即 UTF-8, 无需转换
 int main(int argc, char* argv[])
 {
+    // #130: 尽早附加文件日志
+    InitFileLogging();
     // 极端环境(execve 传空 argv)下 argv[0] 可能为 NULL: 判空避免构造 path 时读取空指针
     const char* argv0 = (argc > 0 && argv[0] != nullptr) ? argv[0] : "";
     fs::path self_path(argv0);
+    return GuardedMain(argc, argv, self_path);
+}
 #endif // _WIN32
 
+// #130: 顶层异常兜底 - 未捕获异常落日志并提示日志路径(而非无声 terminate), 双击用户可报告
+static int GuardedMain(int argc, char** argv, const fs::path& self_path)
+{
+    try {
+        return RunMain(argc, argv, self_path);
+    }
+    catch(const std::exception& e) {
+        spdlog::error("未捕获异常, 程序中止: {}", e.what());
+    }
+    catch(...) {
+        spdlog::error("未捕获未知异常, 程序中止");
+    }
+    if(!g_log_file.empty()) {
+#ifdef _WIN32
+        spdlog::error("如需反馈问题, 请携带日志文件: {}", utils::to_byte_string(g_log_file.wstring()));
+#else
+        spdlog::error("如需反馈问题, 请携带日志文件: {}", g_log_file.string());
+#endif
+    }
+    PAUSE
+    return 1;
+}
+
+// 主流程(原 wmain/main 共享主体, #130 拆出供 GuardedMain 包裹)
+static int RunMain(int argc, char** argv, const fs::path& self_path)
+{
     FileVer = versionparse::Version(FILEVERSION);
     // 设置控制台打印日志输出等级
     if(FileVer.status == FileVer.Dev) {
@@ -1314,11 +1416,8 @@ int main(int argc, char* argv[])
 
 
         try {
-#ifdef _WIN32
-            CLI11_PARSE(app, argc, argv.data());   // Windows: argv 为 std::vector<char*>
-#else
-            CLI11_PARSE(app, argc, argv);          // POSIX: argv 本身即 char**
-#endif
+            // #130: argv 统一为 char**(入口转换后传入 RunMain), 两平台同形
+            CLI11_PARSE(app, argc, argv);
         }
         catch(const std::exception& e) {
             // CLI11 内部仅捕获其自身异常, 命令行含非法编码等仍可能抛出其他异常, 此处兜底避免进程直接崩溃

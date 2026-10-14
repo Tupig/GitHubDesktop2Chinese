@@ -168,6 +168,11 @@ endif()
 
 # CLI11 已内置到 third_party/include/CLI（header-only，无需额外链接）
 
+# #130: spdlog 宽字符文件名(Windows): 中文用户名的 %TEMP% 日志路径无损传给 _wfopen
+if(WIN32)
+    target_compile_definitions(GitHubDesktop2Chinese PRIVATE SPDLOG_WCHAR_FILENAMES)
+endif()
+
 set_property(TARGET GitHubDesktop2Chinese PROPERTY CXX_STANDARD 20)
 
 # ── 单元测试(#123): Version 表驱动解析/比较测试, 无外部依赖 ──
