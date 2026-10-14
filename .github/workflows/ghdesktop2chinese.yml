@@ -40,13 +40,13 @@
 #   4. build          构建矩阵(三平台四目标) + 产物功能测试（无差异时跳过, 见注4）
 #   4b. build-skip-notice  构建跳过说明（skipped job 自身无日志, 以独立 job 输出醒目说明）
 #   5. release        汇总产物并发布
-#   6. vendor-macos   产库 OpenSSL（macOS x64/arm64 交叉编译; PR 标签 vendor-openssl / 手动 vendor）
-#   7. vendor-linux   产库 OpenSSL（linux x64 静态库; 同上触发）
-#   8. vendor-windows 产库 OpenSSL（windows x64 .lib; 同上触发, 产物用于替换内置库）
+#   6. vendor-linux   产库 OpenSSL（linux x64 静态库; PR 标签 vendor-openssl / 手动 vendor）
+#   7. vendor-windows 产库 OpenSSL（windows x64 .lib; 同上触发, 产物用于替换内置库）
+#   8. vendor-macos   产库 OpenSSL（macOS x64/arm64 交叉编译; 同上触发）
 #
 #   job 依赖: 检查/维护类任务(json-quality/encoding-check/tools-test/codeql/auto-maintain/sync-wiki)
 #             与构建矩阵均在解析版本号之后执行(←version), 六个检查/维护 job 定义顺序位于
-#             构建产物之前; build-skip-notice←version; vendor-macos/linux/windows←version;
+#             构建产物之前; build-skip-notice←version; vendor-linux/windows/macos←version;
 #             release←version+build+json-quality+tools-test+encoding-check
 #   图约束: 全图以 version 为根连通, 无孤立/不连通任务、无循环、无悬空 needs —— 由 tools-test 的
 #           单工作流规范校验（tools/ci/check-workflow.py, W0-W5）强制
@@ -58,7 +58,7 @@
 #             macOS: build/GitHubDesktop2Chinese（通用二进制: x86_64 + arm64, 静态链接 OpenSSL）
 #             Linux: build/GitHubDesktop2Chinese（单配置生成器）
 #   Artifact  GitHubDesktop2Chinese-<平台>-<版本号|SHA>
-#   产库产物  openssl-macos-{x64,arm64} / openssl-linux-x64 / openssl-windows-x64
+#   产库产物  openssl-linux-x64 / openssl-windows-x64 / openssl-macos-{x64,arm64}
 #             （vendor 任务产出, 仅 include/+lib/, 保留 7 天, 供人工下载后提交 third_party/）
 #   发布资产  GitHubDesktop2Chinese.exe        — Windows x64（保留历史文件名，向后兼容）
 #             GitHubDesktop2Chinese-macos-x64   — macOS Intel（x64）
@@ -79,7 +79,7 @@
 #   - 所有 job 均设 timeout-minutes 上限
 #   - 网络/配置类关键步骤内置超时与自动重试
 #   - macOS 拆分 macos-x64 / macos-arm64 单架构包, 均在 macos-15-intel 交叉编译(不依赖容量紧张的 arm64 runner),
-#     静态 OpenSSL + strip/LTO 裁剪体积; OpenSSL 静态库由 vendor 任务产库(见 7/8/9),
+#     静态 OpenSSL + strip/LTO 裁剪体积; OpenSSL 静态库由 vendor 任务产库(见 6/7/8),
 #     GitHub Desktop 安装包与提取结果走 actions/cache
 #   - 第三方 actions 全部按 commit SHA 固定（版本升级手动执行；漏洞告警由 Dependabot 提示）
 #   - 数据质量校验/工具自检/维护报告等大型脚本外置于 tools/ci（YAML 仅保留调用）
@@ -1062,81 +1062,7 @@ jobs:
           fi
 
   # ═════════════════════════════════════════════════
-  # 6. 产库 OpenSSL - macOS（x64/arm64 交叉编译; 原 vendor-openssl.yml 并入）
-  #    触发: PR 打 vendor-openssl 标签(labeled, 触发矩阵注5) / 手动 vendor(注6);
-  #    产物供人工下载后提交 third_party/, 构建期零下载零编译
-  # ═════════════════════════════════════════════════
-  vendor-macos:
-    name: 产库 OpenSSL (macOS ${{ matrix.arch }})
-    if: |
-      (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'vendor-openssl') ||
-      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor')
-    # 单工作流规范: 纳入依赖图(version 无 if 恒运行, 无 needs 悬空风险)
-    needs: version
-    runs-on: macos-15-intel
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x64, arm64]
-    env:
-      # inputs 上下文仅 dispatch 事件可用 → 统一经 github.event.inputs 读取, PR 事件回退默认值
-      OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: 编译 OpenSSL（${{ matrix.arch }} ≈8 分钟）
-        run: |
-          set -euo pipefail
-          case "${{ matrix.arch }}" in
-            x64)   TARGET=darwin64-x86_64-cc ;;
-            arm64) TARGET=darwin64-arm64-cc ;;
-          esac
-          if ! printf '%s' "$OSSL_VER" | grep -qE '^3\.[0-9]+\.[0-9]+$'; then
-            echo "::error::openssl-version 格式非法: $OSSL_VER（应为 3.x.y）"
-            exit 1
-          fi
-          # 与主构建一致的部署目标, 防止 SDK 差异引入更高系统版本依赖
-          export MACOSX_DEPLOYMENT_TARGET=11.0
-          cd "$RUNNER_TEMP"
-          rm -rf openssl-src "openssl-$OSSL_VER.tar.gz" "openssl-$OSSL_VER.tar.gz.sha256"
-          curl --fail --location --retry 3 --retry-delay 5 \
-            --output "openssl-$OSSL_VER.tar.gz" \
-            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
-          # 供应链校验(#118): 官方 release 附带的 .sha256 旁证(openssl.org/source 链接的同一文件), 对照后才解压
-          curl --fail --location --retry 3 --retry-delay 5 \
-            --output "openssl-$OSSL_VER.tar.gz.sha256" \
-            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
-          sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
-          mkdir -p openssl-src
-          tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
-          cd openssl-src
-          ./Configure "$TARGET" no-shared no-tests no-apps no-zlib \
-            --prefix="$RUNNER_TEMP/openssl-macos-${{ matrix.arch }}"
-          make -j"$(sysctl -n hw.ncpu)" build_libs
-          make install_dev
-
-      - name: 校验产物齐备
-        run: |
-          set -euo pipefail
-          PREFIX="$RUNNER_TEMP/openssl-macos-${{ matrix.arch }}"
-          for f in "$PREFIX/include/openssl/ssl.h" "$PREFIX/lib/libssl.a" "$PREFIX/lib/libcrypto.a"; do
-            [[ -f "$f" ]] || { echo "::error::缺少产物: $f"; exit 1; }
-          done
-          echo "产库产物齐备: $PREFIX"
-
-      - name: 上传产库产物
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: openssl-macos-${{ matrix.arch }}
-          path: |
-            ${{ runner.temp }}/openssl-macos-${{ matrix.arch }}/include
-            ${{ runner.temp }}/openssl-macos-${{ matrix.arch }}/lib
-          retention-days: 7
-          if-no-files-found: error
-
-  # ═════════════════════════════════════════════════
-  # 7. 产库 OpenSSL - Linux（x64 静态库; 供 CMake Linux 静态链接内置化, 接线随提交 2）
+  # 6. 产库 OpenSSL - Linux（x64 静态库; 供 CMake Linux 静态链接内置化, 接线随提交 2）
   # ═════════════════════════════════════════════════
   vendor-linux:
     name: 产库 OpenSSL (linux x64)
@@ -1199,7 +1125,7 @@ jobs:
           if-no-files-found: error
 
   # ═════════════════════════════════════════════════
-  # 8. 产库 OpenSSL - Windows（x64 .lib; 产物用于替换内置库, 消除本地构建路径内嵌）
+  # 7. 产库 OpenSSL - Windows（x64 .lib; 产物用于替换内置库, 消除本地构建路径内嵌）
   # ═════════════════════════════════════════════════
   vendor-windows:
     name: 产库 OpenSSL (windows x64)
@@ -1289,5 +1215,79 @@ jobs:
           path: |
             ${{ runner.temp }}/openssl-windows-x64/include
             ${{ runner.temp }}/openssl-windows-x64/lib
+          retention-days: 7
+          if-no-files-found: error
+
+  # ═════════════════════════════════════════════════
+  # 8. 产库 OpenSSL - macOS（x64/arm64 交叉编译; 原 vendor-openssl.yml 并入）
+  #    触发: PR 打 vendor-openssl 标签(labeled, 触发矩阵注5) / 手动 vendor(注6);
+  #    产物供人工下载后提交 third_party/, 构建期零下载零编译
+  # ═════════════════════════════════════════════════
+  vendor-macos:
+    name: 产库 OpenSSL (macOS ${{ matrix.arch }})
+    if: |
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'vendor-openssl') ||
+      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor')
+    # 单工作流规范: 纳入依赖图(version 无 if 恒运行, 无 needs 悬空风险)
+    needs: version
+    runs-on: macos-15-intel
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+    env:
+      # inputs 上下文仅 dispatch 事件可用 → 统一经 github.event.inputs 读取, PR 事件回退默认值
+      OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: 编译 OpenSSL（${{ matrix.arch }} ≈8 分钟）
+        run: |
+          set -euo pipefail
+          case "${{ matrix.arch }}" in
+            x64)   TARGET=darwin64-x86_64-cc ;;
+            arm64) TARGET=darwin64-arm64-cc ;;
+          esac
+          if ! printf '%s' "$OSSL_VER" | grep -qE '^3\.[0-9]+\.[0-9]+$'; then
+            echo "::error::openssl-version 格式非法: $OSSL_VER（应为 3.x.y）"
+            exit 1
+          fi
+          # 与主构建一致的部署目标, 防止 SDK 差异引入更高系统版本依赖
+          export MACOSX_DEPLOYMENT_TARGET=11.0
+          cd "$RUNNER_TEMP"
+          rm -rf openssl-src "openssl-$OSSL_VER.tar.gz" "openssl-$OSSL_VER.tar.gz.sha256"
+          curl --fail --location --retry 3 --retry-delay 5 \
+            --output "openssl-$OSSL_VER.tar.gz" \
+            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
+          # 供应链校验(#118): 官方 release 附带的 .sha256 旁证(openssl.org/source 链接的同一文件), 对照后才解压
+          curl --fail --location --retry 3 --retry-delay 5 \
+            --output "openssl-$OSSL_VER.tar.gz.sha256" \
+            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
+          sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
+          mkdir -p openssl-src
+          tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
+          cd openssl-src
+          ./Configure "$TARGET" no-shared no-tests no-apps no-zlib \
+            --prefix="$RUNNER_TEMP/openssl-macos-${{ matrix.arch }}"
+          make -j"$(sysctl -n hw.ncpu)" build_libs
+          make install_dev
+
+      - name: 校验产物齐备
+        run: |
+          set -euo pipefail
+          PREFIX="$RUNNER_TEMP/openssl-macos-${{ matrix.arch }}"
+          for f in "$PREFIX/include/openssl/ssl.h" "$PREFIX/lib/libssl.a" "$PREFIX/lib/libcrypto.a"; do
+            [[ -f "$f" ]] || { echo "::error::缺少产物: $f"; exit 1; }
+          done
+          echo "产库产物齐备: $PREFIX"
+
+      - name: 上传产库产物
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: openssl-macos-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/openssl-macos-${{ matrix.arch }}/include
+            ${{ runner.temp }}/openssl-macos-${{ matrix.arch }}/lib
           retention-days: 7
           if-no-files-found: error
