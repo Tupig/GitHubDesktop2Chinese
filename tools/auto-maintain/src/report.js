@@ -32,6 +32,9 @@ export function renderMarkdown(report) {
     lines.push(`## 失效检测`);
     lines.push('');
     lines.push(`总映射项 ${total}，有效 ${ok}，失效 ${failedCount}。`);
+    // #137: 结构化统计 meta 行(HTML 注释, Markdown 渲染不可见):
+    // report-issue.js 优先解析此行, 与上方中文展示文案解耦, 文案微调不再静默劣化自动关单逻辑
+    lines.push(`<!-- stats: total=${total} ok=${ok} failed=${failedCount} -->`);
     lines.push('');
     lines.push(`| 数组 | 序号 | 原因 | 正则 |`);
     lines.push(`| --- | --- | --- | --- |`);

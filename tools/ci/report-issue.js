@@ -1,5 +1,19 @@
 // 自动维护报告 Issue 的创建/更新逻辑(由工作流 github-script 步骤 require 调用)
 // 入参: { github, context, core } —— 与 actions/github-script 内置对象一致
+
+// #137: 从报告正文提取失效数(纯函数, tools-self-test 回归覆盖):
+// 1) 优先解析 report.js renderMarkdown 输出的结构化 meta 行(<!-- stats: total=.. ok=.. failed=.. -->),
+//    与中文展示文案解耦, 文案微调不影响解析;
+// 2) 后备兼容旧报告/手动报告的中文统计行;
+// 3) 都未命中返回 '?': Number('?')===0 为 false → noFailures 恒 false, 保守不自动关单(仅 core.warning)
+function extractFailedCount(report) {
+  const meta = report.match(/<!--\s*stats:\s*total=(\d+)\s+ok=(\d+)\s+failed=(\d+)\s*-->/);
+  if (meta) return { failed: meta[3], source: 'meta' };
+  const legacy = report.match(/总映射项\s+(\d+)，有效\s+(\d+)，失效\s+(\d+)。/);
+  if (legacy) return { failed: legacy[3], source: 'legacy-text' };
+  return { failed: '?', source: 'none' };
+}
+
 module.exports = async ({ github, context, core }) => {
   try {
     const fs = require('fs');
@@ -7,12 +21,11 @@ module.exports = async ({ github, context, core }) => {
     const reportPath = path.join(process.env.RUNNER_TEMP, 'ghdesktop-auto-maintain', 'report.md');
     const report = fs.readFileSync(reportPath, 'utf8');
 
-    const failedMatch = report.match(/总映射项\s+(\d+)，有效\s+(\d+)，失效\s+(\d+)。/);
-    if (!failedMatch) {
-      // 报告文案与本正则强耦合: 解析失败时若静默降级, 自动关单/标题计数会永久失效且无告警
-      core.warning('report.md 中未找到失效统计行(总映射项 x，有效 x，失效 x。), 失效数按 ? 处理, 请检查 report.js 文案是否变更');
+    const { failed, source } = extractFailedCount(report);
+    if (source === 'none') {
+      // 解析失败若静默降级, 自动关单/标题计数会永久失效且无告警, 故显式 warning
+      core.warning('report.md 中未找到 stats meta 行或中文统计行, 失效数按 ? 处理, 请检查 report.js 是否变更输出格式');
     }
-    const failed = failedMatch ? failedMatch[3] : '?';
     const noFailures = Number(failed) === 0;
 
     const title = `[自动维护] 汉化映射失效 ${failed} 项 / 未翻译候选 (GitHub Desktop 报告)`;
@@ -93,3 +106,6 @@ module.exports = async ({ github, context, core }) => {
     core.setFailed(`创建或更新自动维护 Issue 失败: ${err.message}`);
   }
 };
+
+// #137: 纯函数单独导出供 tools-self-test 跨文件契约回归
+module.exports.extractFailedCount = extractFailedCount;
