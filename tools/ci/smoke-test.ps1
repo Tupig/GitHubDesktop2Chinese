@@ -10,6 +10,17 @@ param(
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
+# #136: Windows PowerShell 5.1 在任何 stderr 重定向下把 native stderr 包装为 ErrorRecord,
+# EAP=Stop 时升级为终止错误 —— T2(CLI11 非法参数经 stderr 输出)会中止整个脚本。
+# 局部降级 EAP 包裹 native 调用, 调用后恢复; $LASTEXITCODE 不受影响(实测 5.1/pwsh 双通过)。
+# pwsh 7 默认 $PSNativeCommandUseErrorActionPreference=false 不受影响, 但统一走此封装保持一致
+function Invoke-Native {
+    param([Parameter(Mandatory)][scriptblock]$Block)
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $Block } finally { $ErrorActionPreference = $prevEap }
+}
+
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
 # ── 定位被测二进制 ──
@@ -22,21 +33,20 @@ if (-not $Binary) {
         $candidates += Get-Item (Join-Path $repoRoot $pattern) -ErrorAction SilentlyContinue
     }
     if (-not $candidates) {
-        Write-Error "未找到待测二进制: 请先构建, 或用 -Binary 指定 GitHubDesktop2Chinese.exe 路径"
-        exit 1
+        # #136: Write-Error 在 EAP=Stop 下直接抛终止错误, 原 exit 1 不可达; throw 语义等价且明确
+        throw "未找到待测二进制: 请先构建, 或用 -Binary 指定 GitHubDesktop2Chinese.exe 路径"
     }
     $Binary = ($candidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 }
 if (-not (Test-Path -LiteralPath $Binary)) {
-    Write-Error "二进制不存在: $Binary"
-    exit 1
+    throw "二进制不存在: $Binary"
 }
 Write-Host "被测二进制: $Binary"
 
 $failed = 0
 
 # ── T1: --help 应 exit 0 ──
-& $Binary --help *> $null
+Invoke-Native { & $Binary --help *> $null }
 if ($LASTEXITCODE -eq 0) {
     Write-Host "T1 --help exit 0: PASS"
 } else {
@@ -45,7 +55,7 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 # ── T2: 非法参数应被拒绝(exit != 0) ──
-& $Binary thisargdoesnotexist *> $null
+Invoke-Native { & $Binary thisargdoesnotexist *> $null }
 if ($LASTEXITCODE -ne 0) {
     Write-Host "T2 非法参数被拒绝: PASS"
 } else {
@@ -62,7 +72,7 @@ try {
     Set-Content -LiteralPath (Join-Path $fixture "renderer.js") -Value "// fixture renderer" -NoNewline
     $json = Join-Path $fixture "localization.json"
     Copy-Item (Join-Path $repoRoot "json\localization.json") $json
-    $out = '' | & $Binary -g $fixture -j $json --nopause 2>&1 | Out-String
+    $out = Invoke-Native { '' | & $Binary -g $fixture -j $json --nopause 2>&1 | Out-String }
     $code = $LASTEXITCODE
     if ($code -eq 0 -and $out.Contains("renderer.js 文件汉化结束")) {
         Write-Host "T3 完整汉化流程 exit 0: PASS"
@@ -77,7 +87,7 @@ try {
     Set-Content -LiteralPath (Join-Path $fixture "main.js.bak") -Value "// original" -NoNewline
     Set-Content -LiteralPath (Join-Path $fixture "renderer.js") -Value "// patched" -NoNewline
     Set-Content -LiteralPath (Join-Path $fixture "renderer.js.bak") -Value "// original" -NoNewline
-    $out = '' | & $Binary -g $fixture --nopause --rollback 2>&1 | Out-String
+    $out = Invoke-Native { '' | & $Binary -g $fixture --nopause --rollback 2>&1 | Out-String }
     $code = $LASTEXITCODE
     $mainRestored = (Get-Content -LiteralPath (Join-Path $fixture "main.js") -Raw) -eq "// original"
     $rendererRestored = (Get-Content -LiteralPath (Join-Path $fixture "renderer.js") -Raw) -eq "// original"
