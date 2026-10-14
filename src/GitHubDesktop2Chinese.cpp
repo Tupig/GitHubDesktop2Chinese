@@ -43,6 +43,7 @@
 
 #include <CLI/CLI.hpp>              // 参数管理器:   https://github.com/CLIUtils/CLI11
 #include "utils/utils.hpp"
+#include "utils/replace_engine.hpp" // 替换引擎(#129): 单遍构建 + 字面量快路径
 #include "version/Version.hpp"
 
 #ifdef _MSC_VER
@@ -140,6 +141,11 @@ inline auto EscapeDollar(const std::string& s) -> std::string {
     }
     return out;
 }
+
+// ── 替换引擎(#129): 抽出至 utils/replace_engine.hpp 以便单元测试 ──
+using utils::IsPlainLiteral;
+using utils::ReplaceLiteralInPlace;
+using utils::ReplaceRegexInPlace;
 
 #ifdef _WIN32
 BOOL WINAPI ConsoleHandler(DWORD dwCtrlType) {
@@ -289,22 +295,28 @@ static void ApplySelectForFile(const char* logTag, const json& sel, const std::s
             }
             // 构造正则: invalidcheck 模式下非法正则本身就是待检测对象, 计入失效项继续;
             // 正常替换模式 rethrow 交由外层(ProcessJsFile)走"中止并从备份恢复"路径
+            // 纯字面量(#129)跳过 regex 构造, 命中检测走 string::find 快路径
+            const bool plain = IsPlainLiteral(rege);
             std::optional<std::regex> pattern_opt;
             if(const auto reject = PatternSafetyRejection(rege)) {
                 spdlog::warn("[select {}] 跳过疑似 ReDoS 正则({}): {}", logTag, *reject, rege);
                 invalid_count++;
                 continue;
             }
-            try {
-                pattern_opt.emplace(rege, std::regex::optimize);
-            }
-            catch(const std::regex_error& re) {
-                spdlog::warn("[select {}] 非法正则, 计入失效项: {} ({})", logTag, rege, re.what());
-                invalid_count++;
-                continue;
+            if(!plain) {
+                try {
+                    pattern_opt.emplace(rege, std::regex::optimize);
+                }
+                catch(const std::regex_error& re) {
+                    spdlog::warn("[select {}] 非法正则, 计入失效项: {} ({})", logTag, rege, re.what());
+                    invalid_count++;
+                    continue;
+                }
             }
             // 搜索第一项 是否存在
-            if(!std::regex_search(js_str, *pattern_opt)) {
+            const bool found = plain ? (js_str.find(rege) != std::string::npos)
+                                     : std::regex_search(js_str, *pattern_opt);
+            if(!found) {
                 spdlog::warn("[select {}] 检测到失效项: {}", logTag, rege.c_str());
                 invalid_count++;
             }
@@ -315,17 +327,26 @@ static void ApplySelectForFile(const char* logTag, const json& sel, const std::s
                     invalid_count++;
                     continue;
                 }
-                try {
-                    std::regex pattern3(v_item[2], std::regex::optimize);
-                    // 搜索第三项是否存在
-                    if(!std::regex_search(js_str, pattern3)) {
+                // 纯字面量(#129)走 find 快路径, 其余构造正则检测
+                if(IsPlainLiteral(v_item[2])) {
+                    if(js_str.find(v_item[2]) == std::string::npos) {
                         spdlog::warn("[select {} 3] 检测到失效项: {}", logTag, v_item[2].c_str());
                         invalid_count++;
                     }
                 }
-                catch(const std::regex_error& re) {
-                    spdlog::warn("[select {} 3] 非法正则, 计入失效项: {} ({})", logTag, v_item[2], re.what());
-                    invalid_count++;
+                else {
+                    try {
+                        std::regex pattern3(v_item[2], std::regex::optimize);
+                        // 搜索第三项是否存在
+                        if(!std::regex_search(js_str, pattern3)) {
+                            spdlog::warn("[select {} 3] 检测到失效项: {}", logTag, v_item[2].c_str());
+                            invalid_count++;
+                        }
+                    }
+                    catch(const std::regex_error& re) {
+                        spdlog::warn("[select {} 3] 非法正则, 计入失效项: {} ({})", logTag, v_item[2], re.what());
+                        invalid_count++;
+                    }
                 }
             }
         }
@@ -348,7 +369,13 @@ static void ApplySelectForFile(const char* logTag, const json& sel, const std::s
                     spdlog::warn("[select {}] 跳过疑似 ReDoS 正则({}): {}", logTag, *reject, rege);
                     continue;
                 }
-                std::regex pattern(rege, std::regex::optimize);
+                // 纯字面量(#129)跳过 regex 构造; 替换文本含 $ 的最终走正则路径保持
+                // format 展开语义($ 检查须在第三参数回填后: 回填捕获文本可能引入 $)
+                const bool plain_pattern = IsPlainLiteral(rege);
+                std::optional<std::regex> pattern;
+                if(!plain_pattern) {
+                    pattern.emplace(rege, std::regex::optimize);
+                }
                 // 如果有第三个字符串
                 if(v_item.size() >= 3) {
                     // 预备用第三个字符串查找关键字 用来替换第二个字符串
@@ -371,10 +398,17 @@ static void ApplySelectForFile(const char* logTag, const json& sel, const std::s
                     spdlog::warn("[select {}] 跳过超长替换文本({}) 条目: {}", logTag, *reject, rege);
                     continue;
                 }
-                // 最终替换: 先预检命中再替换, 避免零匹配时对全文做无谓的整串复制
-                // (std::regex_replace 零匹配也返回完整副本; 输出与预检前逐字节一致)
-                if(std::regex_search(js_str, pattern)) {
-                    js_str = std::regex_replace(js_str, pattern, v_item[1]);
+                // 最终替换(#129): 字面量走 find 快路径, 正则走 sregex_iterator 单遍构建;
+                // 零命中不改动 js_str(与预检语义等价, 免整串复制)
+                if(plain_pattern && v_item[1].find('$') == std::string::npos) {
+                    (void)ReplaceLiteralInPlace(js_str, rege, v_item[1]);
+                }
+                else {
+                    if(!pattern) {
+                        // 回填后引入 $ 的字面量条目: 此刻补构造(字面量必为合法正则, 不抛)
+                        pattern.emplace(rege, std::regex::optimize);
+                    }
+                    (void)ReplaceRegexInPlace(js_str, *pattern, v_item[1]);
                 }
             }
         }
@@ -403,6 +437,11 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
         return 1;
     }
     bool process_failed = false;
+    // #129: 全链路计时埋点(含 select 段) + 主循环命中/未命中条目统计
+    // (此前无任何耗时输出, 慢机用户无从判断卡死还是慢)
+    size_t hit_entries = 0;
+    size_t miss_entries = 0;
+    const auto process_start = std::chrono::steady_clock::now();
     try {
         for(auto& item : localization[baseKey].items())
         {
@@ -420,6 +459,8 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
             }
             // 构造正则: invalidcheck 模式下非法正则本身就是待检测对象(README 功能定义),
             // 计入失效项并继续; 正常替换模式 rethrow 交由外层 catch 走"中止并从备份恢复"路径
+            // 纯字面量(#129)跳过 regex 构造: 命中检测/替换均走 string::find 快路径
+            const bool plain = IsPlainLiteral(rege);
             std::optional<std::regex> pattern_opt;
             if(const auto reject = PatternSafetyRejection(rege)) {
                 spdlog::warn("[{}] 跳过疑似 ReDoS 正则({}): {}", logTag, *reject, rege);
@@ -428,22 +469,24 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
                 }
                 continue;
             }
-            try {
-                pattern_opt.emplace(rege, std::regex::optimize);
-            }
-            catch(const std::regex_error& re) {
-                if(_debug_invalid_check_mode) {
-                    spdlog::warn("[{}] 非法正则, 计入失效项: {} ({})", logTag, rege, re.what());
-                    invalid_count++;
-                    continue;
+            if(!plain) {
+                try {
+                    pattern_opt.emplace(rege, std::regex::optimize);
                 }
-                throw;
+                catch(const std::regex_error& re) {
+                    if(_debug_invalid_check_mode) {
+                        spdlog::warn("[{}] 非法正则, 计入失效项: {} ({})", logTag, rege, re.what());
+                        invalid_count++;
+                        continue;
+                    }
+                    throw;
+                }
             }
-            const std::regex& pattern = *pattern_opt;
 
             // 开发者选项 失效检测
             if(_debug_invalid_check_mode) {
-                bool found = std::regex_search(js_str, pattern);
+                bool found = plain ? (js_str.find(rege) != std::string::npos)
+                                   : std::regex_search(js_str, *pattern_opt);
                 if(!found) {
                     spdlog::warn("[{}] 检测到失效项: {}", logTag, rege);
                     invalid_count++;
@@ -457,17 +500,27 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
                             invalid_count++;
                             continue;
                         }
-                        try {
-                            std::regex pattern3(rege3, std::regex::optimize);
-                            found = std::regex_search(js_str, pattern3);
+                        if(IsPlainLiteral(rege3)) {
+                            // 纯字面量(#129)走 find 快路径
+                            found = js_str.find(rege3) != std::string::npos;
                             if(!found) {
                                 spdlog::warn("[{}] 检测到失效项: {}", logTag, rege3);
                                 invalid_count++;
                             }
                         }
-                        catch(const std::regex_error& re) {
-                            spdlog::warn("[{}] 非法正则, 计入失效项: {} ({})", logTag, rege3, re.what());
-                            invalid_count++;
+                        else {
+                            try {
+                                std::regex pattern3(rege3, std::regex::optimize);
+                                found = std::regex_search(js_str, pattern3);
+                                if(!found) {
+                                    spdlog::warn("[{}] 检测到失效项: {}", logTag, rege3);
+                                    invalid_count++;
+                                }
+                            }
+                            catch(const std::regex_error& re) {
+                                spdlog::warn("[{}] 非法正则, 计入失效项: {} ({})", logTag, rege3, re.what());
+                                invalid_count++;
+                            }
                         }
                     }
                     else {
@@ -504,10 +557,22 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
                 continue;
             }
 
-            // 替换: 先预检命中再替换, 避免零匹配时对全文做无谓的整串复制
-            // (std::regex_replace 零匹配也返回完整副本; 输出与预检前逐字节一致)
-            if(std::regex_search(js_str, pattern)) {
-                js_str = std::regex_replace(js_str, pattern, item.value()[1].get<std::string>());
+            // 替换(#129): 字面量走 find 快路径, 正则走 sregex_iterator 单遍构建;
+            // 零命中不改动 js_str(与原"预检命中再替换"语义等价, 免整串复制)
+            const std::string& replacement = item.value()[1].get<std::string>();
+            const bool use_literal = plain && replacement.find('$') == std::string::npos;
+            if(!use_literal && !pattern_opt) {
+                // 回填后引入 $ 的字面量条目: 此刻补构造(字面量必为合法正则, 不抛)
+                pattern_opt.emplace(rege, std::regex::optimize);
+            }
+            const size_t hits = use_literal
+                                    ? ReplaceLiteralInPlace(js_str, rege, replacement)
+                                    : ReplaceRegexInPlace(js_str, *pattern_opt, replacement);
+            if(hits > 0) {
+                hit_entries++;
+            }
+            else {
+                miss_entries++;
             }
             if(errorCheckMode) {
                 // 控制台已设为 UTF-8, 直接输出原文, 不再经 GBK 转码造成乱码
@@ -587,6 +652,12 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
             spdlog::error("写入 {} 失败(原文件未改动), 已中止", fileTag);
             return 1;
         }
+    }
+    // #129: 处理耗时与命中统计(含 select 段), 供慢机用户判断进度
+    {
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - process_start).count();
+        spdlog::info("{} 处理统计: 命中 {} 条, 未命中 {} 条, 耗时 {} ms", fileTag, hit_entries, miss_entries, ms);
     }
     spdlog::info("{} 文件汉化结束.", fileTag);
     return 0;
