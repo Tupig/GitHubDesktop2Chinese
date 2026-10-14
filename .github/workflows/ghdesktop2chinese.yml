@@ -6,7 +6,8 @@
 #   push main              ✓(注4)   ✓         ✓            -     ✓（仅构建相关变更, 补丁号+1）
 #   push tag v*            ✓        ✓         ✓(空跑,注1)  -     ✓（版本=tag）
 #   PR（目标 main）         ✓        ✓         ✓(注3)       ✓(注5) -
-#   定时 每日 UTC 01:23     ✓(注4)   ✓         ✓(注2)       -     ✓（仅构建相关变更, 补丁号+1）
+#   定时 每日 UTC 01:23    ✓(注4)   ✓         ✓(注2)       -     ✓（仅构建相关变更, 补丁号+1）
+#                                                ↳ 失败时 CI 失败通知 Issue(注8)
 #   手动 build             ✓        -         -            -     -
 #   手动 security          -        ✓         ✓            -     -
 #   手动 maintain          -        ✓         ✓(维护块)    -     -
@@ -27,11 +28,14 @@
 #        concurrency 组(产库期间 push main 排队)
 #   注7: 产库版本强制跟随 openssl/openssl 官方最新 Release(供应链): 四连全部成功后
 #        OpensslVendorPR 校验所产版本 == 官方最新 Release, 否则拒绝开入库 PR
+#   注8: 定时构建失败通知(#131): 任一任务失败时 CiNotify 创建/更新单条 "[CI 失败]"
+#        Issue(连续失败计数, 恢复后自动关闭); 仅限定时触发——push/PR 失败在 Actions/PR
+#        页即时可见, 无需 Issue 渠道
 #   防重复: push 仅绑定 main 与 tag → PR 分支的推送不会二次触发(PR 由 pull_request 单路径负责);
 #           同一 PR 连续推送由 concurrency 取消陈旧运行
 #   边界:   发布类(auto/release)仅限 main 触发(防特性分支误发布); 其他 ref 可跑 build/security/maintain/vendor 排查
 #
-# ── jobs 总览与依赖（10 任务, PascalCase 命名）────────────────
+# ── jobs 总览与依赖（11 任务, PascalCase 命名）────────────────
 #   0. Version            解析版本号与变更检测（构建/发布类任务的前置）;
 #                         构建差异检测: 与上次成功构建对比, 无差异时输出 build_changed=false
 #   1. Build              构建矩阵(三平台四目标) Matrix build + 产物功能测试（无差异时跳过, 见注4）
@@ -51,13 +55,17 @@
 #                         版本须为官方最新 Release 见注7; GITHUB_TOKEN PR 不触发 CI,
 #                         由维护者按 PR 内审查清单确认后合并）
 #   9. Release            汇总产物并发布
+#  10. CiNotify           CI 失败通知（仅定时构建, #131）: 有失败 job 时创建/更新单条
+#                         "[CI 失败]" Issue(连续失败计数), 成功时自动关闭; push/PR 失败
+#                         在 Actions/PR 页即时可见, 不走本渠道
 #
 #   job 依赖: Version 为根; Build/JsonCheck ← Version; CodeqlScan ← Version+JsonCheck
 #             (Version 直连为读其 outputs —— GitHub 仅直接 needs 可访问 outputs, 间接依赖不传递);
 #             产库四连串行: OpensslLinux ← CodeqlScan → OpensslWin → OpensslMacosArm64 → OpensslMacosX64,
 #             以 always() + 原 vendor 触发条件串联(不受上游 skip/失败传导, 保持原独立产库语义与低频);
 #             OpensslVendorPR ← 产库四连(四 result 全 success 才开 PR);
-#             Release ← Version+Build+JsonCheck+CodeqlScan(Version 直连同上; 其余三门为发布质量门)
+#             Release ← Version+Build+JsonCheck+CodeqlScan(Version 直连同上; 其余三门为发布质量门);
+#             CiNotify ← 全部 10 任务(!cancelled(): 失败也要跑, 通知的意义正在于失败)
 #   图约束: 全图以 Version 为根连通, 无孤立/不连通任务、无循环、无悬空 needs —— 由 JsonCheck 的
 #           单工作流规范校验（tools/ci/check-workflow.py, W0-W5）强制
 #   链路保证: changed=true(有变更待发版)时 build_changed 恒为 true(强制构建),
@@ -1641,3 +1649,31 @@ jobs:
               publish
             fi
           fi
+
+  # ═════════════════════════════════════════════════
+  # 11. CI 失败通知 —— 定时构建失败不再静默堆积(#131)
+  # ═════════════════════════════════════════════════
+  # 仅 schedule 触发(push/PR 失败在 Actions/PR 页即时可见, 无需 Issue 渠道):
+  #   本次 run 有失败 job → 创建/更新单条 "[CI 失败]" Issue(标题带连续失败次数);
+  #   本次 run 无失败 job → 自动关闭历史失败 Issue(评论恢复链接)
+  # needs 全部任务 + !cancelled(): 失败也要跑(通知的意义正在于失败); 通知脚本自身
+  # 失败仅 warning 不使本任务变红(避免"通知失败→run 红→下次又通知"的噪音循环)
+  CiNotify:
+    name: CI 失败通知
+    needs: [Version, Build, JsonCheck, CodeqlScan, OpensslLinux, OpensslWin, OpensslMacosArm64, OpensslMacosX64, OpensslVendorPR, Release]
+    if: ${{ !cancelled() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe182084d492a57081a3e3aae2d28c4b16 # v7
+
+      - name: 通知定时构建结果
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const notify = require('./tools/ci/ci-failure-notify.js');
+            await notify({ github, context, core });
