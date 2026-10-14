@@ -173,6 +173,14 @@ class CheckWorkflowTest(unittest.TestCase):
         self.assertIn("解析失败", violation.message)
         self.assertLessEqual(len(violation.message), 400)
 
+    def test_non_utf8_workflow_reported(self) -> None:
+        # GBK 编码的中文在 UTF-8 解码时抛 UnicodeDecodeError(ValueError 子类, 非 OSError)
+        path = self.workflows_dir / "ghdesktop2chinese.yml"
+        path.write_bytes("name: 测试\non: push\njobs:\n  a:\n    runs-on: ubuntu-24.04\n".encode("gbk"))
+        _, violations = check_workflow.run_checks(self.workflows_dir)
+        self.assertEqual([v.rule for v in violations], ["W0"])
+        self.assertIn("非 UTF-8 编码", violations[0].message)
+
     def test_empty_workflow_file(self) -> None:
         self.write_workflow("")
         _, violations = check_workflow.run_checks(self.workflows_dir)

@@ -176,6 +176,10 @@ def parse_workflow(path: Path) -> tuple[WorkflowGraph | None, list[Violation]]:
     except OSError as error:
         return None, [Violation("W0", "error", target,
                                 f"工作流文件读取失败: {collapse_detail(str(error))}")]
+    except UnicodeDecodeError as error:
+        # UnicodeDecodeError 是 ValueError 子类, 非 OSError, 需单独捕获
+        return None, [Violation("W0", "error", target,
+                                f"工作流文件非 UTF-8 编码: {collapse_detail(str(error))}")]
 
     if not isinstance(data, dict):
         kind = "文件为空" if data is None else f"顶层结构必须是映射, 实际为 {type(data).__name__}"
