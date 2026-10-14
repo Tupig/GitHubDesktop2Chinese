@@ -807,6 +807,14 @@ static bool LoadLocalization(const std::pair<std::string, int>& proxy) {
         }
         else
         {
+            constexpr uintmax_t kLocalJsonSizeLimit = 64ull * 1024 * 1024;
+            std::error_code size_err;
+            const auto local_size = fs::file_size(LocalizationJSON, size_err);
+            if (!size_err && local_size > kLocalJsonSizeLimit) {
+                spdlog::error("本地映射文件过大: {} 字节 (上限 64 MB), 请检查是否选错文件", local_size);
+                PAUSE
+                return false;
+            }
             // 本地读取汉化文件到json中
             std::ifstream config(LocalizationJSON);
             if (!config) {
