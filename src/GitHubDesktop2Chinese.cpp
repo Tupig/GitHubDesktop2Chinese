@@ -83,6 +83,7 @@ bool no_pause;                                  // 程序在结束前是否暂�
 bool only_read_from_remote;                     // 仅从远程url中读取本地化文件
 bool rollback;                                  // 从备份中还原汉化前的文件
 bool force_execute;                             // 映射文件 minversion 不满足时仍强制执行替换(--force)
+bool verbose_log;                               // 输出调试日志(--verbose, #141)
 
 json localization = R"(
                         {
@@ -1328,6 +1329,34 @@ int main(int argc, char* argv[])
 }
 #endif // _WIN32
 
+// #141: 用户侧日志级别开关 - 环境变量 GHD2C_LOG_LEVEL(trace/debug/info/warn/error/critical/off)
+// 值合法时设置为对应级别并返回 true; 缺失/为空返回 false(交由 --verbose 或默认级); 非法值告警后忽略
+static bool ApplyLogLevelFromEnv()
+{
+    const char* raw = std::getenv("GHD2C_LOG_LEVEL");
+    if(raw == nullptr || *raw == '\0') {
+        return false;
+    }
+    std::string value = raw;
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    spdlog::level::level_enum level;
+    if(value == "trace")          { level = spdlog::level::trace; }
+    else if(value == "debug")     { level = spdlog::level::debug; }
+    else if(value == "info")      { level = spdlog::level::info; }
+    else if(value == "warn")      { level = spdlog::level::warn; }
+    else if(value == "error")     { level = spdlog::level::err; }
+    else if(value == "critical")  { level = spdlog::level::critical; }
+    else if(value == "off")       { level = spdlog::level::off; }
+    else {
+        spdlog::warn("忽略无法识别的 GHD2C_LOG_LEVEL=\"{}\"(可用值: trace/debug/info/warn/error/critical/off)", raw);
+        return false;
+    }
+    spdlog::set_level(level);
+    spdlog::debug("日志级别已按 GHD2C_LOG_LEVEL={} 设置", value);
+    return true;
+}
+
 // #130: 顶层异常兜底 - 未捕获异常落日志并提示日志路径(而非无声 terminate), 双击用户可报告
 static int GuardedMain(int argc, char** argv, const fs::path& self_path)
 {
@@ -1378,6 +1407,7 @@ static int RunMain(int argc, char** argv, const fs::path& self_path)
 
         app.add_flag("--nopause", no_pause,                         "程序在结束前不再暂停等待");
         app.add_flag("--force", force_execute,                      "映射文件 minversion 不满足时仍强制执行替换(风险自担)");
+        app.add_flag("--verbose", verbose_log,                      "输出调试日志(日志级别 debug, 也可用环境变量 GHD2C_LOG_LEVEL 指定)");
         app.add_option("-g,--githubdesktoppath", Base,              "指定GitHubDesktop要汉化的资源所在目录(js所在目录)");
         app.add_option("-j,--json", LocalizationJSON,               "指定本地化JSON文件的本地路径");
         app.add_flag("-r,--onlyfromremote", only_read_from_remote,  "仅从远程url中读取本地化文件");
@@ -1429,6 +1459,11 @@ static int RunMain(int argc, char** argv, const fs::path& self_path)
         catch(...) {
             spdlog::error("命令行参数解析失败: 发生未知异常");
             return 3;
+        }
+        // #141: 用户侧日志级别开关 - 环境变量优先(可指定任意级别), 其次 --verbose(debug);
+        // release 默认 info, dev 版本保持 debug(见 RunMain 开头)
+        if(!ApplyLogLevelFromEnv() && verbose_log) {
+            spdlog::set_level(spdlog::level::debug);
         }
     }
     if(
