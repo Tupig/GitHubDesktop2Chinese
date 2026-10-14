@@ -4,9 +4,13 @@
 cmake_minimum_required (VERSION 3.30)
 
 # 如果支持，请为 MSVC 编译器启用热重载。
+# #138: 尊重外部(预设/命令行)对调试信息格式的显式选择——
+# x64-debug-asan 预设选 ProgramDatabase(/Zi), 因 /ZI(EditAndContinue) 与 /fsanitize=address 不兼容(D8016)
 if (POLICY CMP0141)
   cmake_policy(SET CMP0141 NEW)
-  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
+  if(NOT DEFINED CMAKE_MSVC_DEBUG_INFORMATION_FORMAT)
+    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
+  endif()
 endif()
 
 project ("GitHubDesktop2Chinese")
@@ -163,11 +167,10 @@ if(WIN32)
         ${GHD2C_OPENSSL_ROOT}/lib/${OPENSSL_SSL_NAME}
         ${GHD2C_OPENSSL_ROOT}/lib/${OPENSSL_CRYPTO_NAME})
     if(MSVC)
-        # 进程级 UTF-8 主动代码页清单(见 src/app.manifest):
-        # 缺少时窄字符路径按系统 ANSI 代码页解释, 非中文系统上中文路径参数会解析失败
-        # SHELL: 前缀保证含空格的源码路径作为单个链接选项传递
-        target_link_options(GitHubDesktop2Chinese PRIVATE
-            "SHELL:/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/src/app.manifest")
+        # 进程级 UTF-8 主动代码页清单: 缺少时窄字符路径按系统 ANSI 代码页解释,
+        # 非中文系统上中文路径参数会解析失败(#138 起作为源文件交给 CMake 统一处理,
+        # VS 生成器走 vcxproj 清单、Ninja 生成器自动配对 /MANIFESTINPUT 与 /MANIFEST:EMBED)
+        target_sources(GitHubDesktop2Chinese PRIVATE src/app.manifest)
     endif()
 elseif(APPLE)
     # 链接内置 OpenSSL 静态库（third_party/openssl-macos-*，配置段已按架构选定；

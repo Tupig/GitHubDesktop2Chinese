@@ -349,6 +349,15 @@ namespace utils {
 
             if(!res) {
                 if(bad_status) {
+                    // 416 Range Not Satisfiable: 临时文件大小与服务器端实际长度错位(资产被重新发布), 续传永久失败
+                    // #138 回归发现: 416 在上方响应头回调被中止后 Result 无效(operator bool 为 false),
+                    // 原 res->status==416 自愈分支不可达(0.15.3 与 0.61 行为一致, 实测复现);
+                    // 残留删除移到此处让上层重试时整包重下(与 JS 侧 fetch.js 的 416 自愈一致)
+                    if(bad_status == 416 && fs::exists(tmp_file)) {
+                        spdlog::warn("断点与服务器端错位(416), 删除残留临时文件后重新完整下载");
+                        std::error_code rm_ec;
+                        fs::remove(tmp_file, rm_ec);
+                    }
                     spdlog::error("更新错误, 服务器返回错误的状态码: {} (响应体未写入临时文件)", bad_status);
                 }
                 else {

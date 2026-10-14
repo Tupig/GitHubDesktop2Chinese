@@ -28,7 +28,6 @@ if (-not $Binary) {
     $candidates = @()
     foreach ($pattern in @(
         "out\build\*\Release\GitHubDesktop2Chinese.exe",
-        "out\build\*\GitHubDesktop2Chinese.exe",
         "build\Release\GitHubDesktop2Chinese.exe")) {
         $candidates += Get-Item (Join-Path $repoRoot $pattern) -ErrorAction SilentlyContinue
     }
