@@ -45,4 +45,38 @@ if (!warnedMd.includes('告警（不阻断）') || !warnedMd.includes('redos-sus
   console.error('FAIL: 报告未渲染告警段'); process.exit(1);
 }
 pass++;
+// #137: renderMarkdown 真实输出喂 report-issue.js 解析——跨文件文本契约回归
+// (修复前: 文案微调即静默劣化自动关单逻辑, 该链路零测试覆盖)
+import { createRequire } from 'node:module';
+const requireCjs = createRequire(import.meta.url);
+const { extractFailedCount } = requireCjs('./report-issue.js');
+const statsReport = renderMarkdown({ version: 't', generatedAt: 't', checks: { total: 120, ok: 111, failedCount: 9, failed: [] }, candidates: { candidates: [], patternsCount: 0 } });
+const metaParsed = extractFailedCount(statsReport);
+if (metaParsed.failed !== '9' || metaParsed.source !== 'meta') {
+  console.error('FAIL: meta 行解析失败', JSON.stringify(metaParsed)); process.exit(1);
+}
+// 文案微调后(模拟"总映射项 120 项，…")meta 行仍可解析——解耦验证
+const retuned = statsReport.replace('总映射项 120，有效 111，失效 9。', '总映射项 120 项，有效 111 项，失效 9 项。');
+const retunedParsed = extractFailedCount(retuned);
+if (retunedParsed.failed !== '9' || retunedParsed.source !== 'meta') {
+  console.error('FAIL: 文案微调后 meta 解析失败', JSON.stringify(retunedParsed)); process.exit(1);
+}
+// 旧格式(无 meta 行)后备中文文案解析仍工作
+const legacyOnly = statsReport.replace(/<!-- stats:[^\n]*-->\n/, '');
+const legacyParsed = extractFailedCount(legacyOnly);
+if (legacyParsed.failed !== '9' || legacyParsed.source !== 'legacy-text') {
+  console.error('FAIL: 旧格式后备解析失败', JSON.stringify(legacyParsed)); process.exit(1);
+}
+// 零失效: noFailures 自动关单链路精确
+const zeroReport = renderMarkdown({ version: 't', generatedAt: 't', checks: { total: 10, ok: 10, failedCount: 0, failed: [] }, candidates: null });
+const zeroParsed = extractFailedCount(zeroReport);
+if (zeroParsed.failed !== '0' || Number(zeroParsed.failed) !== 0) {
+  console.error('FAIL: 零失效解析异常', JSON.stringify(zeroParsed)); process.exit(1);
+}
+// 完全无统计信息: '?' 且不误判为无失效
+const noneParsed = extractFailedCount('no stats at all');
+if (noneParsed.failed !== '?' || Number(noneParsed.failed) === 0) {
+  console.error('FAIL: 无统计降级异常', JSON.stringify(noneParsed)); process.exit(1);
+}
+pass++;
 console.log('单元测试通过:', pass, '项');
