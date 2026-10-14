@@ -27,11 +27,22 @@ fi
 MD_COUNT="$(find "$SRC_DIR" -maxdepth 1 -name '*.md' | wc -l)"
 echo "文档源: $SRC_DIR（$MD_COUNT 个 .md 文件）"
 
+# 空目录前置守卫(#145): 源目录为空时立即中止,
+# 避免后续 cp 的 glob 未展开报出与真实原因相距甚远的错误
+if [ "$MD_COUNT" -eq 0 ]; then
+  echo "错误: 文档源目录 $SRC_DIR 中无 .md 文件，跳过同步（避免清空 Wiki）" >&2
+  exit 1
+fi
+
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
+# token 经 http.extraHeader 传递(#145): 不内嵌 URL, 避免落盘 .git/config;
+# 后续 pull/push 均需显式携带
+GIT_AUTH_HEADER="Authorization: token ${GH_TOKEN}"
+
 echo "克隆 Wiki 仓库 ${REPO_FULL}.wiki.git ..."
-git clone --quiet "https://x-access-token:${GH_TOKEN}@github.com/${REPO_FULL}.wiki.git" "$WORK_DIR/wiki"
+git -c "http.extraHeader=${GIT_AUTH_HEADER}" clone --quiet "https://github.com/${REPO_FULL}.wiki.git" "$WORK_DIR/wiki"
 cd "$WORK_DIR/wiki"
 
 # 镜像语义: 清空 Wiki 工作区（保留 .git）后用文档源覆盖
@@ -52,10 +63,10 @@ git commit --quiet -m "docs: 同步 docs/wiki → GitHub Wiki（源提交 ${SRC_
 
 # 推送; 远端瞬时前进（Wiki 被并发编辑）时 rebase 一次重试,
 # 仍失败则报错退出——工作流下次触发会基于最新 HEAD 自动恢复
-if ! git push --quiet; then
+if ! git -c "http.extraHeader=${GIT_AUTH_HEADER}" push --quiet; then
   echo "推送被拒（远端有新提交），rebase 后重试 ..."
-  git pull --rebase --quiet
-  git push --quiet
+  git -c "http.extraHeader=${GIT_AUTH_HEADER}" pull --rebase --quiet
+  git -c "http.extraHeader=${GIT_AUTH_HEADER}" push --quiet
 fi
 
 echo "同步完成:"
