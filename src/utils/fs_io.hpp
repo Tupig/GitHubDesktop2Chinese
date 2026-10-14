@@ -64,6 +64,28 @@ namespace utils {
         return true;
     }
 
+    // 原子复制: 先复制到 "dst.writing + 随机后缀" 临时文件, 成功后改名覆盖目标(#166)。
+    // 与 WriteFile 同一原子范式; 复制中断(磁盘满/进程被杀)只留临时文件或由本函数清理,
+    // 不会留下半截目标文件 —— 修复 fs::copy_file 直写目标时中断产生半截文件、
+    // 且目标 fs::exists 判定为真导致备份/恢复自愈机制失效的缺陷。
+    // src 不存在时 ec 为 no_such_file_or_directory; 失败时已清理临时文件。
+    inline auto AtomicCopyFile(const fs::path& src, const fs::path& dst, std::error_code& ec) -> bool {
+        const fs::path tmp = dst.string() + ".writing" + RandomTempSuffix();
+        fs::copy_file(src, tmp, fs::copy_options::overwrite_existing, ec);
+        if(ec) {
+            std::error_code rmec;
+            fs::remove(tmp, rmec); // copy 中断可能留半截临时文件; 无临时文件时忽略
+            return false;
+        }
+        fs::rename(tmp, dst, ec);
+        if(ec) {
+            std::error_code rmec;
+            fs::remove(tmp, rmec);
+            return false;
+        }
+        return true;
+    }
+
 }
 
 #endif // !UTILS_FS_IO_HPP
