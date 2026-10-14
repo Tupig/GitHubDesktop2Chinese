@@ -51,10 +51,10 @@ void CompareEntry(const std::string& subject, const std::string& pattern, const 
         hits = utils::ReplaceRegexInPlace(s, re, replacement);
     }
     CheckEqual("输出等价 [" + pattern + "]", s, expected);
-    // 命中计数: 基准用 sregex_iterator 数
+    // 命中计数: 基准在原串上用 sregex_iterator 数(不是在替换后的 expected 上)
     size_t expected_hits = 0;
     const auto end_it = std::sregex_iterator();
-    for(auto it = std::sregex_iterator(expected.begin(), expected.end(), re); it != end_it; ++it) {
+    for(auto it = std::sregex_iterator(subject.begin(), subject.end(), re); it != end_it; ++it) {
         expected_hits++;
     }
     CheckTrue("命中计数等价 [" + pattern + "]", hits == expected_hits);
