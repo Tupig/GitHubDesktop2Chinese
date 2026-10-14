@@ -48,7 +48,7 @@ third_party/
 
 ## 产库自动入库流程（OpenSSL）
 
-触发方式：PR 打 `vendor-openssl` 标签、或手动运行主工作流选择 `type=vendor`（`openssl-version` 默认 `3.5.9`，仅 LTS）。
+触发方式：PR 打 `vendor-openssl` 标签、或手动运行主工作流选择 `type=vendor`（`openssl-version` 留空自动取官方最新 Release，不锁 3.x）。
 
 1. 四平台产库任务（Windows / Linux / macOS x64 / macOS arm64）全部成功后，**OpensslVendorPR** 任务自动执行：
    - 校验所产版本为 openssl/openssl **官方最新 Release**（GitHub API `releases/latest`，非最新则拒绝开 PR）；
@@ -87,7 +87,7 @@ nmake install_sw
 
 macOS 双架构静态库由主工作流 [.github/workflows/ghdesktop2chinese.yml](../.github/workflows/ghdesktop2chinese.yml) 的 **产库 OpenSSL (macOS)** 任务统一产出（PR 打 `vendor-openssl` 标签或手动 `type=vendor` 触发，不参与日常 CI）：
 
-1. 在 PR 上打 `vendor-openssl` 标签（labeled 事件触发），或在 GitHub Actions 页面手动运行主工作流并选择 `type=vendor`；`openssl-version` 输入默认 `3.5.9`（仅 LTS）。
+1. 在 PR 上打 `vendor-openssl` 标签（labeled 事件触发），或在 GitHub Actions 页面手动运行主工作流并选择 `type=vendor`；`openssl-version` 输入留空自动取官方最新 Release。
 2. 运行完成后产物经**产库自动入库流程**（见上节）组装开 PR；手动备选：从 artifact（`openssl-macos-x64` / `openssl-macos-arm64`，保留 7 天）下载产物：
    `gh run download <run-id> -n openssl-macos-x64 -D third_party/openssl-macos-x64`（arm64 同理）。
 3. 确认 `include/openssl/ssl.h`、`lib/libssl.a`、`lib/libcrypto.a` 齐备后随仓库提交。
@@ -161,7 +161,7 @@ third_party/
 
 ## Automatic OpenSSL Vendor Intake Flow
 
-Trigger: the `vendor-openssl` label on a PR, or a manual run of the main workflow with `type=vendor` (`openssl-version` defaults to `3.5.9`, LTS only).
+Trigger: the `vendor-openssl` label on a PR, or a manual run of the main workflow with `type=vendor` (an empty `openssl-version` input resolves to the latest official Release; not locked to 3.x).
 
 1. Once all four vendor jobs (Windows / Linux / macOS x64 / macOS arm64) succeed, the **OpensslVendorPR** job automatically:
    - verifies the produced version is the **latest official Release** of openssl/openssl (GitHub API `releases/latest`; anything older aborts before a PR is opened);
@@ -200,7 +200,7 @@ Build options and artifact conventions:
 
 Both macOS architectures are produced by the **产库 OpenSSL (macOS)** jobs of the main workflow [.github/workflows/ghdesktop2chinese.yml](../.github/workflows/ghdesktop2chinese.yml) (triggered by the `vendor-openssl` label on a PR or manual `type=vendor`, not part of day-to-day CI):
 
-1. Add the `vendor-openssl` label to a PR (labeled event), or run the main workflow manually from the GitHub Actions page with `type=vendor`; the `openssl-version` input defaults to `3.5.9` (LTS only).
+1. Add the `vendor-openssl` label to a PR (labeled event), or run the main workflow manually from the GitHub Actions page with `type=vendor`; an empty `openssl-version` input resolves to the latest official Release.
 2. Once the run completes, the artifacts go through the **automatic vendor intake flow** (see above) to assemble the PR; manual fallback: download the two artifacts (`openssl-macos-x64` / `openssl-macos-arm64`, retained for 7 days):
    `gh run download <run-id> -n openssl-macos-x64 -D third_party/openssl-macos-x64` (likewise for arm64).
 3. Verify that `include/openssl/ssl.h`, `lib/libssl.a` and `lib/libcrypto.a` are present, then commit them to the repository.
