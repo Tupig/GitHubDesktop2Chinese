@@ -79,10 +79,11 @@
 #   push main     有构建相关变更时自动递增版本发布；无变更不发布（版本留空, 产物名回退 commit SHA）
 #
 # ── 稳定性设计 ───────────────────────────────────────────────
-#   - runner 固定版本（ubuntu-24.04 / windows-2025 / macos-15-intel），CodeQL v4
+#   - runner 固定版本（ubuntu-24.04 / windows-2025 / macos-15-intel / macos-15(arm64)），CodeQL v4
 #   - 所有 job 均设 timeout-minutes 上限
 #   - 网络/配置类关键步骤内置超时与自动重试
-#   - macOS 拆分 macos-x64 / macos-arm64 单架构包, 均在 macos-15-intel 交叉编译(不依赖容量紧张的 arm64 runner),
+#   - macOS 拆分 macos-x64 / macos-arm64 单架构包: x64 在 macos-15-intel 原生构建,
+#     arm64 在 macos-15(M1) 原生构建(产物功能测试可原生执行),
 #     静态 OpenSSL + strip/LTO 裁剪体积; OpenSSL 静态库由产库四连任务产库(见 4/5/6/7),
 #     GitHub Desktop 安装包与提取结果走 actions/cache
 #   - 第三方 actions 全部按 commit SHA 固定（版本升级手动执行；漏洞告警由 Dependabot 提示）
@@ -175,7 +176,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -273,12 +275,12 @@ jobs:
   # ═════════════════════════════════════════════════
   # 1. 构建矩阵（windows-x64 / macos-x64 / macos-arm64 / linux-x64）
   #    每平台编译 + 产物功能测试（--help / 非法参数拒绝 / 中文路径完整流程）
-  #    macOS 两个单架构包均在 macos-15-intel 交叉编译（不依赖 arm64 runner）:
-  #    静态链接 OpenSSL + strip/LTO 裁剪体积; arm64 由架构/自包含断言校验(无法原生执行)
+  #    macOS 两个单架构包: x64 在 macos-15-intel 原生构建, arm64 在 macos-15(M1) 原生构建:
+  #    静态链接 OpenSSL + strip/LTO 裁剪体积; 四平台产物功能测试均原生执行
   #    触发：push main|tag / PR / 定时 / 手动(auto|build|release)
   # ═════════════════════════════════════════════════
   Build:
-    name: Matrix build (${{ matrix.name }})
+    name: 构建 ${{ matrix.display }}
     needs: Version
     # build_changed=false(与上次成功构建无差异)时跳过整个矩阵, 由 CodeqlScan 的构建跳过说明块输出说明(#81)
     if: |
@@ -293,17 +295,23 @@ jobs:
       matrix:
         include:
           - name: windows-x64
+            # display 仅用于 Actions 页面任务显示名; name 为产物/目录引用的技术标识, 勿改
+            display: Windows_x64
             os: windows-2025
             artifact: GitHubDesktop2Chinese.exe
           - name: macos-x64
+            display: macOS_x64
             os: macos-15-intel
             arch: x64
             artifact: GitHubDesktop2Chinese-macos-x64
           - name: macos-arm64
-            os: macos-15-intel
+            display: macOS_arm64
+            # 原生 ARM(M1) runner: 产物功能测试可原生执行(此前 Intel 交叉编译无法运行测试)
+            os: macos-15
             arch: arm64
             artifact: GitHubDesktop2Chinese-macos-arm64
           - name: linux-x64
+            display: Linux_x64
             os: ubuntu-24.04
             artifact: GitHubDesktop2Chinese-linux-x64
     runs-on: ${{ matrix.os }}
@@ -319,7 +327,8 @@ jobs:
       CI_SHA: ${{ github.sha }}
     steps:
       # ── 检出 ──
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # ── 配置：CMake 生成（失败自动重试 3 次）──
       - name: 配置 CMake（Windows x64）
@@ -382,10 +391,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # macOS arm64 产物无法在 Intel runner 原生执行, 由后续架构/自包含断言覆盖(同一 SDK/clang 交叉编译)
-          if [[ "$RUNNER_OS" == "macOS" && "${{ matrix.arch }}" == "arm64" ]]; then
-            echo "跳过: arm64 交叉产物无法在本 runner 原生运行"
-            exit 0
+          # 交叉编译产物(目标架构 ≠ runner 原生架构)无法执行, 由后续架构/自包含断言覆盖
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            NATIVE="$(uname -m)"
+            EXPECT="${{ matrix.arch }}"
+            if [[ "$EXPECT" == "x64" ]]; then EXPECT="x86_64"; fi
+            if [[ "$NATIVE" != "$EXPECT" ]]; then
+              echo "跳过: 交叉产物($EXPECT)无法在本 runner($NATIVE) 原生运行"
+              exit 0
+            fi
           fi
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             BIN="build/Release/${EXE_NAME}"
@@ -509,7 +523,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 深度校验 localization.json
         run: python tools/ci/check-localization.py
@@ -520,7 +535,8 @@ jobs:
       - name: 全量扫描源码编码（UTF-8 无 BOM）
         run: python tools/ci/check-encoding.py --config tools/ci/encoding-check.json
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      - name: 安装 Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
 
@@ -577,7 +593,8 @@ jobs:
     steps:
       # fetch-depth: 2 —— Wiki 同步需要 before(HEAD 的父)做 docs/wiki diff 基准;
       # 多 commit 一次 push 时 before 缺失 → fail-safe 视为有变更, 同步幂等无害
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 2
 
@@ -591,28 +608,28 @@ jobs:
         shell: bash
         run: echo "enabled=true" >> "$GITHUB_OUTPUT"
 
-      - name: Initialize CodeQL
+      - name: 初始化 CodeQL
         if: steps.codeql_gate.outputs.enabled == 'true'
         uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           languages: c-cpp
           build-mode: manual
 
-      - name: Configure CMake (x64)
+      - name: 配置 CMake (x64)
         if: steps.codeql_gate.outputs.enabled == 'true'
         shell: pwsh
         run: |
           chcp 65001 | Out-Null
           cmake -B build -A x64 -DFILE_VERSION="codeql"
 
-      - name: Build for CodeQL
+      - name: 为 CodeQL 构建
         if: steps.codeql_gate.outputs.enabled == 'true'
         shell: pwsh
         run: |
           chcp 65001 | Out-Null
           cmake --build build --config Release
 
-      - name: Perform CodeQL Analysis
+      - name: 执行 CodeQL 分析
         if: steps.codeql_gate.outputs.enabled == 'true'
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
@@ -626,7 +643,8 @@ jobs:
         shell: bash
         run: echo "enabled=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      - name: 安装 Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         if: steps.maintain_gate.outputs.enabled == 'true'
         with:
           node-version: 24
@@ -787,7 +805,8 @@ jobs:
     env:
       OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 编译 OpenSSL（x64）
         run: |
@@ -851,7 +870,8 @@ jobs:
     env:
       OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 下载并解压 OpenSSL 源码
         shell: bash
@@ -949,7 +969,8 @@ jobs:
       # inputs 上下文仅 dispatch 事件可用 → 统一经 github.event.inputs 读取, PR 事件回退默认值
       OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 编译 OpenSSL（arm64 ≈8 分钟）
         run: |
@@ -1017,7 +1038,8 @@ jobs:
       # inputs 上下文仅 dispatch 事件可用 → 统一经 github.event.inputs 读取, PR 事件回退默认值
       OSSL_VER: ${{ github.event.inputs.openssl-version || '3.5.9' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 编译 OpenSSL（x64 ≈8 分钟）
         run: |
@@ -1098,7 +1120,8 @@ jobs:
       SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
       SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 校验版本号
         run: |
