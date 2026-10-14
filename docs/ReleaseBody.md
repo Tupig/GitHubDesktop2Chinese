@@ -27,6 +27,18 @@
   - Dependency unification (completed): Linux now also builds against the OpenSSL 3.5.9 static library bundled in the repo (x64, -fPIC, produced by the main workflow's vendor jobs and committed) instead of libssl-dev — all three platforms are now uniformly “clone and build offline” (#98)（v0.0.1）
 - CI 单工作流化: wiki 同步与 OpenSSL 产库任务并入主工作流, 删除独立工作流文件; 新增单工作流规范校验器(连通性/无循环/无孤立任务等)与 20 用例测试防回归 (#98)（v0.0.1）
   - Single-workflow CI: the wiki-sync and OpenSSL vendor jobs are merged into the main workflow and the standalone workflow files are removed; a single-workflow lint (connectivity / no cycles / no orphan jobs) plus 20 test cases guard against regressions (#98)（v0.0.1）
+- 版本重发: v0.0.2 与 v0.0.1 指向同一提交, 无代码变更（v0.0.2）
+  - Version re-publish: v0.0.2 points to the same commit as v0.0.1, with no code changes（v0.0.2）
+- 文档治理: 行尾策略锁定与维护备忘落地 (#115)（v0.0.3）
+  - Documentation: line-ending policy locked in with maintenance memos landed (#115)（v0.0.3）
+- 文档修正: 修正依赖策略与 README 过时表述 (#116)（v0.0.3）
+  - Documentation fix: corrected outdated dependency-policy and README wording (#116)（v0.0.3）
+- 审计修复: workflow 权限最小化、下载完整性校验与工具链一致性 (#124)（v0.0.3）
+  - Audit fixes: workflow permission minimization, download-integrity verification and toolchain consistency (#124)（v0.0.3）
+- 修复: 「关于」菜单中的汉化插件链接改指本仓库 (#126)（v0.0.3）
+  - Fix: the localized About-menu plugin link now points to this repository (#126)（v0.0.3）
+- 关键缺陷修复: 版本解析与退出码关键缺陷(A1/A2/D1)修复, 新增 C++ 单元测试基础设施 version_test (#127)（v0.0.4）
+  - Critical fixes: key version-parsing and exit-code defects (A1/A2/D1) fixed; C++ unit-test infrastructure (version_test) added (#127)（v0.0.4）
 
 <!--
 #### 修复BUG:

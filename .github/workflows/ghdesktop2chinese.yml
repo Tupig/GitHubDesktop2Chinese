@@ -35,20 +35,20 @@
 #   1b. encoding-check 源码编码格式质量门（UTF-8 无 BOM; 第三方依赖排除, 违规即失败）#88
 #   2. tools-test     自动维护工具自检门（语法 + 单元测试 + Markdown 链接检查 + 单工作流规范校验）
 #   3. codeql         C/C++ 安全扫描门
+#   3b. auto-maintain 失效检测 + 未翻译候选提取（定时 / 手动）
+#   3c. sync-wiki     同步 docs/wiki → GitHub Wiki（push main / 手动 auto|release; 检测到变更才执行）
 #   4. build          构建矩阵(三平台四目标) + 产物功能测试（无差异时跳过, 见注4）
 #   4b. build-skip-notice  构建跳过说明（skipped job 自身无日志, 以独立 job 输出醒目说明）
-#   5. auto-maintain  失效检测 + 未翻译候选提取（定时 / 手动）
-#   5b. sync-wiki     同步 docs/wiki → GitHub Wiki（push main / 手动 auto|release; 检测到变更才执行）
-#   6. release        汇总产物并发布
-#   7. vendor-macos   产库 OpenSSL（macOS x64/arm64 交叉编译; PR 标签 vendor-openssl / 手动 vendor）
-#   8. vendor-linux   产库 OpenSSL（linux x64 静态库; 同上触发）
-#   9. vendor-windows 产库 OpenSSL（windows x64 .lib; 同上触发, 产物用于替换内置库）
+#   5. release        汇总产物并发布
+#   6. vendor-macos   产库 OpenSSL（macOS x64/arm64 交叉编译; PR 标签 vendor-openssl / 手动 vendor）
+#   7. vendor-linux   产库 OpenSSL（linux x64 静态库; 同上触发）
+#   8. vendor-windows 产库 OpenSSL（windows x64 .lib; 同上触发, 产物用于替换内置库）
 #
-#   job 依赖: build←version；build-skip-notice←version；codeql←version；auto-maintain←version；
-#             sync-wiki←version；vendor-macos/linux/windows←version；
+#   job 依赖: 检查/维护类任务(json-quality/encoding-check/tools-test/codeql/auto-maintain/sync-wiki)
+#             与构建矩阵均在解析版本号之后执行(←version), 六个检查/维护 job 定义顺序位于
+#             构建产物之前; build-skip-notice←version; vendor-macos/linux/windows←version;
 #             release←version+build+json-quality+tools-test+encoding-check
-#   图约束: json-quality / encoding-check / tools-test 相互独立, 由 release 汇聚连通;
-#           全图无孤立/不连通任务、无循环、无悬空 needs —— 由 tools-test 的
+#   图约束: 全图以 version 为根连通, 无孤立/不连通任务、无循环、无悬空 needs —— 由 tools-test 的
 #           单工作流规范校验（tools/ci/check-workflow.py, W0-W5）强制
 #   链路保证: changed=true(有变更待发版)时 build_changed 恒为 true(强制构建),
 #             release 需要的产物永远存在; 无差异跳过只发生在 changed=false 时
@@ -271,7 +271,8 @@ jobs:
   # ═════════════════════════════════════════════════
   json-quality:
     name: localization.json 质量校验
-    # release needs 本任务: tag 推送与 push main 自动发版均受本质量门约束
+    # 关系链: 解析版本号之后(version)、构建产物之前执行; release needs 本任务: tag 推送与 push main 自动发版均受本质量门约束
+    needs: version
     if: |
       github.event_name == 'pull_request' ||
       github.event_name == 'schedule' ||
@@ -295,7 +296,8 @@ jobs:
   # ═════════════════════════════════════════════════
   encoding-check:
     name: 源码编码格式检查
-    # release needs 本任务: 发布前强制过编码规范门, 防止非 UTF-8/BOM 污染进入发布链
+    # 关系链: 解析版本号之后(version)、构建产物之前执行; release needs 本任务: 发布前强制过编码规范门, 防止非 UTF-8/BOM 污染进入发布链
+    needs: version
     if: |
       github.event_name == 'pull_request' ||
       github.event_name == 'schedule' ||
@@ -314,7 +316,8 @@ jobs:
   # ═════════════════════════════════════════════════
   tools-test:
     name: 自动维护工具自检
-    # release needs 本任务: 保证 tag 推送与 push main 自动发版前工具自检已通过
+    # 关系链: 解析版本号之后(version)、构建产物之前执行; release needs 本任务: 保证 tag 推送与 push main 自动发版前工具自检已通过
+    needs: version
     if: |
       github.event_name == 'pull_request' ||
       github.event_name == 'schedule' ||
@@ -393,6 +396,144 @@ jobs:
         uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
         with:
           category: "/language:c-cpp"
+
+  # ═════════════════════════════════════════════════
+  # 3b. 自动维护（失效检测 + 候选提取 → 创建/更新 Issue）
+  #     触发：push main / 定时 / 手动(auto|maintain|release)
+  # ═════════════════════════════════════════════════
+  auto-maintain:
+    name: 失效检测 + 未翻译候选提取
+    # 单工作流规范: 纳入依赖图, 消除孤立任务(version 无 if 恒运行, 无 needs 悬空风险)
+    needs: version
+    # 触发: push main(每次提交巡检映射健康度) / 定时 / 手动 auto|maintain|release; tag 与 PR 不触发
+    if: |
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'maintain' || inputs.type == 'release'))
+    runs-on: ubuntu-24.04
+    # 检测步骤 2×20min 重试 + 版本查询最坏约 6.5min, 需覆盖完整重试设计(30min 会把第二次重试 cancel 掉)
+    timeout-minutes: 50
+    # report-issue.js / github-script 创建 Issue 需要 issues 写权限；顶层已收窄，job 级显式声明（#117）
+    permissions:
+      contents: read
+      issues: write
+    env:
+      # fetch.js 查询 GitHub API 时使用；匿名限额 60 次/小时会被共享 runner IP 触发 403
+      # 与其余 job 统一取 github.token（#119）
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+
+      - name: 安装解压工具（缺失时）
+        run: |
+          command -v unzip >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y unzip; }
+
+      - name: 查询 GitHub Desktop 最新版本
+        id: version
+        working-directory: tools/auto-maintain
+        run: |
+          set -euo pipefail
+          LATEST=""
+          for attempt in 1 2 3; do
+            if LATEST="$(timeout 120 node -e "import('./src/fetch.js').then(async m=>{const r=await m.getLatestRelease();console.log(r.version)}).catch(e=>{console.error(e.message);process.exit(1)})")"; then
+              break
+            fi
+            echo "::warning::查询 GitHub Desktop 最新版本失败(第 ${attempt} 次)，10 秒后重试"
+            sleep 10
+          done
+          [[ -n "$LATEST" ]] || { echo "::error::查询 GitHub Desktop 最新版本连续失败 3 次"; exit 1; }
+          echo "ghdesktop_version=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "查询到 GitHub Desktop 最新版本: $LATEST"
+
+      - name: 缓存安装包与提取结果
+        id: cache-maintain
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/ghdesktop-auto-maintain
+          # key 只含 安装包/解压产物 的实际决定因素(GHD 版本/平台/工具源码);
+          # 不含 localization.json: 映射每次改动都作废 307MB 安装包缓存, 而报告由步骤内重新生成
+          key: ghd-maintain-v3-${{ steps.version.outputs.ghdesktop_version }}-${{ runner.os }}-${{ hashFiles('tools/auto-maintain/src/**') }}
+
+      - name: 运行失效检测 + 未翻译候选提取
+        working-directory: tools/auto-maintain
+        run: |
+          set -euo pipefail
+          attempt=0
+          until timeout 1200 node src/index.js check extract \
+            --workdir "$RUNNER_TEMP/ghdesktop-auto-maintain" \
+            --top 100 \
+            --write-report; do
+            attempt=$((attempt + 1))
+            if [[ $attempt -ge 2 ]]; then
+              echo "::error::失效检测连续失败 2 次"
+              exit 1
+            fi
+            echo "::warning::失效检测失败(第 ${attempt} 次)，20 秒后重试"
+            sleep 20
+          done
+
+      - name: 创建或更新自动维护 Issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const run = require('./tools/ci/report-issue.js');
+            await run({ github, context, core });
+
+  # ═════════════════════════════════════════════════
+  # 3c. 同步 docs/wiki → GitHub Wiki（push main / 手动 auto|release; 原独立 wiki-sync.yml 并入）
+  # ═════════════════════════════════════════════════
+  sync-wiki:
+    name: 同步 docs/wiki → GitHub Wiki
+    # 触发: push main / 手动 auto|release; PR/定时/tag 不触发(Wiki 只随发布性事件更新)
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'release'))
+    # 单工作流规范: 纳入依赖图(version 无 if 恒运行, 无 needs 悬空风险)
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      # sync-wiki.sh 以 GITHUB_TOKEN 推送 Wiki 仓库; 只下发 contents 写权限
+      contents: write
+    steps:
+      # fetch-depth: 2 —— push 场景需要 before(HEAD 的父)做 diff 基准;
+      # 多 commit 一次 push 时 before 缺失 → fail-safe 视为有变更, 同步本身幂等无害
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 2
+
+      - name: 检测 docs/wiki 变更
+        id: wiki-changed
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # 手动触发 before 为空 / 新分支首推 before 全零 → 视为有变更(尊重用户意图)
+          if [[ -z "$BEFORE_SHA" || "$BEFORE_SHA" =~ ^0+$ ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # before 不在浅克隆历史中(多 commit 推送/历史改写) → fail-safe 视为有变更
+          if ! git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --quiet "$BEFORE_SHA" "$GITHUB_SHA" -- docs/wiki; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "docs/wiki 无变更, 跳过同步"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 同步 docs/wiki 到 GitHub Wiki
+        if: steps.wiki-changed.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/ci/sync-wiki.sh
 
   # ═════════════════════════════════════════════════
   # 4. 构建矩阵（windows-x64 / macos-x64 / macos-arm64 / linux-x64）
@@ -656,145 +797,7 @@ jobs:
           echo "无差异，已跳过构建（对比基准：上次成功构建 ${BASE_SHORT}）"
 
   # ═════════════════════════════════════════════════
-  # 5. 自动维护（失效检测 + 候选提取 → 创建/更新 Issue）
-  #    触发：push main / 定时 / 手动(auto|maintain|release)
-  # ═════════════════════════════════════════════════
-  auto-maintain:
-    name: 失效检测 + 未翻译候选提取
-    # 单工作流规范: 纳入依赖图, 消除孤立任务(version 无 if 恒运行, 无 needs 悬空风险)
-    needs: version
-    # 触发: push main(每次提交巡检映射健康度) / 定时 / 手动 auto|maintain|release; tag 与 PR 不触发
-    if: |
-      github.event_name == 'schedule' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'maintain' || inputs.type == 'release'))
-    runs-on: ubuntu-24.04
-    # 检测步骤 2×20min 重试 + 版本查询最坏约 6.5min, 需覆盖完整重试设计(30min 会把第二次重试 cancel 掉)
-    timeout-minutes: 50
-    # report-issue.js / github-script 创建 Issue 需要 issues 写权限；顶层已收窄，job 级显式声明（#117）
-    permissions:
-      contents: read
-      issues: write
-    env:
-      # fetch.js 查询 GitHub API 时使用；匿名限额 60 次/小时会被共享 runner IP 触发 403
-      # 与其余 job 统一取 github.token（#119）
-      GITHUB_TOKEN: ${{ github.token }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 24
-
-      - name: 安装解压工具（缺失时）
-        run: |
-          command -v unzip >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y unzip; }
-
-      - name: 查询 GitHub Desktop 最新版本
-        id: version
-        working-directory: tools/auto-maintain
-        run: |
-          set -euo pipefail
-          LATEST=""
-          for attempt in 1 2 3; do
-            if LATEST="$(timeout 120 node -e "import('./src/fetch.js').then(async m=>{const r=await m.getLatestRelease();console.log(r.version)}).catch(e=>{console.error(e.message);process.exit(1)})")"; then
-              break
-            fi
-            echo "::warning::查询 GitHub Desktop 最新版本失败(第 ${attempt} 次)，10 秒后重试"
-            sleep 10
-          done
-          [[ -n "$LATEST" ]] || { echo "::error::查询 GitHub Desktop 最新版本连续失败 3 次"; exit 1; }
-          echo "ghdesktop_version=$LATEST" >> "$GITHUB_OUTPUT"
-          echo "查询到 GitHub Desktop 最新版本: $LATEST"
-
-      - name: 缓存安装包与提取结果
-        id: cache-maintain
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ${{ runner.temp }}/ghdesktop-auto-maintain
-          # key 只含 安装包/解压产物 的实际决定因素(GHD 版本/平台/工具源码);
-          # 不含 localization.json: 映射每次改动都作废 307MB 安装包缓存, 而报告由步骤内重新生成
-          key: ghd-maintain-v3-${{ steps.version.outputs.ghdesktop_version }}-${{ runner.os }}-${{ hashFiles('tools/auto-maintain/src/**') }}
-
-      - name: 运行失效检测 + 未翻译候选提取
-        working-directory: tools/auto-maintain
-        run: |
-          set -euo pipefail
-          attempt=0
-          until timeout 1200 node src/index.js check extract \
-            --workdir "$RUNNER_TEMP/ghdesktop-auto-maintain" \
-            --top 100 \
-            --write-report; do
-            attempt=$((attempt + 1))
-            if [[ $attempt -ge 2 ]]; then
-              echo "::error::失效检测连续失败 2 次"
-              exit 1
-            fi
-            echo "::warning::失效检测失败(第 ${attempt} 次)，20 秒后重试"
-            sleep 20
-          done
-
-      - name: 创建或更新自动维护 Issue
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        with:
-          script: |
-            const run = require('./tools/ci/report-issue.js');
-            await run({ github, context, core });
-
-  # ═════════════════════════════════════════════════
-  # 5b. 同步 docs/wiki → GitHub Wiki（push main / 手动 auto|release; 原独立 wiki-sync.yml 并入）
-  # ═════════════════════════════════════════════════
-  sync-wiki:
-    name: 同步 docs/wiki → GitHub Wiki
-    # 触发: push main / 手动 auto|release; PR/定时/tag 不触发(Wiki 只随发布性事件更新)
-    if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'release'))
-    # 单工作流规范: 纳入依赖图(version 无 if 恒运行, 无 needs 悬空风险)
-    needs: version
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      # sync-wiki.sh 以 GITHUB_TOKEN 推送 Wiki 仓库; 只下发 contents 写权限
-      contents: write
-    steps:
-      # fetch-depth: 2 —— push 场景需要 before(HEAD 的父)做 diff 基准;
-      # 多 commit 一次 push 时 before 缺失 → fail-safe 视为有变更, 同步本身幂等无害
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 2
-
-      - name: 检测 docs/wiki 变更
-        id: wiki-changed
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-          # 手动触发 before 为空 / 新分支首推 before 全零 → 视为有变更(尊重用户意图)
-          if [[ -z "$BEFORE_SHA" || "$BEFORE_SHA" =~ ^0+$ ]]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # before 不在浅克隆历史中(多 commit 推送/历史改写) → fail-safe 视为有变更
-          if ! git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git diff --quiet "$BEFORE_SHA" "$GITHUB_SHA" -- docs/wiki; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "docs/wiki 无变更, 跳过同步"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: 同步 docs/wiki 到 GitHub Wiki
-        if: steps.wiki-changed.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash tools/ci/sync-wiki.sh
-
-  # ═════════════════════════════════════════════════
-  # 6. 发布 Release（push main 有变更 / tag v* / 手动 auto|release / 定时且有变更）
+  # 5. 发布 Release（push main 有变更 / tag v* / 手动 auto|release / 定时且有变更）
   #    依赖 build 产物与 version 版本号
   # ═════════════════════════════════════════════════
   release:
@@ -932,6 +935,9 @@ jobs:
 
       - name: 生成 Release 说明
         shell: bash
+        env:
+          # 变更记录自动提取需查询 tags / compare API
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           VER="$RELEASE_VERSION"
@@ -962,12 +968,48 @@ jobs:
               # 仅提取当前版本的变更行(行内含版本标记: 全角括号+vX.Y.Z),
               # 不再整篇附带从 v1.2.0 起的历史日志
               CHANGES="$(grep -F "（v$VER）" docs/ReleaseBody.md || true)"
+              # 变更记录自动化: 未预置当前版本条目时, 自动提取上一发布版本以来的提交标题,
+              # 生成条目写入 docs/ReleaseBody.md 的 Changelog 段末尾, 供 Release 说明与后续发布读取
+              AUTO_EXTRACTED=""
+              if [[ -z "$CHANGES" ]]; then
+                TAGS="$(gh api "repos/${GITHUB_REPOSITORY}/tags?per_page=100" --paginate -q '.[].name' 2>/dev/null || true)"
+                if [[ -n "$TAGS" ]]; then
+                  # 版本序取严格小于当前版本的最大 tag(权重比较, 字典序在 patch>=10 时不可靠)
+                  PREV_TAG="$(printf '%s\n' "$TAGS" | grep -Ex 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -V \
+                    | awk -F. -v v="$VER" 'BEGIN { split(v, c, ".") } { p1 = $1; sub(/^v/, "", p1); if ((p1 * 1000000 + $2 * 1000 + $3) < (c[1] * 1000000 + c[2] * 1000 + c[3])) print }' | tail -n1)"
+                  if [[ -n "$PREV_TAG" ]]; then
+                    SUBJECTS="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${GITHUB_SHA}" \
+                      -q '.commits[] | select((.parents | length) == 1) | .commit.message | split("\n")[0]' 2>/dev/null || true)"
+                    if [[ -n "$SUBJECTS" ]]; then
+                      AUTO_ENTRIES=""
+                      while IFS= read -r subject; do
+                        if [[ -n "$subject" ]]; then
+                          AUTO_ENTRIES+="- ${subject}（v$VER）"$'\n'
+                        fi
+                      done <<< "$SUBJECTS"
+                      AUTO_ENTRIES="${AUTO_ENTRIES%$'\n'}"
+                      # 插入 Changelog 段末尾(首个 <!-- 注释块之前)
+                      AUTO_ENTRIES="$AUTO_ENTRIES" awk '
+                        BEGIN { entries = ENVIRON["AUTO_ENTRIES"] }
+                        /^<!--/ && !inserted { print entries; print ""; inserted = 1 }
+                        { print }
+                      ' docs/ReleaseBody.md > docs/ReleaseBody.md.tmp && mv docs/ReleaseBody.md.tmp docs/ReleaseBody.md
+                      CHANGES="$(grep -F "（v$VER）" docs/ReleaseBody.md || true)"
+                      AUTO_EXTRACTED="1"
+                    fi
+                  fi
+                fi
+              fi
               echo ""
               echo "---"
               echo ""
               if [[ -n "$CHANGES" ]]; then
                 echo "## 本次更新"
                 echo ""
+                if [[ -n "$AUTO_EXTRACTED" ]]; then
+                  echo "> docs/ReleaseBody.md 未预置 v$VER 条目，以下变更由发布流程自动提取自提交历史"
+                  echo ""
+                fi
                 echo "$CHANGES"
               else
                 echo "> ℹ️ 未在 docs/ReleaseBody.md 中找到 v$VER 的变更记录，完整更新历史见仓库文档"
@@ -1020,7 +1062,7 @@ jobs:
           fi
 
   # ═════════════════════════════════════════════════
-  # 7. 产库 OpenSSL - macOS（x64/arm64 交叉编译; 原 vendor-openssl.yml 并入）
+  # 6. 产库 OpenSSL - macOS（x64/arm64 交叉编译; 原 vendor-openssl.yml 并入）
   #    触发: PR 打 vendor-openssl 标签(labeled, 触发矩阵注5) / 手动 vendor(注6);
   #    产物供人工下载后提交 third_party/, 构建期零下载零编译
   # ═════════════════════════════════════════════════
@@ -1094,7 +1136,7 @@ jobs:
           if-no-files-found: error
 
   # ═════════════════════════════════════════════════
-  # 8. 产库 OpenSSL - Linux（x64 静态库; 供 CMake Linux 静态链接内置化, 接线随提交 2）
+  # 7. 产库 OpenSSL - Linux（x64 静态库; 供 CMake Linux 静态链接内置化, 接线随提交 2）
   # ═════════════════════════════════════════════════
   vendor-linux:
     name: 产库 OpenSSL (linux x64)
@@ -1157,7 +1199,7 @@ jobs:
           if-no-files-found: error
 
   # ═════════════════════════════════════════════════
-  # 9. 产库 OpenSSL - Windows（x64 .lib; 产物用于替换内置库, 消除本地构建路径内嵌）
+  # 8. 产库 OpenSSL - Windows（x64 .lib; 产物用于替换内置库, 消除本地构建路径内嵌）
   # ═════════════════════════════════════════════════
   vendor-windows:
     name: 产库 OpenSSL (windows x64)
