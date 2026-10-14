@@ -1463,11 +1463,13 @@ jobs:
           path: release/
           merge-multiple: true
 
-      - name: 准备 localization.json
+      - name: 准备 localization.json 与第三方许可声明
+        # #135: Release 资产随附 THIRD_PARTY_NOTICES.txt, 满足 BSD-3/Apache-2.0/MIT 的二进制分发要求
         run: |
           set -euo pipefail
           mkdir -p release
           cp "json/localization.json" release/
+          cp "THIRD_PARTY_NOTICES.txt" release/
 
       - name: SignPath 门控判定
         # token 与组织 ID 齐备才启用签名链路; 判定一次, 后续 4 个签名步骤统一引用(单一维护点, 防四处条件漂移)
