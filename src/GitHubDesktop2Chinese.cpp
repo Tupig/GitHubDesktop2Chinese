@@ -635,7 +635,7 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
         spdlog::error("{} 处理异常, 已中止且不写入部分汉化结果", fileTag);
         if(!_debug_invalid_check_mode && !_debug_no_replace_res) {
             // exists 用 error_code 重载(#130): 异常善后路径不可再抛(底层 ACL/IO 错误时抛掷重载会逃逸)
-            std::error_code bak_exists_ec;
+            // 复用 L432 的 bak_exists_ec(#134: /W4 C4456 遮蔽告警, 内层不再重新声明)
             if(fs::exists(bak, bak_exists_ec)) {
                 std::error_code ec;
                 // 原子恢复: 中断不产生半截目标文件(#166)
