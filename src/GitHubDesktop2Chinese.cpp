@@ -2,8 +2,10 @@
 
 
 #define _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING
-#define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING   //消除 converter.to_bytes的警告
-#define _CRT_SECURE_NO_WARNINGS                             //消除 sprintf的警告
+// 第三方 CLI11(Macros.hpp) 无条件包含 <codecvt>, MSVC 下触发 STL4017 弃用警告, 无法从我方代码消除
+#define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING
+// formatTime 使用 std::sscanf 解析时间字符串, MSVC 的 CRT 安全警告需要此宏静音
+#define _CRT_SECURE_NO_WARNINGS
 
 // PAUSE: 等待确认(Windows 任意键 / POSIX 一行回车); 非交互 EOF 时立即返回, 管道运行不挂起
 // 展开调用下方 WaitAnyKey()(避免 system("pause") 每次调用创建 shell 进程)
@@ -77,6 +79,7 @@ fs::path LocalizationJSON;
 bool no_pause;                                  // 程序在结束前是否暂停
 bool only_read_from_remote;                     // 仅从远程url中读取本地化文件
 bool rollback;                                  // 从备份中还原汉化前的文件
+bool force_execute;                             // 映射文件 minversion 不满足时仍强制执行替换(--force)
 
 json localization = R"(
                         {
@@ -307,7 +310,9 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
     spdlog::info("正在处理{}文件,{}请勿关闭...{}", fileTag, "\033[33m", "\033[0m");
     int out = 0;
     // 如果"从备份文件中汉化"选项打开 则判断备份文件是否存在,以便尝试从备份文件中读取
-    std::string js_str = ((_debug_translation_from_bak || _debug_invalid_check_mode) && fs::exists(bak))
+    // exists 用 error_code 重载: 底层错误(权限等)不抛异常, 等价于"视为不存在"走目标文件分支(#122 B3)
+    std::error_code bak_exists_ec;
+    std::string js_str = ((_debug_translation_from_bak || _debug_invalid_check_mode) && fs::exists(bak, bak_exists_ec))
         ? utils::ReadFile(bak.string())
         : utils::ReadFile(target.string());
     if(js_str.empty()) {
@@ -414,6 +419,10 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
                     spdlog::info("已写入. 你希望下次替换多少条后写入:");
                     if(std::cin >> out) {
                         utils::stdin_after_extract = true; // >> 提取成功, 残留换行待后续交互清扫
+                        // 0/负数会让 out<=0 在下一轮恒成立, 退化为逐条写盘: 钳制为最小 1
+                        if(out < 1) {
+                            out = 1;
+                        }
                     }
                     else {
                         // 输入流已结束(非交互运行): 置为极大值, 等价于剩余项全部替换后一次性写入
@@ -514,7 +523,9 @@ int wmain(int argc, wchar_t* wargv[])
 // POSIX 入口: argv 本身即 UTF-8, 无需转换
 int main(int argc, char* argv[])
 {
-    fs::path self_path(argv[0]);
+    // 极端环境(execve 传空 argv)下 argv[0] 可能为 NULL: 判空避免构造 path 时读取空指针
+    const char* argv0 = (argc > 0 && argv[0] != nullptr) ? argv[0] : "";
+    fs::path self_path(argv0);
 #endif // _WIN32
 
     FileVer = versionparse::Version(FILEVERSION);
@@ -540,6 +551,7 @@ int main(int argc, char* argv[])
         }
 
         app.add_flag("--nopause", no_pause,                         "程序在结束前不再暂停等待");
+        app.add_flag("--force", force_execute,                      "映射文件 minversion 不满足时仍强制执行替换(风险自担)");
         app.add_option("-g,--githubdesktoppath", Base,              "指定GitHubDesktop要汉化的资源所在目录(js所在目录)");
         app.add_option("-j,--json", LocalizationJSON,               "指定本地化JSON文件的本地路径");
         app.add_flag("-r,--onlyfromremote", only_read_from_remote,  "仅从远程url中读取本地化文件");
@@ -756,7 +768,7 @@ int main(int argc, char* argv[])
                                 if(autoupdate) {
                                     // 下载地址形如:
                                     //https://github.com/Tupig/GitHubDesktop2Chinese/releases/download/v1.0.14/GitHubDesktop2Chinese.exe
-                                    std::regex url_regex(R"(^((?:https?://)[^/]+)(/.*)?$)", std::regex::optimize);
+                                    std::regex url_regex(R"(^((?:https://)[^/]+)(/.*)?$)", std::regex::optimize);
                                     std::smatch matches;
                                     if(std::regex_match(downlink, matches, url_regex)) {
                                         auto result = utils::UpdateProgram(matches[1].str(), matches[2].str(), self_path, max_size, proxy, asset_digest);
@@ -913,7 +925,8 @@ int main(int argc, char* argv[])
                 return;
             }
             // 原子化: 先复制到临时文件, 成功后再改名覆盖, 中断不会留下缺失/半截的目标文件
-            const fs::path tmp = dst.string() + ".restoring";
+            // 临时文件名附加随机后缀: 防止固定名称被抢注/符号链接预置(#122 B2)
+            const fs::path tmp = dst.string() + ".restoring" + utils::RandomTempSuffix();
             std::error_code ec;
             fs::copy_file(bak, tmp, fs::copy_options::overwrite_existing, ec);
             if(ec) {
@@ -1045,35 +1058,46 @@ int main(int argc, char* argv[])
 
     // 如果没有js文件却有备份文件 则从备份恢复
     if (!fs::exists(Base / mainjs)) {
-        if (!fs::exists(Base / mainjsbak)) {
-            spdlog::warn("目录有误，找不到目录下的main.js. ");
+        std::error_code ec;
+        fs::copy_file(Base / "main.js.bak", Base / "main.js", ec);
+        if(!ec) {
+            spdlog::warn("main.js 未找到, 但已从备份main.js.bak中还原");
+        }
+        else if(ec == std::errc::no_such_file_or_directory) {
+            spdlog::warn("目录有误，找不到目录下的main.js 且备份 main.js.bak 不存在。");
             PAUSE
             return 1;
         }
-        std::error_code ec;
-        fs::copy_file(Base / "main.js.bak", Base / "main.js", ec);
-        if(ec) {
+        else if(ec == std::errc::file_exists) {
+            // 预检后目标被并发进程还原: 无需重复操作, 继续使用现有文件
+            spdlog::warn("main.js 已由并发进程还原, 跳过备份还原");
+        }
+        else {
             spdlog::error("从备份还原 main.js 失败: {}", ec.message());
             PAUSE
             return 1;
         }
-        spdlog::warn("main.js 未找到, 但已从备份main.js.bak中还原");
     }
 
     if (!fs::exists(Base / rendererjs)) {
-        if (!fs::exists(Base / rendererjsbak)) {
-            spdlog::warn("目录有误，找不到目录下的renderer.js. ");
+        std::error_code ec;
+        fs::copy_file(Base / "renderer.js.bak", Base / "renderer.js", ec);
+        if(!ec) {
+            spdlog::warn("renderer.js 未找到, 但已从备份renderer.js.bak中还原");
+        }
+        else if(ec == std::errc::no_such_file_or_directory) {
+            spdlog::warn("目录有误，找不到目录下的renderer.js 且备份 renderer.js.bak 不存在。");
             PAUSE
             return 1;
         }
-        std::error_code ec;
-        fs::copy_file(Base / "renderer.js.bak", Base / "renderer.js", ec);
-        if(ec) {
+        else if(ec == std::errc::file_exists) {
+            spdlog::warn("renderer.js 已由并发进程还原, 跳过备份还原");
+        }
+        else {
             spdlog::error("从备份还原 renderer.js 失败: {}", ec.message());
             PAUSE
             return 1;
         }
-        spdlog::warn("renderer.js 未找到, 但已从备份renderer.js.bak中还原");
     }
 
     // 仅在备份文件不存在时备份
@@ -1135,8 +1159,13 @@ int main(int argc, char* argv[])
                         return 1;
                     }
                 }
+                else if(force_execute) {
+                    spdlog::warn("版本不满足要求, 已按 --force 强制执行");
+                }
                 else {
-                    spdlog::warn("版本不满足要求, 因 --nopause 已跳过询问并强制执行");
+                    // 非交互(--nopause)默认中止: 兼容性未知的强制替换风险过高, 需 --force 显式确认
+                    spdlog::warn("版本不满足要求, --nopause 模式默认中止; 如确认要继续请加 --force 显式强制执行");
+                    return 1;
                 }
             }
             else {

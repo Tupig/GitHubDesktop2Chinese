@@ -14,13 +14,19 @@
 #include <cstdlib>
 #include <thread>
 #include <chrono>
+#include <memory>
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <unistd.h>
+#include <fcntl.h>
+#include <csignal>
 #endif
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "http/httplib.h"
 #include <openssl/evp.h>
 #include <spdlog/spdlog.h>
+#include "utils/fs_io.hpp"
 
 namespace fs = std::filesystem;
 
@@ -33,6 +39,16 @@ namespace utils {
     inline constexpr size_t kMaxResponseBytes = 32 * 1024 * 1024;
     // 哈希计算时文件分块读取的缓冲区大小
     inline constexpr size_t kHashBufferSize = 64 * 1024;
+    // 瞬时性错误(连接失败/403/429/5xx)自动重试次数上限
+    inline constexpr int kHttpRetryLimit = 4;
+    // 瞬时性错误重试间隔(秒)
+    inline constexpr int kHttpRetryDelaySec = 2;
+    // 下载失败重试次数上限
+    inline constexpr int kDownloadRetryLimit = 3;
+    // 下载失败重试间隔(秒)
+    inline constexpr int kDownloadRetryDelaySec = 5;
+    // 拉起替换脚本后等待当前进程退出的秒数(ping -n N ≈ N-1 秒 / sleep N)
+    inline constexpr int kReplaceWaitSec = 5;
 
     // 构造带超时与 TLS 校验的 HTTP 客户端
     inline auto MakeHttpClient(const std::string& url_host, const std::pair<std::string, int>& proxy = {}) -> httplib::Client {
@@ -72,22 +88,25 @@ namespace utils {
     inline auto ComputeFileSha256(const fs::path& file) -> std::string {
         std::ifstream in(file, std::ios::binary);
         if(!in) return "";
-        EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+        // RAII 管理上下文: 分配后到释放间的可抛分配不再泄漏 EVP_MD_CTX(#122 C1)
+        struct EvpMdCtxDeleter {
+            void operator()(EVP_MD_CTX* p) const noexcept { EVP_MD_CTX_free(p); }
+        };
+        std::unique_ptr<EVP_MD_CTX, EvpMdCtxDeleter> ctx(EVP_MD_CTX_new());
         if(!ctx) return "";
-        bool ok = EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) == 1;
+        bool ok = EVP_DigestInit_ex(ctx.get(), EVP_sha256(), nullptr) == 1;
         std::vector<char> buf(kHashBufferSize);
         while(ok && in) {
             in.read(buf.data(), static_cast<std::streamsize>(buf.size()));
             const std::streamsize n = in.gcount();
             if(n > 0) {
-                ok = EVP_DigestUpdate(ctx, buf.data(), static_cast<size_t>(n)) == 1;
+                ok = EVP_DigestUpdate(ctx.get(), buf.data(), static_cast<size_t>(n)) == 1;
             }
         }
         if(ok && !in.eof()) ok = false; // 非正常结束(读取错误)
         unsigned char md[EVP_MAX_MD_SIZE] = {};
         unsigned int md_len = 0;
-        if(ok) ok = EVP_DigestFinal_ex(ctx, md, &md_len) == 1;
-        EVP_MD_CTX_free(ctx);
+        if(ok) ok = EVP_DigestFinal_ex(ctx.get(), md, &md_len) == 1;
         if(!ok) return "";
         static const char hexchars[] = "0123456789abcdef";
         std::string hex;
@@ -111,10 +130,10 @@ namespace utils {
 
         // 瞬时性错误(连接失败/403 限流/429/5xx)自动重试: GitHub API 与资产 CDN 在共享 IP 下偶发此类错误
         httplib::Result res;
-        for(int attempt = 0; attempt < 4; attempt++) {
-            if(attempt > 0) {
-                spdlog::warn("请求 {}{} 失败(第 {} 次), 2 秒后重试", url_host, params, attempt);
-                std::this_thread::sleep_for(std::chrono::seconds(2));
+        for(int attempt = 1; attempt <= kHttpRetryLimit; attempt++) {
+            if(attempt > 1) {
+                spdlog::warn("请求 {}{} 失败(第 {} 次), {} 秒后重试", url_host, params, attempt - 1, kHttpRetryDelaySec);
+                std::this_thread::sleep_for(std::chrono::seconds(kHttpRetryDelaySec));
             }
             res = cli.Get(params);
             if(res && res->status == httplib::StatusCode::OK_200) break;
@@ -159,8 +178,10 @@ namespace utils {
      */
     inline auto DownloadToFile(const std::string& url_host, const std::string& params, const std::pair<std::string, int>& proxy, const fs::path& tmp_file, int64_t max_size) -> bool {
         // 1. 如果临时文件已存在，获取已下载大小（用于断点续传）
+        // exists 用 error_code 重载: 底层错误(权限等)不抛异常; 大小竞态由 file_size 的 ec 分支兜底(#122 B3)
         uint64_t downloaded_bytes = 0;
-        if(fs::exists(tmp_file)) {
+        std::error_code exists_ec;
+        if(fs::exists(tmp_file, exists_ec)) {
             std::error_code size_ec;
             const uint64_t existing = fs::file_size(tmp_file, size_ec);
             if(size_ec) {
@@ -342,7 +363,7 @@ namespace utils {
             return out;
         };
         const fs::path exe_name = self.filename();
-        std::wstring p = L"/c ping 127.0.0.1 -n 6 > nul & move /Y ";
+        std::wstring p = L"/c ping 127.0.0.1 -n " + std::to_wstring(kReplaceWaitSec + 1) + L" > nul & move /Y ";
         p += quote_name(tmp_file.filename().wstring());
         p += L" ";
         p += quote_name(exe_name.wstring());
@@ -371,7 +392,8 @@ namespace utils {
             out += "'";
             return out;
         };
-        const fs::path script = self.parent_path() / (self.filename().string() + ".update.sh");
+        // 脚本文件名附加随机后缀: 防止固定名称被抢注(#122 B2)
+        const fs::path script = self.parent_path() / (self.filename().string() + ".update" + RandomTempSuffix() + ".sh");
         {
             std::ofstream sh(script, std::ios::binary | std::ios::trunc);
             if(!sh) {
@@ -379,17 +401,30 @@ namespace utils {
                 return false;
             }
             sh << "#!/bin/sh\n"
-               << "sleep 5\n"
+               << "sleep " << kReplaceWaitSec << "\n"
                << "mv -f " << sh_quote(tmp_file.string()) << " " << sh_quote(self.string()) << "\n"
                << "rm -f " << sh_quote(script.string()) << "\n"
                << "exec " << sh_quote(self.string()) << "\n";
         }
         std::error_code ec;
         fs::permissions(script, fs::perms::owner_all, ec);
-        const std::string cmd = "nohup /bin/sh " + sh_quote(script.string()) + " >/dev/null 2>&1 &";
-        if(std::system(cmd.c_str()) != 0) {
-            spdlog::error("无法启动更新脚本, 请手动用 {} 覆盖 {}", tmp_file.string(), self.string());
+        // 直接 fork+exec 拉起脚本: 不经 shell, 消除 std::system 的 shell 依赖与注入面(#122 B1)
+        const pid_t pid = ::fork();
+        if(pid < 0) {
+            spdlog::error("无法启动更新脚本(fork 失败), 请手动用 {} 覆盖 {}", tmp_file.string(), self.string());
             return false;
+        }
+        if(pid == 0) {
+            // 子进程: 忽略 SIGHUP(对应原 nohup 语义), 标准输出/错误重定向 /dev/null(对应原 >/dev/null 2>&1)
+            ::signal(SIGHUP, SIG_IGN);
+            const int devnull = ::open("/dev/null", O_WRONLY);
+            if(devnull >= 0) {
+                ::dup2(devnull, STDOUT_FILENO);
+                ::dup2(devnull, STDERR_FILENO);
+                if(devnull > STDERR_FILENO) ::close(devnull);
+            }
+            ::execl("/bin/sh", "sh", script.string().c_str(), static_cast<char*>(nullptr));
+            _exit(127); // exec 失败
         }
         return true;
 #endif
@@ -407,16 +442,18 @@ namespace utils {
      * @return 是否成功（成功后调用方应立即退出等待替换）
      */
     inline auto UpdateProgram(std::string url_host, std::string params, fs::path Self, int64_t max_size, std::pair<std::string, int> proxy, std::string expected_digest = "") -> bool {
+        // 下载临时文件: 名称保持稳定以支持跨进程断点续传(重跑时续传依赖同名残留);
+        // 完整性由 VerifyDownloadedFile 的 SHA256 fail-closed 校验兜底, 不采用随机名(#122 B2)
         fs::path tmp_file = Self;
-        tmp_file += ".new"; // 下载临时文件
+        tmp_file += ".new";
 
         // 下载重试: 资产 CDN 偶发瞬时 403(压力实测 6 轮中 2 轮首试命中), 重试即可恢复;
         // 失败残留的临时文件会自然进入续传/从头重下, 不影响正确性
         bool downloaded = false;
-        for(int attempt = 1; attempt <= 3 && !downloaded; attempt++) {
+        for(int attempt = 1; attempt <= kDownloadRetryLimit && !downloaded; attempt++) {
             if(attempt > 1) {
-                spdlog::warn("下载失败, 5 秒后自动重试(第 {}/3 次)", attempt);
-                std::this_thread::sleep_for(std::chrono::seconds(5));
+                spdlog::warn("下载失败, {} 秒后自动重试(第 {}/{} 次)", kDownloadRetryDelaySec, attempt - 1, kDownloadRetryLimit);
+                std::this_thread::sleep_for(std::chrono::seconds(kDownloadRetryDelaySec));
             }
             downloaded = DownloadToFile(url_host, params, proxy, tmp_file, max_size);
         }
