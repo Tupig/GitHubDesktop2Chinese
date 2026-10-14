@@ -467,7 +467,8 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
         spdlog::error("{} 处理异常, 已中止且不写入部分汉化结果", fileTag);
         if(!_debug_invalid_check_mode && !_debug_no_replace_res && fs::exists(bak)) {
             std::error_code ec;
-            fs::copy_file(bak, target, fs::copy_options::overwrite_existing, ec);
+            // 原子恢复: 中断不产生半截目标文件(#166)
+            utils::AtomicCopyFile(bak, target, ec);
             if(ec) {
                 spdlog::error("从备份恢复 {} 失败: {}", fileTag, ec.message());
             }
@@ -884,20 +885,21 @@ enum class RestoreOutcome {
 // base/<name> 缺失时从 base/<name>.bak 还原(目标已存在时调用方不应调用); 统一打印结果日志
 static RestoreOutcome RestoreFromBackup(const fs::path& base, const char* name) {
     const std::string bak_name = std::string(name) + ".bak";
+    // 原子复制前预检目标: 预检后目标若已被并发进程还原则跳过, 不覆盖并发结果
+    // (等价取代原 copy_file 无 overwrite 时的 file_exists 并发检测语义, #166)
+    if(fs::exists(base / name)) {
+        spdlog::warn("{} 已由并发进程还原, 跳过备份还原", name);
+        return RestoreOutcome::kConcurrentlyRestored;
+    }
     std::error_code ec;
-    fs::copy_file(base / bak_name, base / name, ec);
-    if(!ec) {
+    // 原子还原: 中断只留可清理临时文件, 不产生半截目标文件(#166)
+    if(utils::AtomicCopyFile(base / bak_name, base / name, ec)) {
         spdlog::warn("{} 未找到, 但已从备份{}中还原", name, bak_name);
         return RestoreOutcome::kRestored;
     }
     if(ec == std::errc::no_such_file_or_directory) {
         spdlog::warn("目录有误，找不到目录下的{} 且备份 {} 不存在。", name, bak_name);
         return RestoreOutcome::kNoBackup;
-    }
-    if(ec == std::errc::file_exists) {
-        // 预检后目标被并发进程还原: 无需重复操作, 继续使用现有文件
-        spdlog::warn("{} 已由并发进程还原, 跳过备份还原", name);
-        return RestoreOutcome::kConcurrentlyRestored;
     }
     spdlog::error("从备份还原 {} 失败: {}", name, ec.message());
     return RestoreOutcome::kCopyFailed;
@@ -941,7 +943,8 @@ static bool EnsureJsFilesAndBackups() {
             continue;
         }
         std::error_code ec;
-        fs::copy_file(Base / name, Base / bak_name, ec);
+        // 原子备份: 中断不产生半截备份文件(#166)
+        utils::AtomicCopyFile(Base / name, Base / bak_name, ec);
         if(ec) {
             spdlog::error("创建备份 {} -> {} 失败: {}, 已中止以免后续无法还原", name, bak_name, ec.message());
             PAUSE
