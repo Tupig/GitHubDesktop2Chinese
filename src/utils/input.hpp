@@ -39,8 +39,9 @@ namespace utils {
                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             }
             if(!std::getline(std::cin, instr)) {
-                // 输入流已结束(管道/重定向运行): 有默认值返回默认, 否则返回false, 避免死循环
-                return defaultval != -1 ? (defaultval == 1) : false;
+                // 输入流已结束(管道/重定向运行): 一律返回否定动作, 不按默认值放行,
+                // 避免无人值守时自动执行有副作用的确认操作(#122 A5)
+                return false;
             }
 
             if (instr == input[0]) {

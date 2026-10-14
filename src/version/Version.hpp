@@ -134,36 +134,7 @@ public:
         return ret;
     }
 
-    /**
-     * @brief 返回类似 v1.40.100-alpha.456 的版本结构
-     * @return 
-    */
-    std::string toDetailedString() {
-        std::string ret = "v" + std::to_string(major) + "." + std::to_string(minor);
-        if (revision != 0) {
-            ret += "." + std::to_string(revision);
-        }
-        if (status == Status::Dev)  ret += "-dev";
-        if (status == Status::Beta)  ret += "-beta";
-        if (status != Status::Release) {
-            ret += "." + std::to_string(betaversion);
-        }
-        return ret;
-    }
-
 private:
-    /**
-     * @brief 将a~z的字符转为大写,其他字符原样返回
-     * @param c 字符 a~z
-     * @return 返回大写的A~Z
-    */
-    char ToUpper(char c) {
-        if (c >= 97 && c <= 122) { // a ~ z
-            return c - 32;
-        }
-        return c;
-    }
-
     /**
      * @brief 将A~Z的字符转为小写,其他字符原样返回
      * @param c 字符 A~Z
@@ -202,10 +173,6 @@ private:
             }
             if (*(checkvalue + 1) == '\0') {
                 return _increase;
-            }
-            if (*(checkvalue + 1) == ' ') { // 空格跳过
-                _increase++;
-                continue;
             }
             checkvalue++;
             _increase++;
@@ -269,25 +236,26 @@ private:
                     v++;
 
                     // 检查是否是 alpha 或者 dev
-                    int ret = CheckIsAlphaOrBeta(v, "alpha");
-                    if(!ret) ret = CheckIsAlphaOrBeta(v, "dev");
-                    if (ret < 0) break;
-                    if (ret > 0) { // 是 alpha 内部测试版 -> Dev
+                    // (suffix_len: 跳过检查值的字节偏移; 命名区分外层的解析结果 bool ret, #122 E6)
+                    int suffix_len = CheckIsAlphaOrBeta(v, "alpha");
+                    if(!suffix_len) suffix_len = CheckIsAlphaOrBeta(v, "dev");
+                    if (suffix_len < 0) break;
+                    if (suffix_len > 0) { // 是 alpha 内部测试版 -> Dev
                         status = Status::Dev;
                         parseCheckPos = ParseCheckPosition::enumbetaversion;
-                        v += ret;
+                        v += suffix_len;
                         if (*v == '.') {
                             v++;
                         }
                         continue;
                     }
                     // 检查是否是 beta
-                    ret = CheckIsAlphaOrBeta(v, "beta");
-                    if (ret < 0) break;
-                    if (ret > 0) { // 是 beta
+                    suffix_len = CheckIsAlphaOrBeta(v, "beta");
+                    if (suffix_len < 0) break;
+                    if (suffix_len > 0) { // 是 beta
                         status = Status::Beta;
                         parseCheckPos = ParseCheckPosition::enumbetaversion;
-                        v += ret;
+                        v += suffix_len;
                         if (*v == '.') {
                             v++;
                         }
@@ -317,25 +285,25 @@ private:
                     v++;
 
                     // 检查是否是 alpha 或者 dev
-                    int ret = CheckIsAlphaOrBeta(v, "alpha");
-                    if (!ret) ret = CheckIsAlphaOrBeta(v, "dev");
-                    if (ret < 0) break;
-                    if (ret > 0) { // 是 alpha 内部测试版 -> Dev
+                    int suffix_len = CheckIsAlphaOrBeta(v, "alpha");
+                    if (!suffix_len) suffix_len = CheckIsAlphaOrBeta(v, "dev");
+                    if (suffix_len < 0) break;
+                    if (suffix_len > 0) { // 是 alpha 内部测试版 -> Dev
                         status = Status::Dev;
                         parseCheckPos = ParseCheckPosition::enumbetaversion;
-                        v += ret;
+                        v += suffix_len;
                         if (*v == '.') {
                             v++;
                         }
                         continue;
                     }
                     // 检查是否是 beta
-                    ret = CheckIsAlphaOrBeta(v, "beta");
-                    if (ret < 0) break;
-                    if (ret > 0) { // 是 beta
+                    suffix_len = CheckIsAlphaOrBeta(v, "beta");
+                    if (suffix_len < 0) break;
+                    if (suffix_len > 0) { // 是 beta
                         status = Status::Beta;
                         parseCheckPos = ParseCheckPosition::enumbetaversion;
-                        v += ret;
+                        v += suffix_len;
                         if (*v == '.') {
                             v++;
                         }
