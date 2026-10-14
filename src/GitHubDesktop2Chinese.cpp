@@ -805,7 +805,8 @@ static bool CheckForUpdates(const std::pair<std::string, int>& proxy, const fs::
 
 // 目录探测: 未指定(-g)或目录无效时按 注册表(Win) / 交互输入(全平台) 解析并写入全局 Base
 // 返回 false 表示无法获得有效目录, 调用方应中止
-static bool ResolveBaseDirectory(const std::pair<std::string, int>& proxy) {
+// #134: proxy 参数保留(与调用方签名对齐/后续探测扩展), 本地探测未用故标记 maybe_unused(-Wextra)
+static bool ResolveBaseDirectory([[maybe_unused]] const std::pair<std::string, int>& proxy) {
     // Github Desktop 存在目录没有提前设置
     if (!fs::exists(Base) || !fs::exists(Base / "index.html")) {
 #ifdef _WIN32

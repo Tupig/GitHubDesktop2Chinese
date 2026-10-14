@@ -35,8 +35,12 @@ if(MSVC)
     # OpenSSL 静态库不含 PDB，LNK4099 为已知噪音：显式忽略，保证构建零告警（#92）
     add_link_options(/ignore:4099)
 else()
-    # #134: GCC/Clang 高告警级别（third_party SYSTEM 头按 -isystem 天然抑制）
+    # #134: GCC/Clang 高告警级别（third_party SYSTEM 头按 -isystem 抑制）
     add_compile_options(-Wall -Wextra)
+    # #134: fmt 9.1(spdlog 1.11 bundled) 继承 C++17 弃用的 std::iterator，
+    # clang 在用户 TU 实例化点仍会报 deprecated（-isystem 不挡实例化诊断）。
+    # 降级为普通警告（非 error）保持 CI 可过；升级 spdlog 后移除
+    add_compile_options(-Wno-error=deprecated-declarations)
 endif()
 
 # 本项目仅支持 64 位架构（x64 / arm64 / x86_64 均可，指针宽度为 8）。
