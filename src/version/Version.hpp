@@ -180,6 +180,31 @@ private:
         return -1;
     }
 
+    // '-'/'_' 后的预发布后缀解析(单一实现, #121): alpha/dev -> Dev, beta -> Beta
+    // 入参 v 已跳过 '-'/'_'; 匹配则推进 v(含可选的 '.')、写入 status 并返回 true(调用方置 enumbetaversion 后 continue);
+    // 未知/不完整后缀返回 false, 调用方结束解析并保留已识别部分(防止后缀数字被并入版本号, #120)
+    bool TryParsePreReleaseSuffix(const char*& v) {
+        // 检查是否是 alpha 或者 dev
+        // (suffix_len: 跳过检查值的字节偏移; 命名区分外层的解析结果 bool ret, #122 E6)
+        int suffix_len = CheckIsAlphaOrBeta(v, "alpha");
+        if(!suffix_len) suffix_len = CheckIsAlphaOrBeta(v, "dev");
+        if (suffix_len < 0) return false;
+        if (suffix_len > 0) { // 是 alpha 内部测试版 -> Dev
+            status = Status::Dev;
+        }
+        else {
+            // 检查是否是 beta
+            suffix_len = CheckIsAlphaOrBeta(v, "beta");
+            if (suffix_len <= 0) return false;
+            status = Status::Beta;
+        }
+        v += suffix_len;
+        if (*v == '.') {
+            v++;
+        }
+        return true;
+    }
+
     /**
      * @brief 反序列化 将字符串反序列化为内部参数
      * @param v 
@@ -234,31 +259,9 @@ private:
                 }
                 if (*v == '-' || *v == '_') {
                     v++;
-
-                    // 检查是否是 alpha 或者 dev
-                    // (suffix_len: 跳过检查值的字节偏移; 命名区分外层的解析结果 bool ret, #122 E6)
-                    int suffix_len = CheckIsAlphaOrBeta(v, "alpha");
-                    if(!suffix_len) suffix_len = CheckIsAlphaOrBeta(v, "dev");
-                    if (suffix_len < 0) break;
-                    if (suffix_len > 0) { // 是 alpha 内部测试版 -> Dev
-                        status = Status::Dev;
+                    // alpha/dev/beta 预发布后缀: 单一实现(双份拷贝曾致同类解析 bug 存在两处, #121)
+                    if (TryParsePreReleaseSuffix(v)) {
                         parseCheckPos = ParseCheckPosition::enumbetaversion;
-                        v += suffix_len;
-                        if (*v == '.') {
-                            v++;
-                        }
-                        continue;
-                    }
-                    // 检查是否是 beta
-                    suffix_len = CheckIsAlphaOrBeta(v, "beta");
-                    if (suffix_len < 0) break;
-                    if (suffix_len > 0) { // 是 beta
-                        status = Status::Beta;
-                        parseCheckPos = ParseCheckPosition::enumbetaversion;
-                        v += suffix_len;
-                        if (*v == '.') {
-                            v++;
-                        }
                         continue;
                     }
                     // 未知后缀(如 -rc1): 结束解析并保留已识别部分,
@@ -283,30 +286,9 @@ private:
                 }
                 if (*v == '-' || *v == '_') {
                     v++;
-
-                    // 检查是否是 alpha 或者 dev
-                    int suffix_len = CheckIsAlphaOrBeta(v, "alpha");
-                    if (!suffix_len) suffix_len = CheckIsAlphaOrBeta(v, "dev");
-                    if (suffix_len < 0) break;
-                    if (suffix_len > 0) { // 是 alpha 内部测试版 -> Dev
-                        status = Status::Dev;
+                    // alpha/dev/beta 预发布后缀: 单一实现(双份拷贝曾致同类解析 bug 存在两处, #121)
+                    if (TryParsePreReleaseSuffix(v)) {
                         parseCheckPos = ParseCheckPosition::enumbetaversion;
-                        v += suffix_len;
-                        if (*v == '.') {
-                            v++;
-                        }
-                        continue;
-                    }
-                    // 检查是否是 beta
-                    suffix_len = CheckIsAlphaOrBeta(v, "beta");
-                    if (suffix_len < 0) break;
-                    if (suffix_len > 0) { // 是 beta
-                        status = Status::Beta;
-                        parseCheckPos = ParseCheckPosition::enumbetaversion;
-                        v += suffix_len;
-                        if (*v == '.') {
-                            v++;
-                        }
                         continue;
                     }
                     // 未知后缀(如 -4/-rc1): 结束解析并保留已识别部分,

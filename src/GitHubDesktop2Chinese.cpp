@@ -489,6 +489,544 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
     return 0;
 }
 
+// ─────────────────────────────────────────────────────────────────
+// wmain 阶段拆分与重复收敛(#121): 以下函数按主流程阶段组织,
+// 通过全局状态(Base/localization/FileVer/调试开关)与入参协作
+// ─────────────────────────────────────────────────────────────────
+
+// 代理探测: 环境变量优先, 回退系统代理设置; 未检测到返回 {"", 0}
+static std::pair<std::string, int> DetectProxy() {
+    std::pair<std::string, int> proxy = { "", 0 };
+    {
+        auto p1 = utils::get_proxy_env();
+        if(p1) {
+            proxy = *p1;
+        }
+        else {
+            auto p2 = utils::GetSystemProxySettings();
+            if(p2) {
+                proxy = *p2;
+            }
+        }
+    }
+    return proxy;
+}
+
+// 装饰性查询: 本地无 localization.json 时打印仓库最近更新时间(失败仅 debug 日志, 不中断主流程)
+static void LogRepoLastUpdated(const std::pair<std::string, int>& proxy) {
+    if(fs::exists(LocalizationJSON)) {
+        return;
+    }
+    try {
+        std::string repoinfo;
+        if(utils::ReadHttpDataString(kApiHost, kRepoApiPath, repoinfo, proxy)) {
+            auto infojson = json::parse(repoinfo);
+            std::optional<std::string> info = formatTime(infojson["updated_at"]);
+            if(info) {
+                spdlog::info("仓库最新更新时间: {}{}{}", "\033[32m", *info, "\033[0m");
+            }
+        }
+    }
+    catch(const std::exception& e) {
+        // 装饰性信息: 解析失败不中断主流程, 但保留原因便于诊断
+        spdlog::debug("查询仓库更新时间失败: {}", e.what());
+    }
+    catch(...) {
+        spdlog::debug("查询仓库更新时间出现未知异常");
+    }
+}
+
+// 检查更新: 返回 true 表示已触发自更新, 调用方应立即以 0 退出等待替换; Dev 版跳过
+static bool CheckForUpdates(const std::pair<std::string, int>& proxy, const fs::path& self_path) {
+    if(FileVer.status != versionparse::Version::Dev) {
+        spdlog::info("检查更新中..");
+        try {
+            std::string repoinfo;
+            if(utils::ReadHttpDataString(kApiHost, kLatestReleaseApiPath, repoinfo, proxy)) {
+                auto infojson = json::parse(repoinfo);
+                auto tag_name = infojson["tag_name"].get<std::string>();
+                versionparse::Version remoteVer(tag_name.c_str());
+                if(!remoteVer) {
+                    spdlog::warn("远程仓库中的版本号解析失败, ({})", tag_name);
+                }
+                else {
+                    if(FileVer < remoteVer) {
+                        spdlog::info("发现新版本: {}", remoteVer.toString());
+                        // 在资产中定位可执行文件，避免依赖 assets[0] 的顺序
+                        const json* asset = nullptr;
+                        if(infojson.contains("assets") && infojson["assets"].is_array()) {
+                            for(const auto& a : infojson["assets"]) {
+                                if(a.value("name", std::string()) == "GitHubDesktop2Chinese.exe") { asset = &a; break; }
+                            }
+                            if(!asset) {
+                                for(const auto& a : infojson["assets"]) {
+                                    const std::string name = a.value("name", std::string());
+                                    if(name.size() > 4 && name.ends_with(".exe")) { asset = &a; break; }
+                                }
+                            }
+                        }
+                        if(!asset) {
+                            spdlog::warn("未在最新 Release 中找到可执行文件资产, 跳过自动更新");
+                        }
+                        else {
+                            std::string browser_download_url = asset->at("browser_download_url").get<std::string>();
+                            // 下载使用浏览器下载地址(github.com 直链): 不消耗 API 配额,
+                            // 避免共享 IP 触发 60次/小时匿名限流导致下载 403
+                            std::string downlink = browser_download_url;
+                            int download_count = asset->at("download_count").get<int>();
+                            int64_t max_size = asset->at("size").get<int64_t>();
+                            // 发布资产声明的 SHA256 摘要(形如 sha256:<hex>), 用于下载后完整性校验
+                            std::string asset_digest = asset->value("digest", std::string());
+                            spdlog::info("下载链接({}次下载): {}", download_count, browser_download_url);
+                            spdlog::info("是否自动更新:");
+                            bool autoupdate = utils::ReadUserInput_bool({ "n", "y" }, 0);
+                            if(autoupdate) {
+                                // 下载地址形如:
+                                //https://github.com/Tupig/GitHubDesktop2Chinese/releases/download/v1.0.14/GitHubDesktop2Chinese.exe
+                                std::regex url_regex(R"(^((?:https://)[^/]+)(/.*)?$)", std::regex::optimize);
+                                std::smatch matches;
+                                if(std::regex_match(downlink, matches, url_regex)) {
+                                    auto result = utils::UpdateProgram(matches[1].str(), matches[2].str(), self_path, max_size, proxy, asset_digest);
+                                    if(!result) {
+                                        spdlog::error("失败 更新过程出现异常");
+                                    }
+                                    else {
+                                        // 立马退出 等待替换
+                                        return true;
+                                    }
+                                }
+                                else {
+                                    spdlog::error("下载地址可能变更, 正则表达式无法捕获");
+                                }
+                            }
+                        }
+                    }
+                    else {
+                        spdlog::info("当前版本已经是最新版..");
+                    }
+                }
+            }
+            else {
+                spdlog::warn("远程信息读取失败..");
+            }
+        }
+        catch(const std::exception& e) {
+            spdlog::warn("检查更新时出现异常: {}", e.what());
+        }
+        catch(...) {
+            spdlog::warn("检查更新时出现未知异常");
+        }
+    }
+    return false;
+}
+
+// 目录探测: 未指定(-g)或目录无效时按 注册表(Win) / 交互输入(全平台) 解析并写入全局 Base
+// 返回 false 表示无法获得有效目录, 调用方应中止
+static bool ResolveBaseDirectory(const std::pair<std::string, int>& proxy) {
+    // Github Desktop 存在目录没有提前设置
+    if (!fs::exists(Base) || !fs::exists(Base / "index.html")) {
+#ifdef _WIN32
+        //	检查注册表中是否存在GithubDesktop
+        winreg::RegKey key;
+        winreg::RegResult result = key.TryOpen(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\GitHubDesktop");
+        if (!result)
+        {
+            spdlog::warn("注册表中未发现GitHubDesktop相关条目, Reg ErrorMessage: {}" ,utils::to_byte_string(result.ErrorMessage()));
+            spdlog::warn("你可能没有安装GithubDesktop，请先安装然后打开此程序或者手动指定main.js所在的文件夹目录");
+            Base = utils::to_path(LoopGetBasePath());
+            if(Base.empty()) {
+                spdlog::error("未能获取资源目录, 请使用 -g 参数手动指定");
+                PAUSE
+                return false;
+            }
+        }
+        else {
+            try
+            {
+                // 首先要从注册表中拿到GithubDesktop相关信息
+                // 任务就是将Base 中写入路径
+                std::wstring ver = key.GetStringValue(L"DisplayVersion");
+                std::wstring path = key.GetStringValue(L"InstallLocation");
+                Base = path + L"\\" + L"app-" + ver + L"\\resources\\app";
+                std::string desktop_local_ver_str = utils::to_byte_string(ver);
+
+
+                spdlog::info("正在读取GitHubDesktop最新正式版...");
+                std::string httpjson_str;
+                // 使用 GitHub Releases API: releases/latest 仅返回最新非预发布(正式版),
+                // 避免把 beta 预览版(如 3.6.7-beta)误报为最新正式版
+                if(utils::ReadHttpDataString(kApiHost, kDesktopLatestReleaseApiPath, httpjson_str, proxy)) {
+                    // 远程信息仅用于提示, 解析失败不应中断主流程
+                    try {
+                        auto httpjson = json::parse(httpjson_str);
+                        std::string v = httpjson.at("tag_name").get<std::string>();
+                        if(v.rfind("release-", 0) == 0) {
+                            v = v.substr(kDesktopTagPrefixLen); // 剥离 "release-" 前缀
+                        }
+                        versionparse::Version desktop_remote_ver(v.c_str());
+                        if(desktop_remote_ver) {
+                            versionparse::Version desktop_local_ver(desktop_local_ver_str.c_str());
+                            spdlog::info("已读取到远程GitHubDesktop最新版:{} {}", v, desktop_remote_ver > desktop_local_ver ? "(\033[1;33m需更新\033[0m)" : "");
+                        }
+                        else {
+                            spdlog::warn("远程GitHubDesktop版本号解析失败: {}", v);
+                        }
+                    }
+                    catch(const std::exception& e) {
+                        spdlog::warn("远程GitHubDesktop版本信息解析失败: {}", e.what());
+                    }
+                }else{
+                    spdlog::warn("远程GitHubDesktop版本读取失败.");
+                }
+
+                spdlog::info("已从注册表中读取本地GitHubDesktop信息:");
+                spdlog::info("本地GitHubDesktop版本: {}", desktop_local_ver_str);
+                spdlog::info("安装目录: {}", utils::to_byte_string(path));
+                spdlog::info("最后拼接完整目录: {}", utils::to_byte_string(Base.wstring()));
+
+
+                if (!fs::exists(Base)) {
+                    spdlog::warn("注册表最终获取到的目录不存在,请手动指定main.js所在的文件夹目录");
+                    Base = utils::to_path(LoopGetBasePath());
+                    if(Base.empty()) {
+                        spdlog::error("未能获取资源目录, 请使用 -g 参数手动指定");
+                        PAUSE
+                        return false;
+                    }
+                }
+
+            }
+            catch (const winreg::RegException& regerr)
+            {
+                spdlog::error("可能注册表key {} 不存在,请检查注册表目录 {}", "DisplayVersion 或 InstallLocation", "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\GitHubDesktop");
+                spdlog::error("RegException {} ,ErrCode:{}  at line: {}", regerr.what(),regerr.code().value(), __LINE__);
+                PAUSE
+                return false;
+            }
+            catch(const std::runtime_error& err) {
+                spdlog::error("runtime_error {} at line: {}", err.what(), __LINE__);
+                PAUSE
+                return false;
+            }
+            catch(const std::exception& e) {
+                // 兜底: 避免 std::filesystem 等异常未捕获导致进程终止
+                spdlog::error("读取GitHubDesktop安装信息时出现错误 {} at line: {}", e.what(), __LINE__);
+                PAUSE
+                return false;
+            }
+        }
+        key.Close();
+#else
+        spdlog::warn("非 Windows 平台无法自动探测 GitHub Desktop 安装目录");
+        Base = utils::to_path(LoopGetBasePath());
+        if(Base.empty()) {
+            spdlog::error("未能获取资源目录, 请使用 -g 参数手动指定");
+            PAUSE
+            return false;
+        }
+#endif // _WIN32
+    }
+    return true;
+}
+
+// 指定还原: 从备份原子还原 main.js/renderer.js(临时文件+改名, 中断不留下缺失/半截文件)
+// 返回退出码: 0 全部成功, 1 任一失败
+static int PerformRollback() {
+    int restore_fail = 0;
+    auto restore_one = [&](const fs::path& bak, const fs::path& dst) {
+        if(!fs::exists(bak)) {
+            spdlog::warn("{} 回滚失败, {} 文件不存在", dst.string().c_str(), bak.string().c_str());
+            restore_fail++;
+            return;
+        }
+        // 原子化: 先复制到临时文件, 成功后再改名覆盖, 中断不会留下缺失/半截的目标文件
+        // 临时文件名附加随机后缀: 防止固定名称被抢注/符号链接预置(#122 B2)
+        const fs::path tmp = dst.string() + ".restoring" + utils::RandomTempSuffix();
+        std::error_code ec;
+        fs::copy_file(bak, tmp, fs::copy_options::overwrite_existing, ec);
+        if(ec) {
+            spdlog::error("回滚复制 {} -> {} 失败: {}", bak.string().c_str(), tmp.string().c_str(), ec.message());
+            restore_fail++;
+            return;
+        }
+        fs::rename(tmp, dst, ec);
+        if(ec) {
+            spdlog::error("回滚替换 {} -> {} 失败: {}", tmp.string().c_str(), dst.string().c_str(), ec.message());
+            std::error_code rmec;
+            fs::remove(tmp, rmec);
+            restore_fail++;
+            return;
+        }
+        spdlog::info("{} 还原完成", dst.string().c_str());
+    };
+    restore_one(Base / "main.js.bak", Base / "main.js");
+    restore_one(Base / "renderer.js.bak", Base / "renderer.js");
+    PAUSE
+    return restore_fail ? 1 : 0;
+}
+
+// 远程映射拉取(#121 收敛双份拷贝): 获取并解析 localization.json 到全局 localization
+static bool FetchRemoteMapping(const std::pair<std::string, int>& proxy) {
+    spdlog::info("尝试从远程仓库中获取");
+    std::string httpjson;
+    if (!utils::ReadHttpDataString(kRawHost, kLocalizationJsonRawPath, httpjson, proxy)) {
+        spdlog::warn("远程获取失败 - 请{}重试", !proxy.second ? "尝试开启代理或":"");
+        return false;
+    }
+    try {
+        localization = json::parse(httpjson);
+    }
+    catch(const std::exception& e) {
+        spdlog::error("远程映射文件解析失败: {}", e.what());
+        return false;
+    }
+    spdlog::info("远程读取成功");
+    return true;
+}
+
+// 映射加载(#121 阶段拆分): 远程/本地加载 + 顶层结构与必需键校验 + tip 提示打印
+// 返回 false 表示加载失败或映射无效, 调用方应中止
+static bool LoadLocalization(const std::pair<std::string, int>& proxy) {
+    // 如果是仅从远程仓库读取汉化文件
+    if (only_read_from_remote) {
+        if (!FetchRemoteMapping(proxy)) {
+            PAUSE
+            return false;
+        }
+    }
+    // 没有指定仅从远程仓库获取汉化文件
+    else {
+        // 判断汉化映射文件是否存在, 不存在则创建一个
+        if (!fs::exists(LocalizationJSON)) {
+            // 没有发现json文件,尝试从远程开源项目中获取
+            spdlog::warn("没有指定,或从指定位置没有发现 {} 文件", "localization.json");
+            if (!FetchRemoteMapping(proxy)) {
+                PAUSE
+                return false;
+            }
+        }
+        else
+        {
+            // 本地读取汉化文件到json中
+            std::ifstream config(LocalizationJSON);
+            if (!config) {
+                spdlog::error("localization.json 打开失败,无法读取");
+                PAUSE
+                return false;
+            }
+            try
+            {
+                config >> localization;
+            }
+            catch (const std::exception& e)
+            {
+                spdlog::error("{} at line {}", e.what(), __LINE__);
+                PAUSE
+                return false;
+            }
+        }
+    }
+
+    // 映射文件顶层必须为 JSON 对象, 否则后续下标访问是未定义行为
+    if(!localization.is_object()) {
+        spdlog::error("映射文件格式无效, 顶层必须为 JSON 对象");
+        PAUSE
+        return false;
+    }
+
+    // E3: 必需顶层键缺失时 nlohmann 迭代空区间, 会 0 条替换仍报成功, 必须显式校验
+    {
+        const char* main_key = _debug_dev_replace ? "main_dev" : "main";
+        const char* renderer_key = _debug_dev_replace ? "renderer_dev" : "renderer";
+        for(const char* k : { main_key, renderer_key }) {
+            if(!localization.contains(k) || !localization.at(k).is_array() || localization.at(k).empty()) {
+                spdlog::error("映射文件缺少或为空的必需条目: {}", k);
+                PAUSE
+                return false;
+            }
+        }
+        if(!_debug_dev_replace) {
+            if(!localization.contains("select") || !localization.at("select").is_array()) {
+                spdlog::error("映射文件缺少必需条目: select");
+                PAUSE
+                return false;
+            }
+        }
+    }
+
+    // 读取映射文件中的提示信息
+    if (localization.contains("tip") && localization.at("tip").is_array() && !localization.at("tip").empty()) {
+        for(auto& it : localization.at("tip")) {
+            if (it.is_string()) {
+                spdlog::info(" **通知** {}", it.get<std::string>());
+            }
+        }
+    }
+    return true;
+}
+
+// ── 备份恢复/备份创建(#121 收敛三处逐字重复) ──
+enum class RestoreOutcome {
+    kRestored,             // 已从备份还原
+    kNoBackup,             // 备份文件不存在
+    kConcurrentlyRestored, // 预检后目标被并发进程还原, 跳过
+    kCopyFailed,           // 复制失败(原因见日志)
+};
+
+// base/<name> 缺失时从 base/<name>.bak 还原(目标已存在时调用方不应调用); 统一打印结果日志
+static RestoreOutcome RestoreFromBackup(const fs::path& base, const char* name) {
+    const std::string bak_name = std::string(name) + ".bak";
+    std::error_code ec;
+    fs::copy_file(base / bak_name, base / name, ec);
+    if(!ec) {
+        spdlog::warn("{} 未找到, 但已从备份{}中还原", name, bak_name);
+        return RestoreOutcome::kRestored;
+    }
+    if(ec == std::errc::no_such_file_or_directory) {
+        spdlog::warn("目录有误，找不到目录下的{} 且备份 {} 不存在。", name, bak_name);
+        return RestoreOutcome::kNoBackup;
+    }
+    if(ec == std::errc::file_exists) {
+        // 预检后目标被并发进程还原: 无需重复操作, 继续使用现有文件
+        spdlog::warn("{} 已由并发进程还原, 跳过备份还原", name);
+        return RestoreOutcome::kConcurrentlyRestored;
+    }
+    spdlog::error("从备份还原 {} 失败: {}", name, ec.message());
+    return RestoreOutcome::kCopyFailed;
+}
+
+// 备份恢复的布尔包装: 恢复成功(含并发还原跳过)返回 true, 缺备份/复制失败返回 false
+static bool EnsureRestoredFromBackup(const fs::path& base, const char* name) {
+    if(fs::exists(base / name)) {
+        return true;
+    }
+    switch(RestoreFromBackup(base, name)) {
+        case RestoreOutcome::kRestored:
+        case RestoreOutcome::kConcurrentlyRestored:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// js 文件缺失恢复 + 备份创建(#121 阶段拆分): 任一步失败返回 false, 调用方应中止
+static bool EnsureJsFilesAndBackups() {
+    // 如果没有js文件却有备份文件 则从备份恢复
+    for(const char* name : { "main.js", "renderer.js" }) {
+        if(fs::exists(Base / name)) {
+            continue;
+        }
+        switch(RestoreFromBackup(Base, name)) {
+            case RestoreOutcome::kNoBackup:
+            case RestoreOutcome::kCopyFailed:
+                PAUSE
+                return false;
+            default:
+                break;
+        }
+    }
+
+    // 仅在备份文件不存在时备份
+    for(const char* name : { "main.js", "renderer.js" }) {
+        const std::string bak_name = std::string(name) + ".bak";
+        if(fs::exists(Base / bak_name)) {
+            continue;
+        }
+        std::error_code ec;
+        fs::copy_file(Base / name, Base / bak_name, ec);
+        if(ec) {
+            spdlog::error("创建备份 {} -> {} 失败: {}, 已中止以免后续无法还原", name, bak_name, ec.message());
+            PAUSE
+            return false;
+        }
+        spdlog::info("已新建备份 {} -> {}", name, bak_name);
+    }
+    return true;
+}
+
+// minversion 门禁(#121 阶段拆分): 不满足时按 交互确认 / --force / --nopause 三态处理
+// 返回 0 表示可以继续替换, 1 表示应中止
+static int CheckMinVersionGate() {
+    // 判断版本
+    std::string minver_str;
+    if(localization.contains("minversion")) {
+        if(localization["minversion"].is_string()) {
+            minver_str = localization["minversion"].get<std::string>();
+        }
+        else {
+            spdlog::warn("映射文件中 minversion 不是字符串, 已忽略");
+        }
+    }
+    if(FileVer.status != versionparse::Version::Dev && !minver_str.empty()) {
+        versionparse::Version JsonVer(minver_str.c_str());
+        if(!JsonVer) {
+            // 无法确认最低兼容版本: 中止比带着未知兼容性继续替换更安全
+            spdlog::error("映射文件中 minversion 解析失败, 无法确认最低兼容版本, 已中止: {}", minver_str);
+            PAUSE
+            return 1;
+        }
+        if(FileVer < JsonVer) {
+            // 不符合要求
+            spdlog::warn("文件要求加载器版本至少为: {}, 但加载器版本为: {}", JsonVer.toString(), FileVer.toString());
+            spdlog::info("请更新：{}", kReleasesPageUrl);
+            // 询问是否强制执行
+
+            if(!no_pause) {
+                spdlog::info("输入(f)强制执行替换(可能会导致无法打开), 其他退出..");
+                std::string input;
+                if(std::cin >> input) {
+                    utils::stdin_after_extract = true; // >> 提取成功, 残留换行待后续交互清扫
+                }
+                if(!std::cin || (input != "f" && input != "F")) {
+                    PAUSE
+                    return 1;
+                }
+            }
+            else if(force_execute) {
+                spdlog::warn("版本不满足要求, 已按 --force 强制执行");
+            }
+            else {
+                // 非交互(--nopause)默认中止: 兼容性未知的强制替换风险过高, 需 --force 显式确认
+                spdlog::warn("版本不满足要求, --nopause 模式默认中止; 如确认要继续请加 --force 显式强制执行");
+                return 1;
+            }
+        }
+        else {
+            PAUSE
+        }
+    }
+    else {
+        PAUSE
+    }
+    return 0;
+}
+
+// 项目贡献者展示(装饰性): 失败仅告警不影响主流程
+static void ShowContributors(const std::pair<std::string, int>& proxy) {
+    // 获取项目参与者:
+    // https://api.github.com/repos/Tupig/GitHubDesktop2Chinese/contributors
+    try {
+        spdlog::info("正在获取项目参与者");
+        std::string contributors;
+        if(utils::ReadHttpDataString(kApiHost, kContributorsApiPath, contributors, proxy)) {
+            auto contributorsjson = json::parse(contributors);
+            spdlog::info("人数: {}", contributorsjson.size());
+            int num = 0;
+            for(auto& item : contributorsjson.items()) {
+                num++;
+                if(num > kMaxContributorsShown) break;
+                spdlog::info("{}/{} 名称:{} 贡献:{}{}{} 主页:{}", num, kMaxContributorsShown, item.value()["login"].get<std::string>(),"\033[37m\033[5m", item.value()["contributions"].get<int>(),"\033[0m", item.value()["html_url"].get<std::string>());
+            }
+        }
+    }
+    catch(const std::exception& e) {
+        spdlog::warn("读取解析数据出现异常: {}", e.what());
+    }
+    catch(...) {
+        spdlog::warn("读取解析数据出现未知异常.");
+    }
+}
+
 #ifdef _WIN32
 // wmain: 使用宽字符命令行, 避免非UTF-8代码页(如中文GBK)下参数在CLI11内部转换时崩溃
 int wmain(int argc, wchar_t* wargv[])
@@ -657,19 +1195,7 @@ int main(int argc, char* argv[])
     spdlog::info("开发者：Tupig（原作 CNGEGE，项目始于 2024/04/13）");
     spdlog::info("按程序提示流程走，完成后自动会退出，{}请勿手动关闭{}程序，手动关闭可能导致汉化失败", "\033[1;33m", "\033[0m");
 
-    std::pair<std::string, int> proxy = { "", 0 };
-    {
-        auto p1 = utils::get_proxy_env();
-        if(p1) {
-            proxy = *p1;
-        }
-        else {
-            auto p2 = utils::GetSystemProxySettings();
-            if(p2) {
-                proxy = *p2;
-            }
-        }
-    }
+    std::pair<std::string, int> proxy = DetectProxy();
     if(proxy.second) {
         spdlog::info("检测到已开启代理: {}:{}", proxy.first, proxy.second);
     }
@@ -688,7 +1214,7 @@ int main(int argc, char* argv[])
     else {
         spdlog::warn("程序架构：- {}  程序版本解析失败... at {}", arch_str, FILEVERSION);
     }
-    
+
 
 
 #ifdef _WIN32
@@ -699,484 +1225,39 @@ int main(int argc, char* argv[])
         LocalizationJSON = "localization.json";
     }
 
-    if(!fs::exists(LocalizationJSON)) {
-        // 读取项目更新时间
-        try {
-            std::string repoinfo;
-            if(utils::ReadHttpDataString(kApiHost, kRepoApiPath, repoinfo, proxy)) {
-                auto infojson = json::parse(repoinfo);
-                std::optional<std::string> info = formatTime(infojson["updated_at"]);
-                if(info) {
-                    spdlog::info("仓库最新更新时间: {}{}{}", "\033[32m", *info, "\033[0m");
-                }
-            }
-        }
-        catch(const std::exception& e) {
-            // 装饰性信息: 解析失败不中断主流程, 但保留原因便于诊断
-            spdlog::debug("查询仓库更新时间失败: {}", e.what());
-        }
-        catch(...) {
-            spdlog::debug("查询仓库更新时间出现未知异常");
-        }
-    }
+    // 本地无映射文件时的装饰性查询: 仓库最近更新时间
+    LogRepoLastUpdated(proxy);
 
-    // 检查更新
-    // https://api.github.com/repos/Tupig/GitHubDesktop2Chinese/releases/latest
-    {
-        if(FileVer.status != versionparse::Version::Dev) {
-            spdlog::info("检查更新中..");
-            try {
-                std::string repoinfo;
-                if(utils::ReadHttpDataString(kApiHost, kLatestReleaseApiPath, repoinfo, proxy)) {
-                    auto infojson = json::parse(repoinfo);
-                    auto tag_name = infojson["tag_name"].get<std::string>();
-                    versionparse::Version remoteVer(tag_name.c_str());
-                    if(!remoteVer) {
-                        spdlog::warn("远程仓库中的版本号解析失败, ({})", tag_name);
-                    }
-                    else {
-                        if(FileVer < remoteVer) {
-                            spdlog::info("发现新版本: {}", remoteVer.toString());
-                            // 在资产中定位可执行文件，避免依赖 assets[0] 的顺序
-                            const json* asset = nullptr;
-                            if(infojson.contains("assets") && infojson["assets"].is_array()) {
-                                for(const auto& a : infojson["assets"]) {
-                                    if(a.value("name", std::string()) == "GitHubDesktop2Chinese.exe") { asset = &a; break; }
-                                }
-                                if(!asset) {
-                                    for(const auto& a : infojson["assets"]) {
-                                        const std::string name = a.value("name", std::string());
-                                        if(name.size() > 4 && name.ends_with(".exe")) { asset = &a; break; }
-                                    }
-                                }
-                            }
-                            if(!asset) {
-                                spdlog::warn("未在最新 Release 中找到可执行文件资产, 跳过自动更新");
-                            }
-                            else {
-                                std::string browser_download_url = asset->at("browser_download_url").get<std::string>();
-                                // 下载使用浏览器下载地址(github.com 直链): 不消耗 API 配额,
-                                // 避免共享 IP 触发 60次/小时匿名限流导致下载 403
-                                std::string downlink = browser_download_url;
-                                int download_count = asset->at("download_count").get<int>();
-                                int64_t max_size = asset->at("size").get<int64_t>();
-                                // 发布资产声明的 SHA256 摘要(形如 sha256:<hex>), 用于下载后完整性校验
-                                std::string asset_digest = asset->value("digest", std::string());
-                                spdlog::info("下载链接({}次下载): {}", download_count, browser_download_url);
-                                spdlog::info("是否自动更新:");
-                                bool autoupdate = utils::ReadUserInput_bool({ "n", "y" }, 0);
-                                if(autoupdate) {
-                                    // 下载地址形如:
-                                    //https://github.com/Tupig/GitHubDesktop2Chinese/releases/download/v1.0.14/GitHubDesktop2Chinese.exe
-                                    std::regex url_regex(R"(^((?:https://)[^/]+)(/.*)?$)", std::regex::optimize);
-                                    std::smatch matches;
-                                    if(std::regex_match(downlink, matches, url_regex)) {
-                                        auto result = utils::UpdateProgram(matches[1].str(), matches[2].str(), self_path, max_size, proxy, asset_digest);
-                                        if(!result) {
-                                            spdlog::error("失败 更新过程出现异常");
-                                        }
-                                        else {
-                                            // 立马退出 等待替换
-                                            return 0;
-                                        }
-                                    }
-                                    else {
-                                        spdlog::error("下载地址可能变更, 正则表达式无法捕获");
-                                    }
-                                }
-                            }
-                        }
-                        else {
-                            spdlog::info("当前版本已经是最新版..");
-                        }
-                    }
-                }
-                else {
-                    spdlog::warn("远程信息读取失败..");
-                }
-            }
-            catch(const std::exception& e) {
-                spdlog::warn("检查更新时出现异常: {}", e.what());
-            }
-            catch(...) {
-                spdlog::warn("检查更新时出现未知异常");
-            }
-        }
+    // 检查更新: 触发自更新后立即退出等待替换
+    if(CheckForUpdates(proxy, self_path)) {
+        return 0;
     }
 
     // ── 目录解析(前置于 json 加载): 回滚只需目录+备份, 不应被 json 损坏/断网阻断(F4) ──
-    // Github Desktop 存在目录没有提前设置
-    if (!fs::exists(Base) || !fs::exists(Base / "index.html")) {
-#ifdef _WIN32
-        //	检查注册表中是否存在GithubDesktop
-        winreg::RegKey key;
-        winreg::RegResult result = key.TryOpen(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\GitHubDesktop");
-        if (!result)
-        {
-            spdlog::warn("注册表中未发现GitHubDesktop相关条目, Reg ErrorMessage: {}" ,utils::to_byte_string(result.ErrorMessage()));
-            spdlog::warn("你可能没有安装GithubDesktop，请先安装然后打开此程序或者手动指定main.js所在的文件夹目录");
-            Base = utils::to_path(LoopGetBasePath());
-            if(Base.empty()) {
-                spdlog::error("未能获取资源目录, 请使用 -g 参数手动指定");
-                PAUSE
-                return 1;
-            }
-        }
-        else {
-            try
-            {
-                // 首先要从注册表中拿到GithubDesktop相关信息
-                // 任务就是将Base 中写入路径
-                std::wstring ver = key.GetStringValue(L"DisplayVersion");
-                std::wstring path = key.GetStringValue(L"InstallLocation");
-                Base = path + L"\\" + L"app-" + ver + L"\\resources\\app";
-                std::string desktop_local_ver_str = utils::to_byte_string(ver);
-
-
-                spdlog::info("正在读取GitHubDesktop最新正式版...");
-                std::string httpjson_str;
-                // 使用 GitHub Releases API: releases/latest 仅返回最新非预发布(正式版),
-                // 避免把 beta 预览版(如 3.6.7-beta)误报为最新正式版
-                if(utils::ReadHttpDataString(kApiHost, kDesktopLatestReleaseApiPath, httpjson_str, proxy)) {
-                    // 远程信息仅用于提示, 解析失败不应中断主流程
-                    try {
-                        auto httpjson = json::parse(httpjson_str);
-                        std::string v = httpjson.at("tag_name").get<std::string>();
-                        if(v.rfind("release-", 0) == 0) {
-                            v = v.substr(kDesktopTagPrefixLen); // 剥离 "release-" 前缀
-                        }
-                        versionparse::Version desktop_remote_ver(v.c_str());
-                        if(desktop_remote_ver) {
-                            versionparse::Version desktop_local_ver(desktop_local_ver_str.c_str());
-                            spdlog::info("已读取到远程GitHubDesktop最新版:{} {}", v, desktop_remote_ver > desktop_local_ver ? "(\033[1;33m需更新\033[0m)" : "");
-                        }
-                        else {
-                            spdlog::warn("远程GitHubDesktop版本号解析失败: {}", v);
-                        }
-                    }
-                    catch(const std::exception& e) {
-                        spdlog::warn("远程GitHubDesktop版本信息解析失败: {}", e.what());
-                    }
-                }else{
-                    spdlog::warn("远程GitHubDesktop版本读取失败.");
-                }
-
-                spdlog::info("已从注册表中读取本地GitHubDesktop信息:");
-                spdlog::info("本地GitHubDesktop版本: {}", desktop_local_ver_str);
-                spdlog::info("安装目录: {}", utils::to_byte_string(path));
-                spdlog::info("最后拼接完整目录: {}", utils::to_byte_string(Base.wstring()));
-
-
-                if (!fs::exists(Base)) {
-                    spdlog::warn("注册表最终获取到的目录不存在,请手动指定main.js所在的文件夹目录");
-                    Base = utils::to_path(LoopGetBasePath());
-                    if(Base.empty()) {
-                        spdlog::error("未能获取资源目录, 请使用 -g 参数手动指定");
-                        PAUSE
-                        return 1;
-                    }
-                }
-
-            }
-            catch (const winreg::RegException& regerr)
-            {
-                spdlog::error("可能注册表key {} 不存在,请检查注册表目录 {}", "DisplayVersion 或 InstallLocation", "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\GitHubDesktop");
-                spdlog::error("RegException {} ,ErrCode:{}  at line: {}", regerr.what(),regerr.code().value(), __LINE__);
-                PAUSE
-                return 1;
-            }
-            catch(const std::runtime_error& err) {
-                spdlog::error("runtime_error {} at line: {}", err.what(), __LINE__);
-                PAUSE
-                return 1;
-            }
-            catch(const std::exception& e) {
-                // 兜底: 避免 std::filesystem 等异常未捕获导致进程终止
-                spdlog::error("读取GitHubDesktop安装信息时出现错误 {} at line: {}", e.what(), __LINE__);
-                PAUSE
-                return 1;
-            }
-        }
-        key.Close();
-#else
-        spdlog::warn("非 Windows 平台无法自动探测 GitHub Desktop 安装目录");
-        Base = utils::to_path(LoopGetBasePath());
-        if(Base.empty()) {
-            spdlog::error("未能获取资源目录, 请使用 -g 参数手动指定");
-            PAUSE
-            return 1;
-        }
-#endif // _WIN32
-    }
-
-    fs::path mainjs = "main.js";
-    fs::path mainjsbak = "main.js.bak";
-
-    fs::path rendererjs = "renderer.js";
-    fs::path rendererjsbak = "renderer.js.bak";
-
-    // 指定还原(短路: 在 json 加载之前执行, json 损坏/断网不阻断回滚)
-    if(rollback) {
-        int restore_fail = 0;
-        auto restore_one = [&](const fs::path& bak, const fs::path& dst) {
-            if(!fs::exists(bak)) {
-                spdlog::warn("{} 回滚失败, {} 文件不存在", dst.string().c_str(), bak.string().c_str());
-                restore_fail++;
-                return;
-            }
-            // 原子化: 先复制到临时文件, 成功后再改名覆盖, 中断不会留下缺失/半截的目标文件
-            // 临时文件名附加随机后缀: 防止固定名称被抢注/符号链接预置(#122 B2)
-            const fs::path tmp = dst.string() + ".restoring" + utils::RandomTempSuffix();
-            std::error_code ec;
-            fs::copy_file(bak, tmp, fs::copy_options::overwrite_existing, ec);
-            if(ec) {
-                spdlog::error("回滚复制 {} -> {} 失败: {}", bak.string().c_str(), tmp.string().c_str(), ec.message());
-                restore_fail++;
-                return;
-            }
-            fs::rename(tmp, dst, ec);
-            if(ec) {
-                spdlog::error("回滚替换 {} -> {} 失败: {}", tmp.string().c_str(), dst.string().c_str(), ec.message());
-                std::error_code rmec;
-                fs::remove(tmp, rmec);
-                restore_fail++;
-                return;
-            }
-            spdlog::info("{} 还原完成", dst.string().c_str());
-        };
-        restore_one(Base / mainjsbak, Base / mainjs);
-        restore_one(Base / rendererjsbak, Base / rendererjs);
-        PAUSE
-        return restore_fail ? 1 : 0;
-    }
-
-    // 如果是仅从远程仓库读取汉化文件
-    if (only_read_from_remote) {
-        spdlog::info("尝试从远程仓库中获取");
-        std::string httpjson;
-        if (utils::ReadHttpDataString(kRawHost, kLocalizationJsonRawPath, httpjson, proxy)) {
-            try {
-                localization = json::parse(httpjson);
-                spdlog::info("远程读取成功");
-            }
-            catch(const std::exception& e) {
-                spdlog::error("远程映射文件解析失败: {}", e.what());
-                PAUSE
-                return 1;
-            }
-        }
-        else {
-            spdlog::warn("远程获取失败,请检查网络和代理,并稍后再试");
-            PAUSE
-            return 1;
-        }
-    }
-    // 没有指定仅从远程仓库获取汉化文件
-    else {
-        // 判断汉化映射文件是否存在, 不存在则创建一个
-        if (!fs::exists(LocalizationJSON)) {
-            // 没有发现json文件,尝试从远程开源项目中获取
-            spdlog::warn("没有指定,或从指定位置没有发现 {} 文件", "localization.json");
-            spdlog::info("尝试从远程仓库中获取");
-            std::string httpjson;
-            if (utils::ReadHttpDataString(kRawHost, kLocalizationJsonRawPath, httpjson, proxy)) {
-                try {
-                    localization = json::parse(httpjson);
-                    spdlog::info("远程读取成功");
-                }
-                catch(const std::exception& e) {
-                    spdlog::error("远程映射文件解析失败: {}", e.what());
-                    PAUSE
-                    return 1;
-                }
-            }
-            else {
-                spdlog::warn("远程获取失败 - 请{}重试", !proxy.second ? "尝试开启代理或":"");
-                PAUSE
-                return 1;
-            }
-        }
-        else
-        {
-            // 本地读取汉化文件到json中
-            std::ifstream config(LocalizationJSON);
-            if (!config) {
-                spdlog::error("localization.json 打开失败,无法读取");
-                PAUSE
-                return 1;
-            }
-            try
-            {
-                config >> localization;
-            }
-            catch (const std::exception& e)
-            {
-                spdlog::error("{} at line {}", e.what(), __LINE__);
-                PAUSE
-                return 1;
-            }
-        }
-    }
-
-    // 映射文件顶层必须为 JSON 对象, 否则后续下标访问是未定义行为
-    if(!localization.is_object()) {
-        spdlog::error("映射文件格式无效, 顶层必须为 JSON 对象");
-        PAUSE
+    if(!ResolveBaseDirectory(proxy)) {
         return 1;
     }
 
-    // E3: 必需顶层键缺失时 nlohmann 迭代空区间, 会 0 条替换仍报成功, 必须显式校验
-    {
-        const char* main_key = _debug_dev_replace ? "main_dev" : "main";
-        const char* renderer_key = _debug_dev_replace ? "renderer_dev" : "renderer";
-        for(const char* k : { main_key, renderer_key }) {
-            if(!localization.contains(k) || !localization.at(k).is_array() || localization.at(k).empty()) {
-                spdlog::error("映射文件缺少或为空的必需条目: {}", k);
-                PAUSE
-                return 1;
-            }
-        }
-        if(!_debug_dev_replace) {
-            if(!localization.contains("select") || !localization.at("select").is_array()) {
-                spdlog::error("映射文件缺少必需条目: select");
-                PAUSE
-                return 1;
-            }
-        }
+    // 指定还原(短路: 在 json 加载之前执行, json 损坏/断网不阻断回滚)
+    if(rollback) {
+        return PerformRollback();
     }
 
-    // 读取映射文件中的提示信息
-    if (localization.contains("tip") && localization.at("tip").is_array() && !localization.at("tip").empty()) {
-        for(auto& it : localization.at("tip")) {
-            if (it.is_string()) {
-                spdlog::info(" **通知** {}", it.get<std::string>());
-            }
-        }
+    // 映射加载与结构校验(#121 阶段拆分)
+    if(!LoadLocalization(proxy)) {
+        return 1;
     }
 
-
-
-    // 如果没有js文件却有备份文件 则从备份恢复
-    if (!fs::exists(Base / mainjs)) {
-        std::error_code ec;
-        fs::copy_file(Base / "main.js.bak", Base / "main.js", ec);
-        if(!ec) {
-            spdlog::warn("main.js 未找到, 但已从备份main.js.bak中还原");
-        }
-        else if(ec == std::errc::no_such_file_or_directory) {
-            spdlog::warn("目录有误，找不到目录下的main.js 且备份 main.js.bak 不存在。");
-            PAUSE
-            return 1;
-        }
-        else if(ec == std::errc::file_exists) {
-            // 预检后目标被并发进程还原: 无需重复操作, 继续使用现有文件
-            spdlog::warn("main.js 已由并发进程还原, 跳过备份还原");
-        }
-        else {
-            spdlog::error("从备份还原 main.js 失败: {}", ec.message());
-            PAUSE
-            return 1;
-        }
+    // js 文件缺失恢复 + 备份创建(#121 收敛双份拷贝)
+    if(!EnsureJsFilesAndBackups()) {
+        return 1;
     }
 
-    if (!fs::exists(Base / rendererjs)) {
-        std::error_code ec;
-        fs::copy_file(Base / "renderer.js.bak", Base / "renderer.js", ec);
-        if(!ec) {
-            spdlog::warn("renderer.js 未找到, 但已从备份renderer.js.bak中还原");
-        }
-        else if(ec == std::errc::no_such_file_or_directory) {
-            spdlog::warn("目录有误，找不到目录下的renderer.js 且备份 renderer.js.bak 不存在。");
-            PAUSE
-            return 1;
-        }
-        else if(ec == std::errc::file_exists) {
-            spdlog::warn("renderer.js 已由并发进程还原, 跳过备份还原");
-        }
-        else {
-            spdlog::error("从备份还原 renderer.js 失败: {}", ec.message());
-            PAUSE
-            return 1;
-        }
+    // minversion 门禁(#121 阶段拆分)
+    if(CheckMinVersionGate() != 0) {
+        return 1;
     }
 
-    // 仅在备份文件不存在时备份
-    if (!fs::exists(Base / "main.js.bak")) {
-        std::error_code ec;
-        fs::copy_file(Base / "main.js", Base / "main.js.bak", ec);
-        if(ec) {
-            spdlog::error("创建备份 main.js -> main.js.bak 失败: {}, 已中止以免后续无法还原", ec.message());
-            PAUSE
-            return 1;
-        }
-        spdlog::info("已新建备份 main.js -> main.js.bak");
-    }
-
-    if (!fs::exists(Base / "renderer.js.bak")) {
-        std::error_code ec;
-        fs::copy_file(Base / "renderer.js", Base / "renderer.js.bak", ec);
-        if(ec) {
-            spdlog::error("创建备份 renderer.js -> renderer.js.bak 失败: {}, 已中止以免后续无法还原", ec.message());
-            PAUSE
-            return 1;
-        }
-        spdlog::info("已新建备份 renderer.js -> renderer.js.bak");
-    }
-
-    // 判断版本
-    std::string minver_str;
-    if(localization.contains("minversion")) {
-        if(localization["minversion"].is_string()) {
-            minver_str = localization["minversion"].get<std::string>();
-        }
-        else {
-            spdlog::warn("映射文件中 minversion 不是字符串, 已忽略");
-        }
-    }
-    if(FileVer.status != versionparse::Version::Dev && !minver_str.empty()) {
-        versionparse::Version JsonVer(minver_str.c_str());
-        if(!JsonVer) {
-            // 无法确认最低兼容版本: 中止比带着未知兼容性继续替换更安全
-            spdlog::error("映射文件中 minversion 解析失败, 无法确认最低兼容版本, 已中止: {}", minver_str);
-            PAUSE
-            return 1;
-        }
-        else {
-            if(FileVer < JsonVer) {
-                // 不符合要求
-                spdlog::warn("文件要求加载器版本至少为: {}, 但加载器版本为: {}", JsonVer.toString(), FileVer.toString());
-                spdlog::info("请更新：{}", kReleasesPageUrl);
-                // 询问是否强制执行
-
-                if(!no_pause) {
-                    spdlog::info("输入(f)强制执行替换(可能会导致无法打开), 其他退出..");
-                    std::string input;
-                    if(std::cin >> input) {
-                        utils::stdin_after_extract = true; // >> 提取成功, 残留换行待后续交互清扫
-                    }
-                    if(!std::cin || (input != "f" && input != "F")) {
-                        PAUSE
-                        return 1;
-                    }
-                }
-                else if(force_execute) {
-                    spdlog::warn("版本不满足要求, 已按 --force 强制执行");
-                }
-                else {
-                    // 非交互(--nopause)默认中止: 兼容性未知的强制替换风险过高, 需 --force 显式确认
-                    spdlog::warn("版本不满足要求, --nopause 模式默认中止; 如确认要继续请加 --force 显式强制执行");
-                    return 1;
-                }
-            }
-            else {
-                PAUSE
-            }
-        }
-    }
-    else {
-        PAUSE
-    }
-    
     int ret_num = 0;
     // 处理 main[_dev].js 映射（与 renderer 共用 ProcessJsFile 单一实现, 2026-10 审计 M2 去重）
     {
@@ -1196,28 +1277,8 @@ int main(int argc, char* argv[])
         }
     }
 
-    // 获取项目参与者:
-    // https://api.github.com/repos/Tupig/GitHubDesktop2Chinese/contributors
-    try {
-        spdlog::info("正在获取项目参与者");
-        std::string contributors;
-        if(utils::ReadHttpDataString(kApiHost, kContributorsApiPath, contributors, proxy)) {
-            auto contributorsjson = json::parse(contributors);
-            spdlog::info("人数: {}", contributorsjson.size());
-            int num = 0;
-            for(auto& item : contributorsjson.items()) {
-                num++;
-                if(num > kMaxContributorsShown) break;
-                spdlog::info("{}/{} 名称:{} 贡献:{}{}{} 主页:{}", num, kMaxContributorsShown, item.value()["login"].get<std::string>(),"\033[37m\033[5m", item.value()["contributions"].get<int>(),"\033[0m", item.value()["html_url"].get<std::string>());
-            }
-        }
-    }
-    catch(const std::exception& e) {
-        spdlog::warn("读取解析数据出现异常: {}", e.what());
-    }
-    catch(...) {
-        spdlog::warn("读取解析数据出现未知异常.");
-    }
+    // 项目贡献者展示(装饰性)
+    ShowContributors(proxy);
 
 
     PAUSE
@@ -1247,36 +1308,12 @@ bool GetBasePath(std::string& out) {
         spdlog::warn("你输入的目录不存在. ");
         return false;
     }
-    fs::path mainjs = "main.js";
-    fs::path mainjsbak = "main.js.bak";
-    if (!fs::exists(base / mainjs)) {
-        if (!fs::exists(base / mainjsbak)) {
-            spdlog::warn("目录有误，找不到目录下的main.js. ");
-            return false;
-        }
-        std::error_code ec;
-        fs::copy_file(base / "main.js.bak", base / "main.js", ec);
-        if(ec) {
-            spdlog::warn("从备份还原 main.js 失败: {}", ec.message());
-            return false;
-        }
-        spdlog::warn("main.js 未找到, 但已从备份main.js.bak中还原");
+    // 从备份恢复缺失的 js 文件(#121 收敛双份拷贝)
+    if (!EnsureRestoredFromBackup(base, "main.js")) {
+        return false;
     }
-
-    fs::path rendererjs = "renderer.js";
-    fs::path rendererjsbak = "renderer.js.bak";
-    if (!fs::exists(base / rendererjs)) {
-        if (!fs::exists(base / rendererjsbak)) {
-            spdlog::warn("目录有误，找不到目录下的renderer.js. ");
-            return false;
-        }
-        std::error_code ec;
-        fs::copy_file(base / "renderer.js.bak", base / "renderer.js", ec);
-        if(ec) {
-            spdlog::warn("从备份还原 renderer.js 失败: {}", ec.message());
-            return false;
-        }
-        spdlog::warn("renderer.js 未找到, 但已从备份renderer.js.bak中还原");
+    if (!EnsureRestoredFromBackup(base, "renderer.js")) {
+        return false;
     }
     return true;
 }
