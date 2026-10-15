@@ -135,6 +135,10 @@
 		["\"Open &with…\"","\"使用...打开(&W)\""],
 		["\"Wor&ktrees list\"","\"工作树列表（&K）\""],
 		["\"New work&tree…\"","\"新建工作树...（&T）\""],
+		["\"Reveal Repository in Finder\\?\"","\"在 Finder 中显示仓库？\""],
+		["\"This repository might be an application\\.\"","\"此仓库可能是一个应用程序。\""],
+		["\"Opening it directly could run software\\. You can reveal and select it in Finder without opening it\\.\"","\"直接打开它可能会运行软件。你可以在 Finder 中显示并选中它，而不将其打开。\""],
+		["buttons:\\[\"Reveal in Finder\",\"Cancel\"\\]","buttons:[\"在 Finder 中显示\",\"取消\"]"],
 		["\"\"","\"\""]
 	],
 	"main_dev":[
@@ -207,14 +211,13 @@
 		["\"repository name\"","\"仓库名字\""],
 		["\"URL or username/repository\"","\"链接或者 username/repository\""],
 		["\"Summary \\(required\\)\"","\"摘要(必填)\""],
-		["\"Commit\"","\"提交\""],
+		["\"Committing\":\"Commit\"","\"提交\":\"提交\""],
 		["\"A commit summary is required to commit\"","\"提交时需要提供提交摘要\""],
 		["`\\$\\{(.)\\} \\$\\{(.)>1\\?\"files\":\"file\"\\} `","`$${$1}个文件`"],
 		["\\$\\{(.)\\} \\$\\{this\\.getFilesToBeCommittedButtonText\\(\\)\\}to `","$${$1}$${this.getFilesToBeCommittedButtonText()}到`"],
 		["\\((..)\\.Fragment,null,(.),(..)\\.createElement\\(\"strong\",null,(.)\\)\\)","($1.Fragment,null,$2,$3.createElement(\"strong\",null,$4),\"分支\")"],
 		["\"Select one or more files to commit\"","\"选择一个或多个文件进行提交\""],
 		["\"Committing changes…\"","\"正在提交更改...\""],
-		["\"Committing\"","\"提交\""],
 		["\"Amending\"","\"修正\""],
 		["\"Amend\"","\"修正\""],
 		["`\\$\\{(.)\\} to \\$\\{(.)\\}`","`$${$1}到$${$2}分支`"],
@@ -1194,6 +1197,9 @@
 		["label:\"Chat messages\"","label:\"聊天消息\""],
 		["label:\"Code completions\"","label:\"代码补全\""],
 		["\"Configure custom providers…\"","\"配置自定义提供程序…\""],
+		["\"You're already signed in to\"","\"你已登录到\""],
+		["\"This commit message\"","\"此提交信息\""],
+		["\"AI credits\"","\"AI 额度\""],
 		["\"\"","\"\""]
 	],
 	"renderer_dev": [
