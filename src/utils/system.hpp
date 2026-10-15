@@ -12,6 +12,11 @@
 #include <spdlog/spdlog.h>
 #include "utils/encoding.hpp"
 #ifdef _WIN32
+// windows.h 前定义(未定义时): 排除 WinSock1 等旧接口, 防止独立包含本头的
+// 编译单元中 windows.h 预拉入 winsock.h 与后续 winsock2.h 冲突
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <winhttp.h>
 #endif

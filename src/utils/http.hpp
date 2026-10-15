@@ -18,8 +18,12 @@
 #include <chrono>
 #include <memory>
 #ifdef _WIN32
+// windows.h 前定义(未定义时): 排除 WinSock1 等旧接口, 防止独立包含本头的
+// 编译单元中 windows.h 预拉入 winsock.h 与 httplib 的 winsock2.h 冲突
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
-#include <shellapi.h> // ShellExecuteW(LaunchReplaceAndRestart): 显式包含, 不依赖 windows.h 恰好间接拉入
 #else
 #include <unistd.h>
 #include <fcntl.h>
@@ -58,8 +62,13 @@ namespace utils {
     inline constexpr int kDownloadRetryDelaySec = 5;
     // 下载文件校验失败(如续传累积数据损坏)时从头重下的次数上限(#176)
     inline constexpr int kVerifyRedownloadLimit = 1;
-    // 拉起替换脚本后等待当前进程退出的秒数(ping -n N ≈ N-1 秒 / sleep N)
-    inline constexpr int kReplaceWaitSec = 5;
+    // 进程内自更新替换(#182/#183): 校验通过后立即在进程内完成改名入位, 不再经 cmd/sh 脚本等待
+    // 替换重试次数: 目标名被杀毒/索引服务等短暂占用时重试(仅占用类错误)
+    inline constexpr int kReplaceRetryLimit = 5;
+    // 替换重试间隔(毫秒)
+    inline constexpr int kReplaceRetryDelayMs = 200;
+    // 启动清理 .old 残留的重试次数: 上次更新的旧进程退出前短暂占用, 新进程启动时重试删除
+    inline constexpr int kOldCleanupRetryLimit = 10;
 
     // 构造带超时与 TLS 校验的 HTTP 客户端
     inline auto MakeHttpClient(const std::string& url_host, const std::pair<std::string, int>& proxy = {}) -> httplib::Client {
@@ -321,7 +330,7 @@ namespace utils {
     }
 
     // ── 自动更新 ──────────────────────────────────────────────
-    // DownloadToFile / VerifyDownloadedFile / LaunchReplaceAndRestart 为 UpdateProgram 的内部辅助
+    // DownloadToFile / VerifyDownloadedFile / ReplaceSelfAndRestart 为 UpdateProgram 的内部辅助
 
     /**
      * @brief 下载新版本到临时文件（支持断点续传）
@@ -520,87 +529,159 @@ namespace utils {
         return true;
     }
 
-    // 拉起替换脚本: 等待当前进程退出后, 用临时文件替换自身并重启
-    // Windows: cmd 脚本(move/start), 全程宽字符 + 文件名引号转义, 兼容含空格/%/&等特殊字符的文件名
-    // POSIX:   sh 脚本(mv/exec), 后台 nohup 运行, 单引号转义路径
-    // 返回是否成功拉起; 失败时调用方不得假定会自动重启
-    inline auto LaunchReplaceAndRestart(const fs::path& self, const fs::path& tmp_file) -> bool {
+    // 启动时清理自更新残留(#183): 进程内替换在 Windows 上会把旧版本镜像改名为 .old,
+    // 旧进程退出前无法删除, 留待下次启动时重试清理(新进程启动时旧进程通常即将退出);
+    // POSIX 的 rename 原子覆盖无 .old 残留, 本函数为空操作。
+    // .new 下载残留有意保留供断点续传(#176), 此处不清理。
+    inline auto CleanupSelfUpdateResidue(const fs::path& self) -> void {
 #ifdef _WIN32
-        auto quote_name = [](std::wstring name) {
-            std::wstring out = L"\"";
-            for(wchar_t c : name) {
-                if(c == L'%') {
-                    out += L"%%";   // cmd 中 % 即使位于引号内仍会展开, 需转义
-                }
-                else {
-                    out += c;
-                }
+        // 相对路径(裸 wargv[0] 文件名)兜底: 转绝对路径, 不受后续工作目录变化影响
+        std::error_code abs_ec;
+        const fs::path self_abs = fs::absolute(self, abs_ec);
+        const fs::path& self_ref = abs_ec ? self : self_abs;
+        fs::path old_file = self_ref;
+        old_file += ".old";
+        std::error_code exists_ec;
+        if(!fs::exists(old_file, exists_ec)) {
+            return;
+        }
+        for(int attempt = 1; attempt <= kOldCleanupRetryLimit; attempt++) {
+            std::error_code rm_ec;
+            fs::remove(old_file, rm_ec);
+            if(!rm_ec) {
+                spdlog::info("已清理上次更新残留的旧版本文件");
+                return;
             }
-            out += L"\"";
-            return out;
-        };
-        const fs::path exe_name = self.filename();
-        std::wstring p = L"/c ping 127.0.0.1 -n " + std::to_wstring(kReplaceWaitSec + 1) + L" > nul & move /Y ";
-        p += quote_name(tmp_file.filename().wstring());
-        p += L" ";
-        p += quote_name(exe_name.wstring());
-        p += L" & start \"\" ";
-        p += quote_name(exe_name.wstring());
-        // HINSTANCE <= 32 表示失败(权限不足/策略阻止/路径异常); 不校验会导致"提示自动重启"却不会发生且 exit 0
-        const auto r = reinterpret_cast<intptr_t>(ShellExecuteW(
-            NULL,                       // 父窗口句柄
-            L"open",                    // 操作
-            L"cmd.exe",                 // 应用程序
-            p.c_str(),                  // 参数
-            self.parent_path().wstring().c_str(), // 工作目录
-            SW_SHOW));                  // 显示方式
-        if(r <= 32) {
-            spdlog::error("无法启动替换脚本(ShellExecuteW 返回 {}), 请手动用 {} 覆盖 {}", r, tmp_file.string(), self.string());
+            if(attempt < kOldCleanupRetryLimit) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(kReplaceRetryDelayMs));
+            }
+        }
+        spdlog::debug("旧版本残留 {} 暂无法删除(可能仍被占用), 留待下次启动清理", old_file.filename().string());
+#else
+        (void)self; // POSIX rename 原子覆盖, 无 .old 残留
+#endif
+    }
+
+    // 进程内替换自身并重启新版本(#182/#183):
+    // Windows: 重命名运行中 exe 为 .old → 移动 .new 立即入位 → CreateProcessW 重启。
+    //          全程不经 cmd, 消除 cmd /c 上下文 %% 转义不折叠与路径含 % 展开破坏更新的缺陷(#182);
+    //          .new 在 SHA256 校验通过后毫秒级入位, 消除原「校验→等待5秒→替换」的 TOCTOU 窗口(#183)。
+    // POSIX:   fs::permissions 补执行位 → fs::rename 原子覆盖运行中镜像(内核为运行中的旧进程保留 inode)
+    //          → setsid+fork+execl 全脱离重启。
+    // 返回 true ⇔ 新版本已入位(重启拉起失败仅告警, 仍返回 true, 新版本下次手动启动生效);
+    // 返回 false ⇔ 替换失败(原程序完好, 调用方可继续运行)。
+    inline auto ReplaceSelfAndRestart(const fs::path& self, const fs::path& tmp_file) -> bool {
+        // 相对路径(裸 wargv[0] 文件名)兜底: Windows 对相对/裸应用名的 CreateProcessW
+        // 会走系统目录搜索, 必须转绝对路径
+        std::error_code abs_ec;
+        const fs::path self_abs = fs::absolute(self, abs_ec);
+        const fs::path& self_ref = abs_ec ? self : self_abs;
+
+        // 前置检查: 下载文件必须存在且非空(防止 .new 意外丢失时误判替换失败原因)
+        std::error_code size_ec;
+        const uint64_t new_size = fs::file_size(tmp_file, size_ec);
+        if(size_ec || new_size == 0) {
+            spdlog::error("更新临时文件 {} 缺失或为空, 无法替换", tmp_file.filename().string());
             return false;
         }
+#ifdef _WIN32
+        // Windows 允许重命名运行中的 exe(旧进程的镜像映射不受影响)但不允许覆盖:
+        // 依序 self → .old(腾位), .new → self(入位), 入位失败回滚
+        fs::path old_file = self_ref;
+        old_file += ".old";
+        std::error_code ec;
+        bool renamed = false;
+        for(int attempt = 1; attempt <= kReplaceRetryLimit; attempt++) {
+            ec.clear();
+            fs::rename(self_ref, old_file, ec);
+            if(!ec) {
+                renamed = true;
+                break;
+            }
+            // 仅对占用类错误(杀毒/索引服务短暂锁定等)重试; 其余(权限/只读卷)为确定性失败
+            const int err = static_cast<int>(ec.value());
+            if(err != ERROR_ACCESS_DENIED && err != ERROR_SHARING_VIOLATION) {
+                break;
+            }
+            if(attempt < kReplaceRetryLimit) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(kReplaceRetryDelayMs));
+            }
+        }
+        if(!renamed) {
+            spdlog::error("重命名当前程序失败({}), 请手动用 {} 覆盖 {}", ec.message(), tmp_file.string(), self_ref.string());
+            return false;
+        }
+        ec.clear();
+        fs::rename(tmp_file, self_ref, ec);
+        if(ec) {
+            // 回滚: 恢复原程序保持可运行; 回滚也失败时提示手动恢复位置
+            std::error_code rb_ec;
+            fs::rename(old_file, self_ref, rb_ec);
+            if(rb_ec) {
+                spdlog::error("新版本入位失败({})且回滚失败, 原程序已移至 {}, 请手动恢复", ec.message(), old_file.string());
+            }
+            else {
+                spdlog::error("新版本入位失败({}), 已回滚原程序, 请手动用 {} 覆盖 {}", ec.message(), tmp_file.string(), self_ref.string());
+            }
+            return false;
+        }
+        spdlog::info("新版本已就位, 正在重启..");
+        // CREATE_NEW_CONSOLE: 保留原 cmd start 的独立新控制台窗口语义;
+        // lpCommandLine 需可变缓冲(CreateProcessW 可能写回); 不经 cmd,
+        // 路径含 %/空格/中文 等无需任何转义(#182)
+        std::wstring cmd_line = L"\"" + self_ref.wstring() + L"\"";
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        const BOOL started = CreateProcessW(nullptr, cmd_line.data(), nullptr, nullptr, FALSE,
+                                             CREATE_NEW_CONSOLE, nullptr, self_ref.parent_path().wstring().c_str(),
+                                             &si, &pi);
+        if(!started) {
+            const int err = static_cast<int>(GetLastError());
+            spdlog::warn("新版本已就位, 但自动重启失败(错误码 {}), 请手动启动 {}", err, self_ref.string());
+            return true;
+        }
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
         return true;
 #else
-        auto sh_quote = [](const std::string& s) {
-            std::string out = "'";
-            for(char c : s) {
-                if(c == '\'') out += "'\\''";
-                else out += c;
-            }
-            out += "'";
-            return out;
-        };
-        // 脚本文件名附加随机后缀: 防止固定名称被抢注(#122 B2)
-        const fs::path script = self.parent_path() / (self.filename().string() + ".update" + RandomTempSuffix() + ".sh");
-        {
-            std::ofstream sh(script, std::ios::binary | std::ios::trunc);
-            if(!sh) {
-                spdlog::error("无法创建更新脚本 {}", script.string());
-                return false;
-            }
-            sh << "#!/bin/sh\n"
-               << "sleep " << kReplaceWaitSec << "\n"
-               << "mv -f " << sh_quote(tmp_file.string()) << " " << sh_quote(self.string()) << "\n"
-               << "rm -f " << sh_quote(script.string()) << "\n"
-               << "exec " << sh_quote(self.string()) << "\n";
-        }
-        std::error_code ec;
-        fs::permissions(script, fs::perms::owner_all, ec);
-        // 直接 fork+exec 拉起脚本: 不经 shell, 消除 std::system 的 shell 依赖与注入面(#122 B1)
-        const pid_t pid = ::fork();
-        if(pid < 0) {
-            spdlog::error("无法启动更新脚本(fork 失败), 请手动用 {} 覆盖 {}", tmp_file.string(), self.string());
+        // 下载的 .new 由 ofstream 创建(默认 0644): rename 不改变权限位,
+        // 不补执行位则重启 exec 以 EACCES 失败
+        std::error_code perm_ec;
+        fs::permissions(tmp_file,
+                        fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
+                        fs::perm_options::add, perm_ec);
+        if(perm_ec) {
+            spdlog::error("无法为更新文件添加执行权限({}), 请手动用 {} 覆盖 {}", perm_ec.message(), tmp_file.string(), self_ref.string());
             return false;
         }
+        std::error_code ec;
+        fs::rename(tmp_file, self_ref, ec);
+        if(ec) {
+            spdlog::error("替换失败({}), 请手动用 {} 覆盖 {}", ec.message(), tmp_file.string(), self_ref.string());
+            return false;
+        }
+        spdlog::info("新版本已就位, 正在重启..");
+        // 全脱离重启: setsid 建立新会话不再受父进程终端退出影响;
+        // stdin/stdout/stderr 重定向 /dev/null, 消除与原终端的输入/输出竞争
+        const pid_t pid = ::fork();
+        if(pid < 0) {
+            spdlog::warn("新版本已就位, 但 fork 重启失败, 请手动启动 {}", self_ref.string());
+            return true;
+        }
         if(pid == 0) {
-            // 子进程: 忽略 SIGHUP(对应原 nohup 语义), 标准输出/错误重定向 /dev/null(对应原 >/dev/null 2>&1)
+            ::setsid();
             ::signal(SIGHUP, SIG_IGN);
-            const int devnull = ::open("/dev/null", O_WRONLY);
+            const int devnull = ::open("/dev/null", O_RDWR);
             if(devnull >= 0) {
+                ::dup2(devnull, STDIN_FILENO);
                 ::dup2(devnull, STDOUT_FILENO);
                 ::dup2(devnull, STDERR_FILENO);
-                if(devnull > STDERR_FILENO) ::close(devnull);
+                if(devnull > STDERR_FILENO) {
+                    ::close(devnull);
+                }
             }
-            ::execl("/bin/sh", "sh", script.string().c_str(), static_cast<char*>(nullptr));
+            ::execl(self_ref.c_str(), self_ref.c_str(), static_cast<char*>(nullptr));
             _exit(127); // exec 失败
         }
         return true;
@@ -609,7 +690,7 @@ namespace utils {
 
     /**
      * @brief 自动更新：下载新版本到临时文件（支持断点续传），校验大小与SHA256（不通过删临时文件从头重下，#176），
-     *        校验通过后拉起替换脚本并退出
+     *        校验通过后进程内立即替换自身并重启（#182/#183）
      * @param url_host 下载主机（如 https://github.com）
      * @param params 下载路径
      * @param Self 当前可执行文件路径
@@ -617,7 +698,7 @@ namespace utils {
      * @param proxy 代理 host:port
      * @param expected_digest 发布资产声明的摘要（形如 "sha256:<hex>"），必须提供且格式正确，
      *                        否则拒绝替换（fail-closed，#120）
-     * @return 是否成功（成功后调用方应立即退出等待替换）
+     * @return 是否成功（成功后调用方应立即退出, 新版本已入位并由替换逻辑负责重启）
      */
     inline auto UpdateProgram(std::string url_host, std::string params, fs::path Self, int64_t max_size, std::pair<std::string, int> proxy, std::string expected_digest = "") -> bool {
         // 下载临时文件: 名称保持稳定以支持跨进程断点续传(重跑时续传依赖同名残留);
@@ -662,8 +743,8 @@ namespace utils {
             return false;
         }
 
-        spdlog::info("下载完成, 请稍等, 随后自动完成并(无参)重启..");
-        if(!LaunchReplaceAndRestart(Self, tmp_file)) {
+        spdlog::info("下载完成, 正在替换为新版本..");
+        if(!ReplaceSelfAndRestart(Self, tmp_file)) {
             return false;
         }
         return true;

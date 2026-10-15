@@ -219,3 +219,31 @@ add_executable(replace_engine_test tests/replace_engine_test.cpp)
 set_property(TARGET replace_engine_test PROPERTY CXX_STANDARD 20)
 target_include_directories(replace_engine_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
 add_test(NAME replace_engine_test COMMAND replace_engine_test)
+
+# ── 自更新残留清理与替换前置检查测试(#182/#183): 依赖 http.hpp(OpenSSL/httplib 头) ──
+# include/链接配置与主程序一致; 完整替换+重启路径涉及真实进程操作, 不在单测范围
+add_executable(selfupdate_test tests/selfupdate_test.cpp)
+set_property(TARGET selfupdate_test PROPERTY CXX_STANDARD 20)
+target_include_directories(selfupdate_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(selfupdate_test SYSTEM PRIVATE
+    ${PROJECT_SOURCE_DIR}/third_party/include
+    "${GHD2C_OPENSSL_ROOT}/include")
+if(WIN32)
+    target_link_libraries(selfupdate_test PRIVATE
+        ${GHD2C_OPENSSL_ROOT}/lib/${OPENSSL_SSL_NAME}
+        ${GHD2C_OPENSSL_ROOT}/lib/${OPENSSL_CRYPTO_NAME})
+elseif(APPLE)
+    target_link_libraries(selfupdate_test PRIVATE
+        ${GHD2C_OPENSSL_ROOT}/lib/libssl.a
+        ${GHD2C_OPENSSL_ROOT}/lib/libcrypto.a
+        Threads::Threads
+        ${COREFOUNDATION_FW}
+        ${SECURITY_FW})
+else()
+    target_link_libraries(selfupdate_test PRIVATE
+        ${GHD2C_OPENSSL_ROOT}/lib/libssl.a
+        ${GHD2C_OPENSSL_ROOT}/lib/libcrypto.a
+        Threads::Threads
+        ${CMAKE_DL_LIBS})
+endif()
+add_test(NAME selfupdate_test COMMAND selfupdate_test)
