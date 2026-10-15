@@ -611,8 +611,35 @@ namespace utils {
             spdlog::error("重命名当前程序失败({}), 请手动用 {} 覆盖 {}", ec.message(), tmp_file.string(), self_ref.string());
             return false;
         }
-        ec.clear();
-        fs::rename(tmp_file, self_ref, ec);
+        // .new 入位前强制落盘(#243): 下载仅刷到 OS 缓存(ofstream::flush 为 C 库语义),
+        // 断电可致入位的新 exe 半截/空 —— 与 #171 的 rename 前落盘范式一致
+        std::error_code sync_ec;
+        if(!FlushToDisk(tmp_file, sync_ec)) {
+            spdlog::error("更新文件落盘失败({}), 已回滚原程序, 请手动用 {} 覆盖 {}",
+                sync_ec.message(), tmp_file.string(), self_ref.string());
+            std::error_code rb_ec;
+            fs::rename(old_file, self_ref, rb_ec);
+            if(rb_ec) {
+                spdlog::error("回滚亦失败, 原程序已移至 {}, 请手动恢复", old_file.string());
+            }
+            return false;
+        }
+        // .new → self 入位: 与 self → .old 对称的占用类重试(#243) —— 杀软/索引服务扫描 .new 时
+        // 首试可能失败, 此前无重试即直接回滚, 无谓降低更新成功率
+        for(int attempt = 1; attempt <= kReplaceRetryLimit; attempt++) {
+            ec.clear();
+            fs::rename(tmp_file, self_ref, ec);
+            if(!ec) {
+                break;
+            }
+            const int err = static_cast<int>(ec.value());
+            if(err != ERROR_ACCESS_DENIED && err != ERROR_SHARING_VIOLATION) {
+                break;
+            }
+            if(attempt < kReplaceRetryLimit) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(kReplaceRetryDelayMs));
+            }
+        }
         if(ec) {
             // 回滚: 恢复原程序保持可运行; 回滚也失败时提示手动恢复位置
             std::error_code rb_ec;
@@ -653,6 +680,12 @@ namespace utils {
                         fs::perm_options::add, perm_ec);
         if(perm_ec) {
             spdlog::error("无法为更新文件添加执行权限({}), 请手动用 {} 覆盖 {}", perm_ec.message(), tmp_file.string(), self_ref.string());
+            return false;
+        }
+        // rename 前落盘(#243): 与 Windows 分支一致, 避免断电后新镜像为半截/空
+        std::error_code sync_ec;
+        if(!FlushToDisk(tmp_file, sync_ec)) {
+            spdlog::error("更新文件落盘失败({}), 请手动用 {} 覆盖 {}", sync_ec.message(), tmp_file.string(), self_ref.string());
             return false;
         }
         std::error_code ec;

@@ -950,21 +950,11 @@ static int PerformRollback() {
             restore_fail++;
             return;
         }
-        // 原子化: 先复制到临时文件, 成功后再改名覆盖, 中断不会留下缺失/半截的目标文件
-        // 临时文件名附加随机后缀: 防止固定名称被抢注/符号链接预置(#122 B2)
-        const fs::path tmp = dst.string() + ".restoring" + utils::RandomTempSuffix();
+        // 原子还原复用 fs_io 的 AtomicCopyFile(#242): 临时名+落盘(fsync)+改名+失败清理同一范式,
+        // 消除内联重复实现缺失 rename 前落盘、与 #171 范式漂移的缺陷
         std::error_code ec;
-        fs::copy_file(bak, tmp, fs::copy_options::overwrite_existing, ec);
-        if(ec) {
-            spdlog::error("回滚复制 {} -> {} 失败: {}", bak.string().c_str(), tmp.string().c_str(), ec.message());
-            restore_fail++;
-            return;
-        }
-        fs::rename(tmp, dst, ec);
-        if(ec) {
-            spdlog::error("回滚替换 {} -> {} 失败: {}", tmp.string().c_str(), dst.string().c_str(), ec.message());
-            std::error_code rmec;
-            fs::remove(tmp, rmec);
+        if(!utils::AtomicCopyFile(bak, dst, ec)) {
+            spdlog::error("回滚 {} -> {} 失败: {}", bak.string().c_str(), dst.string().c_str(), ec.message());
             restore_fail++;
             return;
         }
