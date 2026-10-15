@@ -56,6 +56,8 @@ namespace utils {
     inline constexpr int kDownloadRetryLimit = 3;
     // 下载失败重试间隔(秒)
     inline constexpr int kDownloadRetryDelaySec = 5;
+    // 下载文件校验失败(如续传累积数据损坏)时从头重下的次数上限(#176)
+    inline constexpr int kVerifyRedownloadLimit = 1;
     // 拉起替换脚本后等待当前进程退出的秒数(ping -n N ≈ N-1 秒 / sleep N)
     inline constexpr int kReplaceWaitSec = 5;
 
@@ -606,7 +608,8 @@ namespace utils {
     }
 
     /**
-     * @brief 自动更新：下载新版本到临时文件（支持断点续传），校验大小与SHA256后拉起替换脚本并退出
+     * @brief 自动更新：下载新版本到临时文件（支持断点续传），校验大小与SHA256（不通过删临时文件从头重下，#176），
+     *        校验通过后拉起替换脚本并退出
      * @param url_host 下载主机（如 https://github.com）
      * @param params 下载路径
      * @param Self 当前可执行文件路径
@@ -622,33 +625,40 @@ namespace utils {
         fs::path tmp_file = Self;
         tmp_file += ".new";
 
-        // 下载重试: 资产 CDN 偶发瞬时 403(压力实测 6 轮中 2 轮首试命中), 重试即可恢复;
-        // 失败残留的临时文件会自然进入续传/从头重下, 不影响正确性
-        bool downloaded = false;
-        for(int attempt = 1; attempt <= kDownloadRetryLimit && !downloaded; attempt++) {
-            if(attempt > 1) {
-                spdlog::warn("下载失败, {} 秒后自动重试(第 {}/{} 次)", kDownloadRetryDelaySec, attempt - 1, kDownloadRetryLimit);
-                std::this_thread::sleep_for(std::chrono::seconds(kDownloadRetryDelaySec));
-            }
-            downloaded = DownloadToFile(url_host, params, proxy, tmp_file, max_size);
-        }
-
-        // 失效代理直连降级(#133): 经代理下载全部失败时降级直连重试一轮
-        // (与 ReadHttpDataString 的降级策略对应; 代理进程退出后的配置残留场景)
-        if(!downloaded && proxy.second) {
-            spdlog::warn("经代理 {}:{} 下载失败(代理不可达), 已尝试直连", proxy.first, proxy.second);
+        // 校验失败重下: 断点续传累积的数据损坏导致校验不通过时, 删临时文件从头重下(#176),
+        // 重下上限 kVerifyRedownloadLimit 次, 仍失败则放弃(fail-closed 语义不变, 减少用户手动重跑)
+        bool verified = false;
+        for(int round = 0; round <= kVerifyRedownloadLimit && !verified; round++) {
+            // 下载重试: 资产 CDN 偶发瞬时 403(压力实测 6 轮中 2 轮首试命中), 重试即可恢复;
+            // 失败残留的临时文件会自然进入续传/从头重下, 不影响正确性
+            bool downloaded = false;
             for(int attempt = 1; attempt <= kDownloadRetryLimit && !downloaded; attempt++) {
                 if(attempt > 1) {
-                    spdlog::warn("直连下载失败, {} 秒后自动重试(第 {}/{} 次)", kDownloadRetryDelaySec, attempt - 1, kDownloadRetryLimit);
+                    spdlog::warn("下载失败, {} 秒后自动重试(第 {}/{} 次)", kDownloadRetryDelaySec, attempt - 1, kDownloadRetryLimit);
                     std::this_thread::sleep_for(std::chrono::seconds(kDownloadRetryDelaySec));
                 }
-                downloaded = DownloadToFile(url_host, params, {}, tmp_file, max_size);
+                downloaded = DownloadToFile(url_host, params, proxy, tmp_file, max_size);
             }
+
+            // 失效代理直连降级(#133): 经代理下载全部失败时降级直连重试一轮
+            // (与 ReadHttpDataString 的降级策略对应; 代理进程退出后的配置残留场景)
+            if(!downloaded && proxy.second) {
+                spdlog::warn("经代理 {}:{} 下载失败(代理不可达), 已尝试直连", proxy.first, proxy.second);
+                for(int attempt = 1; attempt <= kDownloadRetryLimit && !downloaded; attempt++) {
+                    if(attempt > 1) {
+                        spdlog::warn("直连下载失败, {} 秒后自动重试(第 {}/{} 次)", kDownloadRetryDelaySec, attempt - 1, kDownloadRetryLimit);
+                        std::this_thread::sleep_for(std::chrono::seconds(kDownloadRetryDelaySec));
+                    }
+                    downloaded = DownloadToFile(url_host, params, {}, tmp_file, max_size);
+                }
+            }
+            if(!downloaded) {
+                return false;
+            }
+            // 校验失败时 VerifyDownloadedFile 已删除临时文件, 首轮失败进入下一轮从头重下(#176)
+            verified = VerifyDownloadedFile(tmp_file, max_size, expected_digest);
         }
-        if(!downloaded) {
-            return false;
-        }
-        if(!VerifyDownloadedFile(tmp_file, max_size, expected_digest)) {
+        if(!verified) {
             return false;
         }
 
