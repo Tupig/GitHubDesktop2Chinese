@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-单工作流规范校验器（W0-W5）
+单工作流规范校验器（W0-W6）
 
 规范：本仓库 CI 统一收敛为唯一工作流文件（单工作流规范），新增或修改工作流后必须
      通过本校验器（主工作流 tools-test 任务自动执行）。
@@ -13,7 +13,10 @@
     W2 孤立任务 —— 任务既没有 needs 依赖、也没有其他任务依赖它（单任务工作流豁免）；
     W3 图不连通 —— 任务依赖图存在多个互不相关的连通分量；
     W4 循环依赖 —— 任务之间通过 needs 形成环（含自环）；
-    W5 未知依赖 —— needs 引用了 jobs 中不存在的任务。
+    W5 未知依赖 —— needs 引用了 jobs 中不存在的任务；
+    W6 引用无效 —— 任务 body 内 needs.<X>.outputs/<key> / needs.<X>.result 表达式引用了
+                   不存在的任务, 或引用了非本任务直接 needs 的任务（GitHub Actions 仅直接
+                   needs 可访问 outputs/result, 间接依赖不传递; #152 类静默失效防护）。
 输出：default 模式逐条输出 GitHub Actions ::error:: 注解（CI 界面可点击定位）；
      --format json 输出 {ok, workflows, violations} 结构供脚本消费。
 用法：
@@ -28,9 +31,11 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import re
 import sys
 from collections import deque
-from dataclasses import dataclass
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 
 try:
@@ -45,6 +50,9 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_WORKFLOWS_DIR = ROOT / ".github" / "workflows"
 # YAML 解析错误详情折叠上限(保证 ::error:: 注解单行且不超长)
 YAML_ERROR_DETAIL_LIMIT = 300
+# needs 表达式引用模式: needs.<任务ID>.outputs / needs.<任务ID>.result
+# （GitHub Actions 仅直接 needs 可访问的两类引用面; 星形 needs.* 为合法语法, 不在匹配范围）
+NEEDS_REF_PATTERN = re.compile(r"needs\.([A-Za-z0-9_\-]+)\.(?:outputs|result)\b")
 
 
 @dataclass(frozen=True)
@@ -63,10 +71,16 @@ class Violation:
 
 @dataclass
 class JobNode:
-    """工作流任务节点（needs 为排序去重后的依赖名列表，含未知依赖，由 W5 报告）。"""
+    """工作流任务节点。
+
+    needs 为排序去重后的依赖名列表（含未知依赖，由 W5 报告）；
+    needs_refs 为任务 body 内 needs.<X>.outputs/.result 表达式引用到的任务名
+    （排序去重，含未知/间接引用，由 W6 报告）。
+    """
 
     job_id: str
     needs: list[str]
+    needs_refs: list[str] = field(default_factory=list)
 
 
 class WorkflowGraph:
@@ -163,6 +177,18 @@ def collapse_detail(text: str) -> str:
     return one_line
 
 
+def iter_string_values(value: object) -> Iterator[str]:
+    """递归提取 YAML 值中的全部字符串叶子（映射的值 / 列表的元素），供 W6 扫描 needs 表达式。"""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from iter_string_values(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from iter_string_values(item)
+
+
 def parse_workflow(path: Path) -> tuple[WorkflowGraph | None, list[Violation]]:
     """解析单个工作流文件，返回 (依赖图, 违规列表)；结构错误（W0）时依赖图为 None。"""
     # PyYAML 缺失时应由 main() 以退出码 2 拦截, 不会走到这里
@@ -216,7 +242,12 @@ def parse_workflow(path: Path) -> tuple[WorkflowGraph | None, list[Violation]]:
             violations.append(Violation("W0", "error", f"{target}/{raw_job_id}",
                                         f"任务 {raw_job_id} 的 needs 必须是字符串或字符串列表"))
             continue
-        nodes[raw_job_id] = JobNode(raw_job_id, sorted(set(needs)))
+        refs = sorted({
+            match
+            for text in iter_string_values(raw_body)
+            for match in NEEDS_REF_PATTERN.findall(text)
+        })
+        nodes[raw_job_id] = JobNode(raw_job_id, sorted(set(needs)), refs)
 
     if not nodes:
         return None, violations
@@ -224,7 +255,7 @@ def parse_workflow(path: Path) -> tuple[WorkflowGraph | None, list[Violation]]:
 
 
 def check_graph(graph: WorkflowGraph, target: str) -> list[Violation]:
-    """对依赖图执行 W2（孤立）/ W3（连通）/ W4（环）/ W5（未知依赖）检查。"""
+    """对依赖图执行 W2（孤立）/ W3（连通）/ W4（环）/ W5（未知依赖）/ W6（needs 引用有效性）检查。"""
     violations: list[Violation] = []
 
     # W5: needs 引用了不存在的任务
@@ -234,6 +265,24 @@ def check_graph(graph: WorkflowGraph, target: str) -> list[Violation]:
                 violations.append(Violation(
                     "W5", "error", f"{target}/{job_id}",
                     f"任务 {job_id} 的 needs 引用了不存在的任务: {dep}"))
+
+    # W6: needs 表达式引用有效性（引用的任务须存在, 且须为本任务的直接依赖）
+    for job_id in sorted(graph.nodes):
+        node = graph.nodes[job_id]
+        for ref in node.needs_refs:
+            if ref in node.needs and ref not in graph.nodes:
+                # 该引用同时出现在 needs 列表中, 未知依赖已由 W5 报告, 不重复报
+                continue
+            if ref not in graph.nodes:
+                violations.append(Violation(
+                    "W6", "error", f"{target}/{job_id}",
+                    f"任务 {job_id} 的 needs 表达式引用了不存在的任务: "
+                    f"needs.{ref}.outputs/result（jobs 中无任务 {ref}）"))
+            elif ref not in node.needs:
+                violations.append(Violation(
+                    "W6", "error", f"{target}/{job_id}",
+                    f"任务 {job_id} 通过 needs.{ref}.outputs/result 读取了非直接依赖的任务 {ref}: "
+                    "GitHub Actions 仅直接 needs 可访问 outputs/result, 间接依赖不传递(详见 #152)"))
 
     # W2: 孤立任务(无任何边), 单任务工作流豁免
     if len(graph.nodes) > 1:
@@ -293,8 +342,8 @@ def run_checks(workflows_dir: Path) -> tuple[list[str], list[Violation]]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="单工作流规范校验器(W0-W5): 工作流文件有且仅有一个, "
-                    "任务依赖图无孤立任务、连通且无环")
+        description="单工作流规范校验器(W0-W6): 工作流文件有且仅有一个, "
+                    "任务依赖图无孤立任务、连通且无环, needs 表达式引用可达")
     parser.add_argument("--workflows-dir", type=Path, default=DEFAULT_WORKFLOWS_DIR,
                         help="工作流目录(默认: 仓库 .github/workflows)")
     parser.add_argument("--format", choices=("default", "json"), default="default",
@@ -321,7 +370,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"::error::[{violation.rule}] {violation.target}: {violation.message}")
         if not violations:
             print("单工作流规范校验通过: 有且仅有一个工作流文件, "
-                  "任务依赖图连通且无孤立任务、无循环依赖。")
+                  "任务依赖图连通且无孤立任务、无循环依赖, needs 表达式引用有效。")
 
     return 0 if not violations else 1
 

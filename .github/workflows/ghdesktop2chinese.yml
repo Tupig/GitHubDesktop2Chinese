@@ -66,8 +66,9 @@
 #             OpensslVendorPR ← 产库四连(四 result 全 success 才开 PR);
 #             Release ← Version+Build+JsonCheck+CodeqlScan(Version 直连同上; 其余三门为发布质量门);
 #             CiNotify ← 全部 10 任务(!cancelled(): 失败也要跑, 通知的意义正在于失败)
-#   图约束: 全图以 Version 为根连通, 无孤立/不连通任务、无循环、无悬空 needs —— 由 JsonCheck 的
-#           单工作流规范校验（tools/ci/check-workflow.py, W0-W5）强制
+#   图约束: 全图以 Version 为根连通, 无孤立/不连通任务、无循环、无悬空 needs,
+#           needs 表达式引用须指向存在的直接依赖任务 —— 由 JsonCheck 的
+#           单工作流规范校验（tools/ci/check-workflow.py, W0-W6）强制
 #   链路保证: changed=true(有变更待发版)时 build_changed 恒为 true(强制构建),
 #             Release 需要的产物永远存在; 无差异跳过只发生在 changed=false 时
 #
@@ -570,7 +571,7 @@ jobs:
       - name: Markdown 链接检查
         run: python tools/ci/md-check.py
 
-      - name: 单工作流规范校验（W0-W5）
+      - name: 单工作流规范校验（W0-W6）
         run: python tools/ci/check-workflow.py
 
       - name: 单工作流校验器单元测试
