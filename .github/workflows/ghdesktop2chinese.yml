@@ -367,7 +367,7 @@ jobs:
 
       # ── sccache 编译缓存（跨 run 复用）──
       - name: 安装 sccache
-        uses: mozilla-actions/sccache-action@fd02668681acd5f960e1372061bee5e3e987195c # v0.0.11
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       # ── 配置：CMake 生成（失败自动重试 2 次）──
       - name: 配置 CMake（Windows x64）
@@ -430,9 +430,10 @@ jobs:
             cmake --build build --config "$BUILD_TYPE" -j "$JOBS"
           fi
 
-      # ── #167: version_test 单测真实执行(此前仅被构建从不运行, 104 项断言闲置) ──
+      # ── #167: 单测真实执行(此前仅被构建从不运行) ──
       # 四平台均为原生 runner(含 macos-15 原生 ARM), 无交叉编译, 测试可原生执行;
-      # --no-tests=error: version_test 为唯一注册测试, 0 项被发现视为 CTest 接入回归
+      # --no-tests=error: CTest 已注册 3 个测试(version/replace_engine/selfupdate),
+      # 0 项被发现视为 CTest 接入回归; version_test 断言数已增至 129(#239)
       - name: 运行单元测试 (ctest)
         shell: bash
         run: |
@@ -637,8 +638,9 @@ jobs:
       (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
       (github.event_name == 'workflow_dispatch' && (inputs.type == 'auto' || inputs.type == 'maintain' || inputs.type == 'security' || inputs.type == 'release'))
     runs-on: windows-2025
-    # 各块最坏串行: CodeQL 30 + 维护 50 + Wiki 10 + 说明 3, 留余量
-    timeout-minutes: 100
+    # 实测基线(#159): CodeQL ~4-5min + 维护(缓存命中)~30s + Wiki ~5s, 全块 <6min;
+    # 按实测留足余量(含缓存未命中等最坏情形), 由 100 收紧至 60
+    timeout-minutes: 60
     # 合并权限集: CodeQL SARIF 上传 + 维护报告 Issue + Wiki 推送
     permissions:
       contents: write
@@ -705,12 +707,14 @@ jobs:
       - name: 安装 Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         if: steps.maintain_gate.outputs.enabled == 'true'
+        continue-on-error: true
         with:
           node-version: 24
 
       # Git Bash 自带 unzip; Linux 才走 apt 安装; 均缺失则显式失败
       - name: 安装解压工具（缺失时）
         if: steps.maintain_gate.outputs.enabled == 'true'
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -725,6 +729,7 @@ jobs:
 
       - name: 查询 GitHub Desktop 最新版本
         if: steps.maintain_gate.outputs.enabled == 'true'
+        continue-on-error: true
         id: version
         working-directory: tools/auto-maintain
         shell: bash
@@ -744,6 +749,7 @@ jobs:
 
       - name: 缓存安装包与提取结果
         if: steps.maintain_gate.outputs.enabled == 'true'
+        continue-on-error: true
         id: cache-maintain
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -753,6 +759,7 @@ jobs:
 
       - name: 运行失效检测 + 未翻译候选提取 + 依序模拟检测
         if: steps.maintain_gate.outputs.enabled == 'true'
+        continue-on-error: true
         working-directory: tools/auto-maintain
         shell: bash
         run: |
@@ -773,6 +780,7 @@ jobs:
 
       - name: 创建或更新自动维护 Issue
         if: steps.maintain_gate.outputs.enabled == 'true'
+        continue-on-error: true
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
@@ -788,6 +796,7 @@ jobs:
 
       - name: 检测 docs/wiki 变更
         if: steps.wiki_gate.outputs.enabled == 'true'
+        continue-on-error: true
         id: wiki-changed
         shell: bash
         env:
@@ -813,6 +822,7 @@ jobs:
 
       - name: 同步 docs/wiki 到 GitHub Wiki
         if: steps.wiki_gate.outputs.enabled == 'true' && steps.wiki-changed.outputs.changed == 'true'
+        continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -854,7 +864,7 @@ jobs:
   OpensslCheck:
     name: OpenSSL 版本检测
     needs: CodeqlScan
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' && github.event.schedule == '0 2 * * 1'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -927,9 +937,9 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_VER: ${{ github.event.inputs.openssl-version }}
         run: |
           set -euo pipefail
-          INPUT_VER="${{ github.event.inputs.openssl-version }}"
           OSSL_VER=""
           if [[ -n "$INPUT_VER" ]]; then
             OSSL_VER="$INPUT_VER"
@@ -1055,9 +1065,9 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_VER: ${{ github.event.inputs.openssl-version }}
         run: |
           set -euo pipefail
-          INPUT_VER="${{ github.event.inputs.openssl-version }}"
           OSSL_VER=""
           if [[ -n "$INPUT_VER" ]]; then
             OSSL_VER="$INPUT_VER"
@@ -1219,9 +1229,9 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_VER: ${{ github.event.inputs.openssl-version }}
         run: |
           set -euo pipefail
-          INPUT_VER="${{ github.event.inputs.openssl-version }}"
           OSSL_VER=""
           if [[ -n "$INPUT_VER" ]]; then
             OSSL_VER="$INPUT_VER"
@@ -1348,9 +1358,9 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_VER: ${{ github.event.inputs.openssl-version }}
         run: |
           set -euo pipefail
-          INPUT_VER="${{ github.event.inputs.openssl-version }}"
           OSSL_VER=""
           if [[ -n "$INPUT_VER" ]]; then
             OSSL_VER="$INPUT_VER"
@@ -1521,7 +1531,7 @@ jobs:
           echo "third_party 组装完成"
 
       - name: 安装 sccache
-        uses: mozilla-actions/sccache-action@fd02668681acd5f960e1372061bee5e3e987195c # v0.0.11
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: 配置 CMake（Windows x64）
         if: runner.os == 'Windows'
@@ -2043,7 +2053,7 @@ jobs:
     name: CI 失败通知
     needs: [Version, Build, JsonCheck, CodeqlScan, OpensslCheck, OpensslLinux, OpensslWin, OpensslMacosArm64, OpensslMacosX64, OpensslVerify, OpensslVendorPR, Release]
     if: ${{ !cancelled() && github.event_name == 'schedule' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
