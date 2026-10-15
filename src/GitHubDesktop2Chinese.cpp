@@ -1621,7 +1621,10 @@ static int RunMain(int argc, char** argv, const fs::path& self_path)
     // 本地无映射文件时的装饰性查询: 仓库最近更新时间
     LogRepoLastUpdated(proxy);
 
-    // 检查更新: 触发自更新后立即退出等待替换
+    // 启动清理自更新残留(.old 旧版本镜像, #183): 清理失败不阻断主流程, 留待下次启动
+    utils::CleanupSelfUpdateResidue(self_path);
+
+    // 检查更新: 触发自更新后立即退出(新版本已入位, 由替换逻辑负责重启)
     if(CheckForUpdates(proxy, self_path)) {
         return 0;
     }
