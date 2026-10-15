@@ -41,11 +41,17 @@
 import argparse
 import concurrent.futures
 import functools
+import io
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+# 与 check-workflow.py / check-localization.py 统一: 守卫非 TextIOWrapper 的环境(#119/#247),
+# 避免 Windows 控制台非 UTF-8 代码页下中文输出乱码
+if isinstance(sys.stdout, io.TextIOWrapper):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 # ── 内置默认配置（优先级最低，可被 --config 配置文件与命令行参数覆盖） ──
 DEFAULTS = {
