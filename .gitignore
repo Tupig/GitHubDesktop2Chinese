@@ -33,3 +33,6 @@ __pycache__/
 
 # 本地交接文档（禁止推送 GitHub：仅存于本地分支 local/handoff 与工作区副本）
 docs/HANDOFF.md
+
+# 本地规划/SDD 产物目录（禁止推送 GitHub：仅本地工作文件）
+spec/
