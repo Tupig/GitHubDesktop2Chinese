@@ -84,6 +84,7 @@ bool only_read_from_remote;                     // 仅从远程url中读取本�
 bool rollback;                                  // 从备份中还原汉化前的文件
 bool force_execute;                             // 映射文件 minversion 不满足时仍强制执行替换(--force)
 bool verbose_log;                               // 输出调试日志(--verbose, #141)
+bool json_template_created;                     // -j 指定的映射文件不存在且已创建模板, 主流程提示后正常退出
 
 json localization = R"(
                         {
@@ -98,7 +99,8 @@ json localization = R"(
                             ],
                             "renderer_dev": [
                                 ["",""]
-                            ]
+                            ],
+                            "select": []
                         }
                     )"_json;
 bool _debug_goto_devoptions;
@@ -1432,7 +1434,8 @@ static int RunMain(int argc, char** argv, const fs::path& self_path)
                         // 权限不足/父目录不可写时不能谎报"已创建"(随后 CLI11 以 105 退出)
                         throw CLI::ValidationError("(-j,--json) 指定位置无法创建本地化文件(权限或路径问题)");
                     }
-                    throw CLI::ValidationError("(-j,--json) 指定的本地化文件不存在,已在指定位置创建");
+                    // 创建成功不再是错误: 置标志, CLI11_PARSE 之后提示用户填写并正常退出
+                    json_template_created = true;
                 }
             }
             // 手动指定了GitHubDesktop资源文件目录
@@ -1465,6 +1468,17 @@ static int RunMain(int argc, char** argv, const fs::path& self_path)
         if(!ApplyLogLevelFromEnv() && verbose_log) {
             spdlog::set_level(spdlog::level::debug);
         }
+    }
+    // -j 引导: 模板已创建, 引导用户填写后重新运行, 以成功语义退出(不走后续 GitHub Desktop 检测流程)
+    if(json_template_created) {
+#ifdef _WIN32
+        spdlog::info("已在指定位置创建模板: {}", utils::to_byte_string(LocalizationJSON.wstring()));
+#else
+        spdlog::info("已在指定位置创建模板: {}", LocalizationJSON.string());
+#endif
+        spdlog::info("请参考 json/localization.json 填写后重新运行");
+        PAUSE
+        return 0;
     }
     if(
 #ifdef _WIN32
