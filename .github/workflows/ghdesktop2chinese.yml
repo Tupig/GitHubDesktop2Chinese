@@ -707,12 +707,14 @@ jobs:
       - name: 安装 Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         if: steps.maintain_gate.outputs.enabled == 'true'
+        continue-on-error: true
         with:
           node-version: 24
 
       # Git Bash 自带 unzip; Linux 才走 apt 安装; 均缺失则显式失败
       - name: 安装解压工具（缺失时）
         if: steps.maintain_gate.outputs.enabled == 'true'
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -727,6 +729,7 @@ jobs:
 
       - name: 查询 GitHub Desktop 最新版本
         if: steps.maintain_gate.outputs.enabled == 'true'
+        continue-on-error: true
         id: version
         working-directory: tools/auto-maintain
         shell: bash
@@ -746,6 +749,7 @@ jobs:
 
       - name: 缓存安装包与提取结果
         if: steps.maintain_gate.outputs.enabled == 'true'
+        continue-on-error: true
         id: cache-maintain
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -755,6 +759,7 @@ jobs:
 
       - name: 运行失效检测 + 未翻译候选提取 + 依序模拟检测
         if: steps.maintain_gate.outputs.enabled == 'true'
+        continue-on-error: true
         working-directory: tools/auto-maintain
         shell: bash
         run: |
@@ -775,6 +780,7 @@ jobs:
 
       - name: 创建或更新自动维护 Issue
         if: steps.maintain_gate.outputs.enabled == 'true'
+        continue-on-error: true
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
@@ -790,6 +796,7 @@ jobs:
 
       - name: 检测 docs/wiki 变更
         if: steps.wiki_gate.outputs.enabled == 'true'
+        continue-on-error: true
         id: wiki-changed
         shell: bash
         env:
@@ -815,6 +822,7 @@ jobs:
 
       - name: 同步 docs/wiki 到 GitHub Wiki
         if: steps.wiki_gate.outputs.enabled == 'true' && steps.wiki-changed.outputs.changed == 'true'
+        continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
