@@ -59,6 +59,28 @@ export function renderMarkdown(report) {
       lines.push('');
     }
   }
+  if (report.simulation) {
+    // 依序模拟检测段(#207): 隐性失效为 warning 级, 仅列异常条目供人工判断, 不参与 stats 失效统计
+    const { total, hiddenCount, hidden, counts } = report.simulation;
+    lines.push(`## 依序模拟检测`);
+    lines.push('');
+    lines.push(`依序应用 main/renderer/select 全部映射（main ${counts.main}，renderer ${counts.renderer}，select ${counts.select}，共 ${total} 条），隐性失效 ${hiddenCount} 条。`);
+    // 结构化统计 meta 行(HTML 注释, 渲染不可见): 前缀 simulate 与失效检测的 stats 区分,
+    // report-issue.js 的 extractFailedCount 仅匹配 stats 行, 不受此影响
+    lines.push(`<!-- simulate: total=${total} hidden=${hiddenCount} -->`);
+    lines.push('');
+    if (hidden.length > 0) {
+      lines.push(`| 数组 | 序号 | 原因 | 独立匹配 | 正则 |`);
+      lines.push(`| --- | --- | --- | --- | --- |`);
+      for (const h of hidden.slice(0, MAX_FAILED_ROWS)) {
+        lines.push(`| ${mdText(h.array)} | ${h.index} | ${mdText(h.reason)} | ${h.origMatches} | ${mdCode(h.pattern)} |`);
+      }
+      if (hidden.length > MAX_FAILED_ROWS) {
+        lines.push(`| … | … | … | … | 其余 ${hidden.length - MAX_FAILED_ROWS} 条隐性失效未展示，本地运行 \`simulate --verbose\` 查看完整列表 |`);
+      }
+      lines.push('');
+    }
+  }
   if (report.candidates) {
     const { candidates, patternsCount } = report.candidates;
     lines.push(`## 未翻译候选`);

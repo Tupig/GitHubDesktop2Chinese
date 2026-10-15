@@ -747,14 +747,14 @@ jobs:
           # key 含 GHD 版本/平台/工具源码/映射文件哈希: 映射变更即作废缓存重新下载安装包
           key: ghd-maintain-v4-${{ steps.version.outputs.ghdesktop_version }}-${{ runner.os }}-${{ hashFiles('tools/auto-maintain/src/**', 'json/localization.json') }}
 
-      - name: 运行失效检测 + 未翻译候选提取
+      - name: 运行失效检测 + 未翻译候选提取 + 依序模拟检测
         if: steps.maintain_gate.outputs.enabled == 'true'
         working-directory: tools/auto-maintain
         shell: bash
         run: |
           set -euo pipefail
           attempt=0
-          until timeout 1200 node src/index.js check extract \
+          until timeout 1200 node src/index.js check extract simulate \
             --workdir "$RUNNER_TEMP/ghdesktop-auto-maintain" \
             --top 100 \
             --write-report; do
