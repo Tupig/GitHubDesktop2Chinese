@@ -946,7 +946,7 @@ jobs:
             echo "未指定 openssl-version, 自动取 3.5 LTS 系列最新: $OSSL_VER"
           fi
           if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::openssl-version 格式非法: $OSSL_VER（应为 X.Y.Z, 不带 v/openssl- 前缀）"
+            echo "::error::openssl-version 格式非法: ${OSSL_VER}（应为 X.Y.Z, 不带 v/openssl- 前缀）"
             exit 1
           fi
           echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
@@ -1003,7 +1003,7 @@ jobs:
             exit 1
           fi
           echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
-          echo "产库产物齐备: $PREFIX（tarball SHA256: $HASH）"
+          echo "产库产物齐备: ${PREFIX}（tarball SHA256: ${HASH}）"
 
       - name: 上传产库产物
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -1070,7 +1070,7 @@ jobs:
             echo "未指定 openssl-version, 自动取 3.5 LTS 系列最新: $OSSL_VER"
           fi
           if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::openssl-version 格式非法: $OSSL_VER（应为 X.Y.Z, 不带 v/openssl- 前缀）"
+            echo "::error::openssl-version 格式非法: ${OSSL_VER}（应为 X.Y.Z, 不带 v/openssl- 前缀）"
             exit 1
           fi
           echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
@@ -1164,7 +1164,7 @@ jobs:
             exit 1
           fi
           echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
-          echo "产库产物齐备: $PREFIX（tarball SHA256: $HASH）"
+          echo "产库产物齐备: ${PREFIX}（tarball SHA256: ${HASH}）"
 
       - name: 上传产库产物
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -1230,7 +1230,7 @@ jobs:
             echo "未指定 openssl-version, 自动取 3.5 LTS 系列最新: $OSSL_VER"
           fi
           if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::openssl-version 格式非法: $OSSL_VER（应为 X.Y.Z, 不带 v/openssl- 前缀）"
+            echo "::error::openssl-version 格式非法: ${OSSL_VER}（应为 X.Y.Z, 不带 v/openssl- 前缀）"
             exit 1
           fi
           echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
@@ -1289,7 +1289,7 @@ jobs:
             exit 1
           fi
           echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
-          echo "产库产物齐备: $PREFIX（tarball SHA256: $HASH）"
+          echo "产库产物齐备: ${PREFIX}（tarball SHA256: ${HASH}）"
 
       - name: 上传产库产物
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -1355,7 +1355,7 @@ jobs:
             echo "未指定 openssl-version, 自动取 3.5 LTS 系列最新: $OSSL_VER"
           fi
           if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::openssl-version 格式非法: $OSSL_VER（应为 X.Y.Z, 不带 v/openssl- 前缀）"
+            echo "::error::openssl-version 格式非法: ${OSSL_VER}（应为 X.Y.Z, 不带 v/openssl- 前缀）"
             exit 1
           fi
           echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
@@ -1414,7 +1414,7 @@ jobs:
             exit 1
           fi
           echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
-          echo "产库产物齐备: $PREFIX（tarball SHA256: $HASH）"
+          echo "产库产物齐备: ${PREFIX}（tarball SHA256: ${HASH}）"
 
       - name: 上传产库产物
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -1640,7 +1640,7 @@ jobs:
           fi
           echo "3.5 LTS 系列最新: $LATEST_VER"
           if [[ "$OSSL_VER" != "$LATEST_VER" ]]; then
-            echo "::error::所产版本 $OSSL_VER 非 3.5 LTS 系列最新（最新为 $LATEST_VER）。产库须跟随 LTS 最新 patch, 请以最新版本重新触发"
+            echo "::error::所产版本 $OSSL_VER 非 3.5 LTS 系列最新（最新为 ${LATEST_VER}）。产库须跟随 LTS 最新 patch, 请以最新版本重新触发"
             exit 1
           fi
 
@@ -1735,7 +1735,7 @@ jobs:
             echo ""
             echo "### 变更范围"
             echo ""
-            echo "- 仅 \`third_party/openssl*\` 四目录二进制替换（版本 $CUR → $OSSL_VER）"
+            echo "- 仅 \`third_party/openssl*\` 四目录二进制替换（版本 $CUR → ${OSSL_VER}）"
           } > pr-body.md
           echo "--- PR 描述已生成 ---"
           cat pr-body.md
@@ -1755,7 +1755,7 @@ jobs:
           git checkout -b "$BRANCH"
           git add third_party
           git commit -m "vendor: OpenSSL $OSSL_VER 四平台静态库入库（产库自动 PR）" \
-            -m "版本: $CUR -> $OSSL_VER（3.5 LTS 系列最新）; 产物: linux-x64 / windows-x64 / macos-arm64 / macos-x64; 溯源与审查清单见 PR 描述"
+            -m "版本: $CUR -> ${OSSL_VER}（3.5 LTS 系列最新）; 产物: linux-x64 / windows-x64 / macos-arm64 / macos-x64; 溯源与审查清单见 PR 描述"
           git push origin "$BRANCH"
           gh pr create --title "vendor: OpenSSL $OSSL_VER 四平台静态库入库" --body-file pr-body.md
 
@@ -1913,7 +1913,7 @@ jobs:
             echo "> ⚠️ 仅支持 64 位系统 / GitHub Desktop。macOS/Linux 首次运行请先 \`chmod +x\`；"
             echo "> Windows 找不到 openssl dll 请升级到本版本；缺失 MSVCP140_ATOMIC_WAIT.dll 请安装 Microsoft Visual C++ Redistributable"
             if [[ -f docs/ReleaseBody.md ]]; then
-              CHANGES="$(grep -F "（v$VER）" docs/ReleaseBody.md || true)"
+              CHANGES="$(grep -F "（v${VER}）" docs/ReleaseBody.md || true)"
               AUTO_EXTRACTED=""
               if [[ -z "$CHANGES" ]]; then
                 TAGS="$(gh api "repos/${GITHUB_REPOSITORY}/tags?per_page=100" --paginate -q '.[].name' 2>/dev/null || true)"
@@ -1927,7 +1927,7 @@ jobs:
                       AUTO_ENTRIES=""
                       while IFS= read -r subject; do
                         if [[ -n "$subject" ]]; then
-                          AUTO_ENTRIES+="- ${subject}（v$VER）"$'\n'
+                          AUTO_ENTRIES+="- ${subject}（v${VER}）"$'\n'
                         fi
                       done <<< "$SUBJECTS"
                       AUTO_ENTRIES="${AUTO_ENTRIES%$'\n'}"
@@ -1936,7 +1936,7 @@ jobs:
                         /^<!--/ && !inserted { print entries; print ""; inserted = 1 }
                         { print }
                       ' docs/ReleaseBody.md > docs/ReleaseBody.md.tmp && mv docs/ReleaseBody.md.tmp docs/ReleaseBody.md
-                      CHANGES="$(grep -F "（v$VER）" docs/ReleaseBody.md || true)"
+                      CHANGES="$(grep -F "（v${VER}）" docs/ReleaseBody.md || true)"
                       AUTO_EXTRACTED="1"
                     fi
                   fi
