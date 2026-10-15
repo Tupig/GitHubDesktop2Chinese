@@ -43,8 +43,9 @@
 #                         构建差异检测: 与上次成功构建对比, 无差异时输出 build_changed=false
 #   1. Build              构建矩阵(三平台四目标) Matrix build + 产物功能测试（无差异时跳过, 见注4）
 #                         sccache 编译缓存加速增量构建
-#   2. JsonCheck          localization.json 质量校验门
-#                         （json 深度校验 + 源码编码格式检查 #88 + 自动维护工具自检;
+#   2. JsonCheck          质量校验门（json/编码/工具/md/工作流）
+#                         （json 深度校验 + 源码编码格式检查 #88 + 自动维护工具语法/自测
+#                          + Markdown 链接检查 + 单工作流规范校验 W0-W6 及校验器单测;
 #                          合并原 json-quality / encoding-check / tools-test 三任务）
 #   3. CodeqlScan         安全与维护门（保持 windows-2025 以扫描 _WIN32 代码分支, 四块独立控制）:
 #                         ├ CodeQL 安全扫描（原 codeql, 增量扫描 + 数据库缓存）
@@ -543,13 +544,16 @@ jobs:
           path: dist/
 
   # ═════════════════════════════════════════════════
-  # 2. localization.json 质量校验门
+  # 2. 质量校验门（JsonCheck）
   #    合并原 json-quality / encoding-check / tools-test 三任务:
   #    三者依赖一致(均 ← version), 触发条件近同, 合并减少排队开销;
-  #    任一检查失败即本任务失败, 维持原质量门语义
+  #    另含 Markdown 链接检查与单工作流规范校验(W0-W6)及校验器单测;
+  #    任一检查失败即本任务失败, 维持原质量门语义;
+  #    注意: name 即分支保护必需 check, 改名须同步
+  #    branches/main/protection required_status_checks(#156)
   # ═════════════════════════════════════════════════
   JsonCheck:
-    name: localization.json 质量校验
+    name: 质量校验门（json/编码/工具/md/工作流）
     needs: Version
     if: |
       github.event_name == 'pull_request' ||

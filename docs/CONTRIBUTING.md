@@ -86,11 +86,7 @@
 - **任务先行**：每项任务开工前先建 issue，提交信息与 PR 均关联该 issue 编号。
 - **分支模型**：`main` 受分支保护（禁强推、禁删除、管理员同样受限、要求 1 个 approval、对话全部解决、线性历史）；功能与修复一律走 `<type>/<短描述>` feature 分支 + PR，如 `ci/cron-beijing-0923`。
 - **提交信息**：遵循 [Conventional Commits](https://www.conventionalcommits.org/zh-hans/)——`<type>(<scope>): <subject>(#<issue>)`，`type` 取 `feat` / `fix` / `docs` / `ci` / `refactor` / `test` / `chore`，`scope` 可选。仓库根目录提供 `.gitmessage` 模板，执行 `git config commit.template .gitmessage` 后 `git commit` 自动载入。
-- **PR 必需检查**：以下三个 status checks 为合并必需（分支保护配置）：
-
-  - `localization.json 质量校验`
-  - `源码编码格式检查`
-  - `自动维护工具自检`
+- **PR 必需检查**：`质量校验门（json/编码/工具/md/工作流）`（`JsonCheck` 单任务，涵盖 json 深度校验、源码编码检查、自动维护工具语法与自测、Markdown 链接检查、单工作流规范校验）为合并必需（分支保护配置）。
 
   其余 checks（4 平台构建矩阵、CodeQL、版本解析等）须通过但不设为必需；PR 获 1 个 approve 且对话全部解决后 squash merge。
 
@@ -227,11 +223,7 @@ Any change to `json/`, `src/`, `third_party/`, `CMakeLists.txt` or `CMakePresets
 - **Issue first**: open an issue before starting any task, and reference its number in commits and PRs.
 - **Branching**: `main` is protected (no force push, no deletion, admins included, 1 approval required, all conversations resolved, linear history); features and fixes always go through `<type>/<short-description>` feature branches + PRs, e.g. `ci/cron-beijing-0923`.
 - **Commit messages**: follow [Conventional Commits](https://www.conventionalcommits.org/) — `<type>(<scope>): <subject>(#<issue>)`, where `type` is one of `feat` / `fix` / `docs` / `ci` / `refactor` / `test` / `chore` and `scope` is optional. A `.gitmessage` template is provided at the repo root; run `git config commit.template .gitmessage` so `git commit` loads it automatically.
-- **Required PR checks**: the following three status checks are required for merging (branch protection):
-
-  - `localization.json 质量校验`
-  - `源码编码格式检查`
-  - `自动维护工具自检`
+- **Required PR checks**: `质量校验门（json/编码/工具/md/工作流）` (the single `JsonCheck` job, covering json deep validation, source encoding checks, auto-maintain tool syntax checks & self-tests, markdown link checks, and single-workflow spec validation) is required for merging (branch protection).
 
   All other checks (the 4-platform build matrix, CodeQL, version resolution, ...) must pass but are not required; after 1 approval and all conversations resolved, PRs are squash-merged.
 
