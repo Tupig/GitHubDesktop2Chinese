@@ -270,8 +270,9 @@ private:
                     // 防止后缀中的数字被并入版本号(如 "1.2-rc1" 被解析为 1.21, #120)
                     break;
                 }
-                v++;
-                continue;
+                // 无分隔符垃圾字符: 终止当前段解析并保留已识别部分,
+                // 防止垃圾字符后的数字被并入版本号(如 "1.2abc3" 被解析为 1.23, #175)
+                break;
             }
             // parseCheckPos == ParseCheckPosition::enumrevision
             if (parseCheckPos == ParseCheckPosition::enumrevision) {
@@ -297,8 +298,9 @@ private:
                     // 防止后缀中的数字被并入版本号(如 "1.2.3-4" 中的 4 被静默丢弃, #120)
                     break;
                 }
-                v++;
-                continue;
+                // 无分隔符垃圾字符: 终止当前段解析并保留已识别部分,
+                // 防止垃圾字符后的数字被并入版本号(如 "1.2.3x4" 被解析为 1.2.34, #175)
+                break;
             }
             // parseCheckPos == ParseCheckPosition::enumbetaversion
             if (parseCheckPos == ParseCheckPosition::enumbetaversion) {
