@@ -58,7 +58,8 @@ module.exports = async ({ github, context, core }) => {
 
     // 不按 label 过滤(#144): 旧单 label 被人工移除后, labels 过滤会漏查导致重复开单;
     // 改为列出 open issue 按标题前缀识别(该前缀仅本脚本使用, 误匹配面可控)
-    const { data: issues } = await github.rest.issues.listForRepo({
+    // paginate 聚合全部页(#230): 只取首页时 open issue 超 100 条目标单漏检, 导致重复开单/漏关单
+    const issues = await github.paginate(github.rest.issues.listForRepo, {
       owner: context.repo.owner,
       repo: context.repo.repo,
       state: 'open',
@@ -74,6 +75,7 @@ module.exports = async ({ github, context, core }) => {
           repo: context.repo.repo,
           issue_number: existing.number,
           state: 'closed',
+          title: title + '（已恢复）', // #230: 关单同步标题, 避免历史标题永久保留过期失效计数
           body: finalBody,
         });
         console.log(`已关闭 Issue #${existing.number}（无失效项）`);

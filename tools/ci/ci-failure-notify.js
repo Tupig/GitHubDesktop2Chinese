@@ -21,7 +21,8 @@ module.exports = async ({ github, context, core }) => {
 
     // 列 open issue 按标题前缀识别(不按 label 过滤, 与 report-issue.js #144 同因:
     // label 被人工移除会漏查导致重复开单; 该前缀仅本脚本使用)
-    const { data: issues } = await github.rest.issues.listForRepo({
+    // paginate 聚合全部页(#230): 只取首页时 open issue 超 100 条目标单漏检, 导致重复开单/漏关单
+    const issues = await github.paginate(github.rest.issues.listForRepo, {
       owner,
       repo,
       state: 'open',
@@ -50,6 +51,7 @@ module.exports = async ({ github, context, core }) => {
           repo,
           issue_number: existing.number,
           state: 'closed',
+          title: existing.title + '（已恢复）', // #230: 关单同步标题, 避免历史标题永久保留过期失败计数
         });
         console.log(`CI 已恢复, 关闭 Issue #${existing.number}`);
       } else {
