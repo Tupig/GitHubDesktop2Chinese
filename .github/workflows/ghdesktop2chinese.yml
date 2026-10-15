@@ -38,7 +38,7 @@
 #           同一 PR 连续推送由 concurrency 取消陈旧运行
 #   边界:   发布类(auto/release)仅限 main 触发(防特性分支误发布); 其他 ref 可跑 build/security/maintain/vendor 排查
 #
-# ── jobs 总览与依赖（12 任务, PascalCase 命名）────────────────
+# ── jobs 总览与依赖（13 任务, PascalCase 命名）────────────────
 #   0. Version            解析版本号与变更检测（构建/发布类任务的前置）;
 #                         构建差异检测: 与上次成功构建对比, 无差异时输出 build_changed=false
 #   1. Build              构建矩阵(三平台四目标) Matrix build + 产物功能测试（无差异时跳过, 见注4）
@@ -56,11 +56,12 @@
 #   6. OpensslWin         产库 OpenSSL（windows x64 .lib; 同上触发, 产物用于替换内置库）
 #   7. OpensslMacosArm64  产库 OpenSSL（macOS arm64 交叉编译; 同上触发, macos-15 原生 ARM）
 #   8. OpensslMacosX64    产库 OpenSSL（macOS x64 交叉编译; 同上触发, macos-15-intel 原生 x64）
-#   9. OpensslVendorPR    产库自动开 PR（四连全部成功后组装 third_party 并自动开入库 PR,
+#   9. OpensslVerify      产库验证（四连全部成功后, 组装 third_party, 四平台矩阵构建验证新库可用）
+#  10. OpensslVendorPR   产库自动开 PR（验证通过后组装 third_party 并自动开入库 PR,
 #                         版本须为官方最新 Release 见注7; GITHUB_TOKEN PR 不触发 CI,
 #                         由维护者按 PR 内审查清单确认后合并）
-#  10. Release            汇总产物并发布
-#  11. CiNotify           CI 失败通知（仅定时构建, #131）: 有失败 job 时创建/更新单条
+#  11. Release            汇总产物并发布
+#  12. CiNotify           CI 失败通知（仅定时构建, #131）: 有失败 job 时创建/更新单条
 #                         "[CI 失败]" Issue(连续失败计数), 成功时自动关闭; push/PR 失败
 #                         在 Actions/PR 页即时可见, 不走本渠道
 #
@@ -69,9 +70,10 @@
 #             OpensslCheck ← CodeqlScan（定时检测, 依赖维护门通过）;
 #             产库四连并行: OpensslLinux/Win/MacosArm64/MacosX64 均 ← CodeqlScan（不再串行依赖）,
 #             以 always() + 原 vendor 触发条件串联(不受上游 skip/失败传导, 保持原独立产库语义与低频);
-#             OpensslVendorPR ← 产库四连(四 result 全 success 才开 PR);
+#             OpensslVerify ← 产库四连(四 result 全 success 才验证);
+#             OpensslVendorPR ← 产库四连 + 验证(全 success 才开 PR);
 #             Release ← Version+Build+JsonCheck+CodeqlScan(Version 直连同上; 其余三门为发布质量门);
-#             CiNotify ← 全部 11 任务(!cancelled(): 失败也要跑, 通知的意义正在于失败)
+#             CiNotify ← 全部 12 任务(!cancelled(): 失败也要跑, 通知的意义正在于失败)
 #   图约束: 全图以 Version 为根连通, 无孤立/不连通任务、无循环、无悬空 needs,
 #           needs 表达式引用须指向存在的直接依赖任务 —— 由 JsonCheck 的
 #           单工作流规范校验（tools/ci/check-workflow.py, W0-W6）强制
@@ -246,7 +248,7 @@ jobs:
             BUILD_BASE_SHA="$(gh api \
               "repos/${GITHUB_REPOSITORY}/actions/workflows/ghdesktop2chinese.yml/runs?branch=main&status=success&per_page=1" \
               --jq '.workflow_runs[0].head_sha' 2>/dev/null || true)"
-            for [[ -n "$BUILD_BASE_SHA" && "$BUILD_BASE_SHA" != "null" ]]; then
+            if [[ -n "$BUILD_BASE_SHA" && "$BUILD_BASE_SHA" != "null" ]]; then
               BUILD_DIFF="$(git diff --name-only "${BUILD_BASE_SHA}..HEAD" -- "${PATHSPEC[@]}" | wc -l | tr -d ' ')"
               if [[ "$BUILD_DIFF" -eq 0 ]]; then
                 BUILD_CHANGED="false"
@@ -1247,14 +1249,12 @@ jobs:
           if-no-files-found: error
 
   # ═════════════════════════════════════════════════
-  # 9. 产库自动开 PR（四连全部成功后组装 third_party 并自动开入库 PR, 由维护者审查合并）
-  #    GITHUB_TOKEN 创建的 PR 不触发 CI(GitHub 防递归), 审查清单见 PR 描述;
-  #    所产版本强制等于 openssl/openssl 官方最新 Release(注7), 防止产旧版本入库
+  # 9. 产库验证（四连全部成功后, 组装 third_party, 四平台矩阵构建验证新库可用）
+  #    验证通过后才允许 OpensslVendorPR 开入库 PR
   # ═════════════════════════════════════════════════
-  OpensslVendorPR:
-    name: 产库自动开 PR
+  OpensslVerify:
+    name: 产库验证 (${{ matrix.display }})
     needs: [OpensslLinux, OpensslWin, OpensslMacosArm64, OpensslMacosX64, OpensslCheck]
-    # 四连全部成功才开 PR: 部分失败不开, 避免提交不完整的四平台库
     if: |
       always() && (
       (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'vendor-openssl') ||
@@ -1264,6 +1264,165 @@ jobs:
       needs.OpensslWin.result == 'success' &&
       needs.OpensslMacosArm64.result == 'success' &&
       needs.OpensslMacosX64.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            display: Windows_x64
+            os: windows-2025
+          - name: macos-x64
+            display: macOS_x64
+            os: macos-15-intel
+            arch: x64
+          - name: macos-arm64
+            display: macOS_arm64
+            os: macos-15
+            arch: arm64
+          - name: linux-x64
+            display: Linux_x64
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: 下载四平台产库产物
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          path: vendor-staging
+          pattern: openssl-*
+          merge-multiple: false
+
+      - name: 组装 third_party
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A DST=(
+            [openssl-linux-x64]="third_party/openssl-linux-x64"
+            [openssl-windows-x64]="third_party/openssl"
+            [openssl-macos-arm64]="third_party/openssl-macos-arm64"
+            [openssl-macos-x64]="third_party/openssl-macos-x64"
+          )
+          for art in "${!DST[@]}"; do
+            src="vendor-staging/$art"
+            dst="${DST[$art]}"
+            [[ -f "$src/include/openssl/ssl.h" ]] || { echo "::error::artifact $art 缺少 include/openssl/ssl.h"; exit 1; }
+            rm -rf "$dst/include" "$dst/lib"
+            mkdir -p "$dst"
+            cp -a "$src/include" "$src/lib" "$dst/"
+          done
+          echo "third_party 组装完成"
+
+      - name: 安装 sccache
+        uses: mozilla-actions/sccache-action@fd02668681acd5f960e1372061bee5e3e987195c # v0.0.11
+
+      - name: 配置 CMake（Windows x64）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          chcp 65001 | Out-Null
+          cmake -B build -A x64 -DFILE_VERSION="openssl-verify" -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+
+      - name: 配置 CMake（macOS/Linux）
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXTRA=()
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            ARCH="${{ matrix.arch }}"
+            CMAKE_ARCH="$ARCH"
+            if [[ "$ARCH" == "x64" ]]; then CMAKE_ARCH="x86_64"; fi
+            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=$CMAKE_ARCH")
+            EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0")
+          fi
+          EXTRA+=("-DCMAKE_COMPILE_WARNING_AS_ERROR=ON")
+          cmake -B build -DCMAKE_BUILD_TYPE=Release "-DFILE_VERSION=openssl-verify" ${EXTRA[@]+"${EXTRA[@]}"}
+
+      - name: 构建
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cmake --build build --config Release
+          else
+            JOBS="$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
+            cmake --build build --config Release -j "$JOBS"
+          fi
+
+      - name: 产物功能测试
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            NATIVE="$(uname -m)"
+            EXPECT="${{ matrix.arch }}"
+            if [[ "$EXPECT" == "x64" ]]; then EXPECT="x86_64"; fi
+            if [[ "$NATIVE" != "$EXPECT" ]]; then
+              echo "跳过: 交叉产物($EXPECT)无法在本 runner($NATIVE) 原生运行"
+              exit 0
+            fi
+          fi
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            BIN="build/Release/${EXE_NAME}"
+          else
+            BIN="build/GitHubDesktop2Chinese"
+          fi
+          [[ -f "$BIN" ]] || { echo "::error::未找到构建产物 $BIN"; exit 1; }
+
+          echo "== 测试1: --help 应 exit 0 =="
+          "$BIN" --help > /dev/null
+          echo "OK"
+
+          echo "== 测试2: 非法参数应被拒绝(exit!=0) =="
+          if "$BIN" thisargdoesnotexist > /dev/null 2>&1; then
+            echo "::error::非法参数未被拒绝"
+            exit 1
+          fi
+          echo "OK"
+
+          echo "== 测试3: 中文路径 + EOF 完整汉化流程应 exit 0 =="
+          FIXTURE="$RUNNER_TEMP/汉化测试目录"
+          rm -rf "$FIXTURE"
+          mkdir -p "$FIXTURE"
+          printf '<html></html>' > "$FIXTURE/index.html"
+          printf '// fixture main\n' > "$FIXTURE/main.js"
+          printf '// fixture renderer\n' > "$FIXTURE/renderer.js"
+          set +e
+          OUT="$(echo "" | "$BIN" -g "$FIXTURE" --nopause --force 2>&1)"
+          CODE=$?
+          set -e
+          if [[ $CODE -ne 0 ]]; then
+            echo "$OUT"
+            echo "::error::完整流程 exit=$CODE"
+            exit 1
+          fi
+          grep -q "renderer.js 文件汉化结束" <<< "$OUT" || { echo "$OUT"; echo "::error::流程未到达 renderer 汉化完成"; exit 1; }
+          echo "OK"
+
+  # ═════════════════════════════════════════════════
+  # 10. 产库自动开 PR（验证通过后组装 third_party 并自动开入库 PR, 由维护者审查合并）
+  #    GITHUB_TOKEN 创建的 PR 不触发 CI(GitHub 防递归), 审查清单见 PR 描述;
+  #    所产版本强制等于 openssl/openssl 官方最新 Release(注7), 防止产旧版本入库
+  # ═════════════════════════════════════════════════
+  OpensslVendorPR:
+    name: 产库自动开 PR
+    needs: [OpensslLinux, OpensslWin, OpensslMacosArm64, OpensslMacosX64, OpensslCheck, OpensslVerify]
+    # 四连 + 验证全部成功才开 PR
+    if: |
+      always() && (
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'vendor-openssl') ||
+      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor') ||
+      (github.event_name == 'schedule' && needs.OpensslCheck.outputs.trigger_vendor == 'true')) &&
+      needs.OpensslLinux.result == 'success' &&
+      needs.OpensslWin.result == 'success' &&
+      needs.OpensslMacosArm64.result == 'success' &&
+      needs.OpensslMacosX64.result == 'success' &&
+      needs.OpensslVerify.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # 权限最小化: 仅本 job 授予开 PR 所需写权限, 其余 job 保持工作流级只读
@@ -1414,7 +1573,7 @@ jobs:
           gh pr create --title "vendor: OpenSSL $OSSL_VER 四平台静态库入库" --body-file pr-body.md
 
   # ═════════════════════════════════════════════════
-  # 10. 发布 Release（push main 有变更 / tag v* / 手动 auto|release / 定时且有变更）
+  # 11. 发布 Release（push main 有变更 / tag v* / 手动 auto|release / 定时且有变更）
   #    依赖 build 产物与 version 版本号
   # ═════════════════════════════════════════════════
   Release:
@@ -1662,7 +1821,7 @@ jobs:
   # 失败仅 warning 不使本任务变红(避免"通知失败→run 红→下次又通知"的噪音循环)
   CiNotify:
     name: CI 失败通知
-    needs: [Version, Build, JsonCheck, CodeqlScan, OpensslCheck, OpensslLinux, OpensslWin, OpensslMacosArm64, OpensslMacosX64, OpensslVendorPR, Release]
+    needs: [Version, Build, JsonCheck, CodeqlScan, OpensslCheck, OpensslLinux, OpensslWin, OpensslMacosArm64, OpensslMacosX64, OpensslVerify, OpensslVendorPR, Release]
     if: ${{ !cancelled() && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
