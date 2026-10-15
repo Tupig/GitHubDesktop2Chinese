@@ -1134,8 +1134,43 @@ static bool EnsureRestoredFromBackup(const fs::path& base, const char* name) {
     }
 }
 
+// 残留临时文件清理(#177): 进程被杀(非异常路径)时原子写/原子还原的 .writing*/.restoring* 临时文件残留,
+// 此前无启动清理机制导致垃圾累积(仅磁盘卫生, 不影响功能)
+static void CleanupStaleTempFiles() {
+    // 匹配本工具原子写约定的 ".writing."/" .restoring." 子串(fs_io.hpp/PerformRollback: 目标名+标记+随机后缀);
+    // .new(自动更新断点续传依赖同名残留续传, 见 http.hpp)/.bak(备份) 不含该子串, 天然不会被误删
+    std::vector<fs::path> stale;
+    std::error_code ec;
+    // 先收集后删除: 标准不保证 directory_iterator 遍历中删除条目安全(迭代器失效)
+    for(fs::directory_iterator it(Base, ec), end; !ec && it != end; it.increment(ec)) {
+        const std::string name = it->path().filename().string();
+        if(name.find(".writing.") != std::string::npos ||
+            name.find(".restoring.") != std::string::npos) {
+            stale.push_back(it->path());
+        }
+    }
+    if(ec) {
+        // 目录列举失败不阻断主流程: 卫生性操作, 后续备份/还原的失败提示会兜底
+        spdlog::warn("扫描残留临时文件失败: {}", ec.message());
+        return;
+    }
+    for(const fs::path& p : stale) {
+        std::error_code rm_ec;
+        fs::remove(p, rm_ec);
+        if(rm_ec) {
+            // 删除失败(如被并发实例占用)只告警不阻断: 清理是尽力而为
+            spdlog::warn("清理残留临时文件 {} 失败: {}", p.filename().string(), rm_ec.message());
+        }
+        else {
+            spdlog::info("已清理残留临时文件 {}", p.filename().string());
+        }
+    }
+}
+
 // js 文件缺失恢复 + 备份创建(#121 阶段拆分): 任一步失败返回 false, 调用方应中止
 static bool EnsureJsFilesAndBackups() {
+    // 启动清理: 先于恢复/备份删除上次运行被杀残留的 .writing*/.restoring* 临时文件(#177)
+    CleanupStaleTempFiles();
     // 如果没有js文件却有备份文件 则从备份恢复
     for(const char* name : { "main.js", "renderer.js" }) {
         if(fs::exists(Base / name)) {
