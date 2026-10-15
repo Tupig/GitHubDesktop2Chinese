@@ -84,6 +84,8 @@ bool only_read_from_remote;                     // 仅从远程url中读取本�
 bool rollback;                                  // 从备份中还原汉化前的文件
 bool force_execute;                             // 映射文件 minversion 不满足时仍强制执行替换(--force)
 bool verbose_log;                               // 输出调试日志(--verbose, #141)
+bool offline_mode;                              // 离线模式(--offline): 跳过全部网络请求, 仅使用本地资源
+bool network_degraded = false;                  // 首个网络请求失败后置位, 后续装饰性请求自动跳过(#173)
 bool json_template_created;                     // -j 指定的映射文件不存在且已创建模板, 主流程提示后正常退出
 
 json localization = R"(
@@ -704,6 +706,11 @@ static void LogRepoLastUpdated(const std::pair<std::string, int>& proxy) {
     if(fs::exists(LocalizationJSON)) {
         return;
     }
+    // 装饰性请求可跳过: --offline 显式离线, 或首个网络请求已失败(断网/受限网络时不干等)(#173)
+    if(offline_mode || network_degraded) {
+        spdlog::debug("离线模式或网络已降级, 跳过仓库更新时间查询");
+        return;
+    }
     try {
         std::string repoinfo;
         if(utils::ReadHttpDataString(kApiHost, kRepoApiPath, repoinfo, proxy)) {
@@ -712,6 +719,9 @@ static void LogRepoLastUpdated(const std::pair<std::string, int>& proxy) {
             if(info) {
                 spdlog::info("仓库最新更新时间: {}{}{}", "\033[32m", *info, "\033[0m");
             }
+        }
+        else {
+            network_degraded = true;
         }
     }
     catch(const std::exception& e) {
@@ -726,6 +736,10 @@ static void LogRepoLastUpdated(const std::pair<std::string, int>& proxy) {
 // 检查更新: 返回 true 表示已触发自更新, 调用方应立即以 0 退出等待替换; Dev 版跳过
 static bool CheckForUpdates(const std::pair<std::string, int>& proxy, const fs::path& self_path) {
     if(FileVer.status != versionparse::Version::Dev) {
+        if(offline_mode) {
+            spdlog::info("--offline 已指定, 跳过检查更新");
+            return false;
+        }
         spdlog::info("检查更新中..");
         try {
             std::string repoinfo;
@@ -795,6 +809,7 @@ static bool CheckForUpdates(const std::pair<std::string, int>& proxy, const fs::
             }
             else {
                 spdlog::warn("远程信息读取失败..");
+                network_degraded = true;
             }
         }
         catch(const std::exception& e) {
@@ -841,9 +856,13 @@ static bool ResolveBaseDirectory([[maybe_unused]] const std::pair<std::string, i
 
                 spdlog::info("正在读取GitHubDesktop最新正式版...");
                 std::string httpjson_str;
+                // 装饰性请求可跳过: --offline 显式离线, 或首个网络请求已失败(#173)
+                if(offline_mode || network_degraded) {
+                    spdlog::debug("离线模式或网络已降级, 跳过远程GitHubDesktop版本查询");
+                }
                 // 使用 GitHub Releases API: releases/latest 仅返回最新非预发布(正式版),
                 // 避免把 beta 预览版(如 3.6.7-beta)误报为最新正式版
-                if(utils::ReadHttpDataString(kApiHost, kDesktopLatestReleaseApiPath, httpjson_str, proxy)) {
+                else if(utils::ReadHttpDataString(kApiHost, kDesktopLatestReleaseApiPath, httpjson_str, proxy)) {
                     // 远程信息仅用于提示, 解析失败不应中断主流程
                     try {
                         auto httpjson = json::parse(httpjson_str);
@@ -865,6 +884,7 @@ static bool ResolveBaseDirectory([[maybe_unused]] const std::pair<std::string, i
                     }
                 }else{
                     spdlog::warn("远程GitHubDesktop版本读取失败.");
+                    network_degraded = true;
                 }
 
                 spdlog::info("已从注册表中读取本地GitHubDesktop信息:");
@@ -959,6 +979,10 @@ static int PerformRollback() {
 
 // 远程映射拉取(#121 收敛双份拷贝): 获取并解析 localization.json 到全局 localization
 static bool FetchRemoteMapping(const std::pair<std::string, int>& proxy) {
+    if(offline_mode) {
+        spdlog::error("--offline 已指定, 无法从远程获取映射文件, 请提供本地 localization.json");
+        return false;
+    }
     spdlog::info("尝试从远程仓库中获取");
     std::string httpjson;
     if (!utils::ReadHttpDataString(kRawHost, kLocalizationJsonRawPath, httpjson, proxy)) {
@@ -1207,6 +1231,11 @@ static int CheckMinVersionGate() {
 
 // 项目贡献者展示(装饰性): 失败仅告警不影响主流程
 static void ShowContributors(const std::pair<std::string, int>& proxy) {
+    // 装饰性请求可跳过: --offline 显式离线, 或此前网络请求已失败(#173)
+    if(offline_mode || network_degraded) {
+        spdlog::debug("离线模式或网络已降级, 跳过项目参与者展示");
+        return;
+    }
     // 获取项目参与者:
     // https://api.github.com/repos/Tupig/GitHubDesktop2Chinese/contributors
     try {
@@ -1410,6 +1439,7 @@ static int RunMain(int argc, char** argv, const fs::path& self_path)
         app.add_flag("--nopause", no_pause,                         "程序在结束前不再暂停等待");
         app.add_flag("--force", force_execute,                      "映射文件 minversion 不满足时仍强制执行替换(风险自担)");
         app.add_flag("--verbose", verbose_log,                      "输出调试日志(日志级别 debug, 也可用环境变量 GHD2C_LOG_LEVEL 指定)");
+        app.add_flag("--offline", offline_mode,                     "离线模式:跳过全部网络请求(检查更新/远程映射下载/装饰性查询),仅使用本地资源");
         app.add_option("-g,--githubdesktoppath", Base,              "指定GitHubDesktop要汉化的资源所在目录(js所在目录)");
         app.add_option("-j,--json", LocalizationJSON,               "指定本地化JSON文件的本地路径");
         app.add_flag("-r,--onlyfromremote", only_read_from_remote,  "仅从远程url中读取本地化文件");
