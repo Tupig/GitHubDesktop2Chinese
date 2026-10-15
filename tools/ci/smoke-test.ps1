@@ -1,10 +1,14 @@
-﻿# 本地冒烟测试(构建产物快速功能验证, CI 产物功能测试的本地等价物)
-# 用法: pwsh tools/ci/smoke-test.ps1 [-Binary <GitHubDesktop2Chinese.exe 路径>]
+﻿# 冒烟测试(构建产物快速功能验证)
+# 本地与 CI Build job Windows 产物功能测试共用同一用例源(#178, 消除两套平行维护漂移)
+# 用法: pwsh tools/ci/smoke-test.ps1 [-Binary <GitHubDesktop2Chinese.exe 路径>] [-Force]
 # 默认自动探测 out\build\*\Release\ 与 build\Release\ 下的产物, 取最新者
+# -Force: T3 完整汉化流程追加 --force(CI 构建版本 ci-<sha> 解析为 0.0.0 低于 minversion,
+#         --nopause 下默认中止; 本地默认版本为 Dev 状态跳过门禁, 无需此开关)
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [string]$Binary
+    [string]$Binary,
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -63,7 +67,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # ── T3: 完整汉化流程(fixture + 仓库内映射, 不联网)应 exit 0 且到达 renderer 完成 ──
-$fixture = Join-Path ([System.IO.Path]::GetTempPath()) ("ghd2c-smoke-" + [System.IO.Path]::GetRandomFileName())
+# fixture 名含中文: 汉化目标用户路径普遍含中文, 保留中文路径覆盖(原 CI 内联用例等价迁移)
+$fixture = Join-Path ([System.IO.Path]::GetTempPath()) ("ghd2c-冒烟测试-" + [System.IO.Path]::GetRandomFileName())
 New-Item -ItemType Directory -Path $fixture -Force | Out-Null
 try {
     Set-Content -LiteralPath (Join-Path $fixture "index.html") -Value "<html></html>" -NoNewline
@@ -71,7 +76,9 @@ try {
     Set-Content -LiteralPath (Join-Path $fixture "renderer.js") -Value "// fixture renderer" -NoNewline
     $json = Join-Path $fixture "localization.json"
     Copy-Item (Join-Path $repoRoot "json\localization.json") $json
-    $out = Invoke-Native { '' | & $Binary -g $fixture -j $json --nopause 2>&1 | Out-String }
+    $t3Args = @('-g', $fixture, '-j', $json, '--nopause')
+    if ($Force) { $t3Args += '--force' }
+    $out = Invoke-Native { '' | & $Binary @t3Args 2>&1 | Out-String }
     $code = $LASTEXITCODE
     if ($code -eq 0 -and $out.Contains("renderer.js 文件汉化结束")) {
         Write-Host "T3 完整汉化流程 exit 0: PASS"
