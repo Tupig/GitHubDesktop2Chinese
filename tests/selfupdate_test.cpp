@@ -50,14 +50,19 @@ int main() {
         CheckTrue("T1 无 .old 时不产生 .old", !fs::exists(old_file));
     }
 
-    // T2: 存在 .old 残留(上次更新的旧版本镜像) → 被清理, 主文件不受影响
+    // T2: 存在 .old 残留(上次更新的旧版本镜像) → Windows 清理之;
+    //     POSIX 清理为空操作(rename 原子替换无 .old 机制), 不应删改任何文件
     {
         const fs::path fake_exe = dir / "app.exe";
         fs::path old_file = fake_exe;
         old_file += ".old";
         WriteBytes(old_file, "old-image");
         utils::CleanupSelfUpdateResidue(fake_exe);
+#ifdef _WIN32
         CheckTrue("T2 .old 残留被清理", !fs::exists(old_file));
+#else
+        CheckTrue("T2 POSIX 空操作不删 .old", fs::exists(old_file));
+#endif
         CheckTrue("T2 主文件不受影响", fs::exists(fake_exe));
     }
 
@@ -71,7 +76,11 @@ int main() {
         if(!cwd_ec) {
             WriteBytes("relapp.exe.old", "old-image");
             utils::CleanupSelfUpdateResidue(fs::path("relapp.exe"));
+#ifdef _WIN32
             CheckTrue("T3 相对路径下 .old 被清理", !fs::exists("relapp.exe.old"));
+#else
+            CheckTrue("T3 POSIX 空操作不崩溃且不动文件", fs::exists("relapp.exe.old"));
+#endif
             fs::current_path(prev_cwd, cwd_ec); // 切回, 避免 Windows 下删除占用中的 cwd
         }
     }
