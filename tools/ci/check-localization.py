@@ -45,6 +45,18 @@ except (OSError, ValueError, KeyError, TypeError) as e:
     blacklist = []
     redos_heuristic = ""
 
+def check_pattern(label, pat, blacklist, redos_heuristic):
+    """单个正则校验: 黑名单 + 可编译 + ReDoS 启发式 (#245: 供 item[0]/item[2]/select row[0]/row[2] 复用)"""
+    for rx, why in blacklist:
+        if re.search(rx, pat):
+            errors.append(f"{label} std::regex 不兼容语法({why}): {pat!r}")
+    try:
+        re.compile(pat)
+    except re.error as e:
+        errors.append(f"{label} 非法正则: {pat!r} -> {e}")
+    if redos_heuristic and re.search(redos_heuristic, pat):
+        errors.append(f"{label} 疑似灾难性回溯(嵌套量词), 请改写该正则: {pat!r}")
+
 def check_array(name, arr):
     seen = {}
     for i, item in enumerate(arr):
@@ -74,6 +86,9 @@ def check_array(name, arr):
         # ReDoS 启发式(命中阻断, #128): 嵌套量词(如 (a+)+ 、 (.*x)* )在长文本上可能灾难性回溯卡死加载器, 阻止合入
         if redos_heuristic and re.search(redos_heuristic, pat):
             errors.append(f"{name}[{i}] 疑似灾难性回溯(嵌套量词), 请改写该正则: {pat!r}")
+        # 第三元素(条件门)同样被应用侧作为正则消费(FillPlaceholders, #245) —— 施加与 item[0] 同等校验
+        if len(item) == 3 and item[2] not in ("", '""'):
+            check_pattern(f"{name}[{i}][2]", item[2], blacklist, redos_heuristic)
         # 译文问句风格: 去掉尾部引号后以 半角? 收尾且 ? 前为汉字 → 建议全角？
         # (JS 三元/正则语法的 ? 不满足"以 ? 收尾"或 ? 前非汉字, 不会误报)
         t = item[1].rstrip("\"'")
@@ -127,6 +142,9 @@ else:
                     errors.append(f"select[{si}].replace[{ri}] 非法正则: {pat!r} -> {e}")
                 if redos_heuristic and re.search(redos_heuristic, pat):
                     errors.append(f"select[{si}].replace[{ri}] 疑似灾难性回溯(嵌套量词), 请改写该正则: {pat!r}")
+                # 第三元素(条件门)同样被应用侧作为正则消费(ApplySelectForFile, #245)
+                if len(row) >= 3 and row[2] not in ("", '""'):
+                    check_pattern(f"select[{si}].replace[{ri}][2]", row[2], blacklist, redos_heuristic)
 
 print(f"映射项统计: main={len(data.get('main', []))} renderer={len(data.get('renderer', []))}")
 if warnings:

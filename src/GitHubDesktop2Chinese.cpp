@@ -188,13 +188,18 @@ static bool LooksLikeNestedQuantifier(const std::string& pat) {
         }
         size_t j = i + 1;
         bool group_has_quantifier = false;
-        while(j < n && pat[j] != ')' && pat[j] != '(') {
+        while(j < n && pat[j] != ')') {
             if(pat[j] == '+' || pat[j] == '*') {
+                group_has_quantifier = true;
+            }
+            if(pat[j] == '(') {
+                // 嵌套组也视为疑似(#240): 原实现遇 '(' 即跳过, 放行了 ((a)*)* 类可致
+                // std::regex 灾难性回溯的形态; 保守拒绝(宁可漏汉化不可假死)
                 group_has_quantifier = true;
             }
             j++;
         }
-        // 未闭合 / 组内含嵌套括号 / 组内无量词字符: 不构成启发式形态
+        // 未闭合 / 组内无量词与嵌套括号: 不构成启发式形态
         if(j >= n || pat[j] != ')' || !group_has_quantifier) {
             continue;
         }
