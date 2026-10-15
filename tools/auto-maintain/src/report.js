@@ -2,8 +2,9 @@ import { buildDraftLine } from './extract-new.js';
 
 // 表格最多渲染行数; 超出部分以说明行代替。
 // 目的: 防止 Issue 正文超出 GitHub 65536 字符上限导致创建/更新失败(恰在最需要报告时丢失)。
-const MAX_FAILED_ROWS = 150;
-const MAX_CANDIDATE_ROWS = 200;
+// #146: 导出供 tools-self-test.mjs 引用, 测试不再隐式绑定常量数值(改常量即碎且碎法误导)
+export const MAX_FAILED_ROWS = 150;
+export const MAX_CANDIDATE_ROWS = 200;
 
 // markdown 单元格纯文本转义: | 断表格列, 反引号开 inline code 均会破坏渲染。
 // 反引号以全角 ˋ 替代(仅展示层, 不影响复制使用的内容)。
@@ -50,6 +51,8 @@ export function renderMarkdown(report) {
     if (warnList.length > 0) {
       lines.push(`### 告警（不阻断）`);
       lines.push('');
+      // #146: 稳定语义标记(HTML 注释, 渲染不可见)——测试断言此标记而非标题文案, 措辞微调不再碎测试
+      lines.push(`<!-- section: warnings -->`);
       for (const w of warnList) {
         lines.push(`- \`${mdText(w.array)}[${w.index}]\` ${mdText(w.reason)}: ${mdCode(w.pattern)}`);
       }

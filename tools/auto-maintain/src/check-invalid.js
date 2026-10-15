@@ -32,6 +32,9 @@ const REDOS_HEURISTIC = _BLACKLIST_JSON.redos_heuristic?.regex
   ? new RegExp(_BLACKLIST_JSON.redos_heuristic.regex)
   : null;
 
+// #146: 告警原因标识导出为命名常量——渲染契约与测试统一引用, 不再各自绑定字符串字面量
+export const WARN_REASON_REDOS_SUSPECT = 'redos-suspect';
+
 /**
  * 对单个映射项执行失效检测（与 C++ std::regex 语义对齐）。
  * 规则（对应 GitHubDesktop2Chinese.cpp 的 --invalidcheck）：
@@ -39,7 +42,7 @@ const REDOS_HEURISTIC = _BLACKLIST_JSON.redos_heuristic?.regex
  *  - item[2]（可选）为第三个参数正则，需额外匹配
  * 返回 { ok, errors, warnings }，
  * reason 为 'not-found' | 'regex-error' | 'unsupported-syntax'；
- * warnings 为仅告警项（如 'redos-suspect'），不参与 ok 判定
+ * warnings 为仅告警项（如 WARN_REASON_REDOS_SUSPECT），不参与 ok 判定
  */
 export function checkEntry(jsText, item) {
   const errors = [];
@@ -61,7 +64,7 @@ export function checkEntry(jsText, item) {
     }
     // ReDoS 启发式(仅告警不阻断): 规则来自 regex-blacklist.json, 与 CI 的 tools/ci/check-localization.py 对齐, 由调用方纳入输出与报告
     if (REDOS_HEURISTIC && REDOS_HEURISTIC.test(p)) {
-      warnings.push({ reason: 'redos-suspect', pattern: p });
+      warnings.push({ reason: WARN_REASON_REDOS_SUSPECT, pattern: p });
     }
     try {
       const re = new RegExp(p);
