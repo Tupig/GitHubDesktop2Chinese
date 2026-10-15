@@ -33,6 +33,9 @@ node src/index.js check --json /path/to/localization.json
 
 # 本地调试：复用已有的 main.js/renderer.js（跳过约 307MB 下载）
 node src/index.js check extract --keep-js
+
+# 运行单元测试（与 CI JsonCheck 同一入口，无需网络）
+npm test
 ```
 
 ## 参数
@@ -103,6 +106,7 @@ tools/auto-maintain/
 ├── regex-blacklist.json   # std::regex 不兼容语法黑名单（CI 数据质量校验共用）
 ├── src/
 │   ├── index.js           # CLI 入口
+│   ├── args.js            # CLI 参数解析（无副作用纯模块，单测覆盖各分支）
 │   ├── fetch.js           # 获取/下载/解压最新 GitHub Desktop，提取 main.js/renderer.js
 │   ├── check-invalid.js   # 失效检测
 │   ├── extract-new.js     # 未翻译候选提取
@@ -146,6 +150,9 @@ node src/index.js check --json /path/to/localization.json
 
 # Local debugging: reuse existing main.js/renderer.js (skips the ~307MB download)
 node src/index.js check extract --keep-js
+
+# Run the unit tests (same entry point as the CI JsonCheck job; no network needed)
+npm test
 ```
 
 ## Options
@@ -216,6 +223,7 @@ tools/auto-maintain/
 ├── regex-blacklist.json   # Denylist of std::regex-incompatible syntax (shared with the CI data quality check)
 ├── src/
 │   ├── index.js           # CLI entry
+│   ├── args.js            # CLI argument parsing (side-effect-free pure module, unit-tested)
 │   ├── fetch.js           # Fetch/download/extract the latest GitHub Desktop, extract main.js/renderer.js
 │   ├── check-invalid.js   # Invalid-entry check
 │   ├── extract-new.js     # Untranslated candidate extraction

@@ -19,6 +19,53 @@ const DOWNLOAD_TIMEOUT_MS = 900_000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// ── 纯逻辑(#174 抽出, tools/ci/tools-self-test.mjs 单测覆盖) ──
+
+/** 构造 GitHub API 最新 release 查询 URL */
+export function buildLatestReleaseUrl() {
+  return `${API_BASE}/repos/${GITHUB_DESKTOP_REPO}/releases/latest`;
+}
+
+/** release tag(形如 release-3.6.6) -> 纯版本号(3.6.6) */
+export function parseVersionFromTag(tag) {
+  return tag.replace(/^release-/, '');
+}
+
+/** 从 release assets 中挑选 Windows x64 Squirrel 完整包; 无匹配返回 null */
+export function pickWindowsAsset(assets) {
+  const list = Array.isArray(assets) ? assets : [];
+  return list.find((a) => ASSET_PATTERN.test(a.name)) ?? null;
+}
+
+/** 限流 Retry-After 响应头 -> 重试等待毫秒(封顶 90s); 缺失/非法返回 undefined */
+export function retryWaitMsFromHeader(retryAfterHeader) {
+  const retryAfter = Number(retryAfterHeader);
+  return Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 90) * 1000 : undefined;
+}
+
+/** Content-Range("bytes 1234-.../...")断点起始位置; 缺失/无法解析返回 null(调用方按可解析才判错处理) */
+export function rangeResumeStart(contentRange) {
+  const m = contentRange && /^bytes (\d+)-/.exec(contentRange);
+  return m ? Number(m[1]) : null;
+}
+
+/** 416 自愈判定: 本地存在断点却收到 416, 断点已不可续传, 须删除后从头重下 */
+export function is416SelfHeal(status, hasPartial) {
+  return status === 416 && hasPartial;
+}
+
+/** 下载缓存三件套路径: 最终 nupkg / .part 断点 / .part.url 来源旁证 */
+export function deriveCachePaths(destDir) {
+  const zipPath = path.join(destDir, 'github-desktop.nupkg');
+  const tmpPath = zipPath + '.part';
+  return { zipPath, tmpPath, tmpUrlPath: tmpPath + '.url' };
+}
+
+/** 提取结果复用标记: 版本号(缺省回退包名)+包尺寸; 标记一致才复用, 版本变化自然失效重建 */
+export function extractSourceId(versionTag, zipName, zipSize) {
+  return `${versionTag || zipName}:${zipSize}`;
+}
+
 /**
  * 获取最新 GitHub Desktop 的 release 信息
  * 返回 { tag, version, zipAssetUrl }
@@ -35,22 +82,20 @@ export async function getLatestRelease() {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      const res = await fetch(`${API_BASE}/repos/${GITHUB_DESKTOP_REPO}/releases/latest`, {
+      const res = await fetch(buildLatestReleaseUrl(), {
         headers,
         signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
       });
       if (!res.ok) {
         const err = new Error(`获取 GitHub Desktop 最新 release 失败: HTTP ${res.status}`);
         // #132: 限流(403/429)时遵守 Retry-After(上限 90s), 固定 5s 重试在限流场景必败
-        const retryAfter = Number(res.headers.get('retry-after'));
-        err.waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 90) * 1000 : undefined;
+        err.waitMs = retryWaitMsFromHeader(res.headers.get('retry-after'));
         throw err;
       }
       const data = await res.json();
       const tag = data.tag_name; // 形如 release-3.6.6
-      const version = tag.replace(/^release-/, '');
-      const assets = Array.isArray(data.assets) ? data.assets : [];
-      const asset = assets.find((a) => ASSET_PATTERN.test(a.name));
+      const version = parseVersionFromTag(tag);
+      const asset = pickWindowsAsset(data.assets);
       if (!asset) {
         throw new Error(`未在 release ${tag} 中找到 Windows 完整包 ${ASSET_PATTERN}`);
       }
@@ -136,9 +181,7 @@ export async function digestMismatch(filePath, expectedDigest) {
  */
 export async function downloadZip(url, destDir, expectedSize, expectedDigest) {
   fs.mkdirSync(destDir, { recursive: true });
-  const zipPath = path.join(destDir, 'github-desktop.nupkg');
-  const tmpPath = zipPath + '.part';
-  const tmpUrlPath = tmpPath + '.url'; // 旁证: .part 来自哪个 URL, 防止跨版本续传拼出混合文件
+  const { zipPath, tmpPath, tmpUrlPath } = deriveCachePaths(destDir);
 
   // 已下载文件: 尺寸与本次 release 资产一致、EOCD 完整且内容哈希一致才复用(版本变化后的旧缓存一律重下)
   if (fs.existsSync(zipPath)) {
@@ -180,15 +223,15 @@ export async function downloadZip(url, destDir, expectedSize, expectedDigest) {
   // 重置断点后抛出, 由上层重试从头下载
   if (res.status === 206 && hasPartial) {
     const cr = res.headers.get('content-range'); // 形如 "bytes 1234-5678/9012"
-    const m = cr && /^bytes (\d+)-/.exec(cr);
-    if (m && Number(m[1]) !== partialSize) {
+    const start = rangeResumeStart(cr);
+    if (start !== null && start !== partialSize) {
       fs.rmSync(tmpPath, { force: true });
       throw new Error(`服务器返回的断点位置与请求不符(Content-Range: ${cr}), 已重置断点文件, 重试将从头下载`);
     }
   }
   // 416: 断点尺寸已达到服务器认为的完整大小, 但本地并非完整 zip(极端残留)。
   // 必须删除断点, 否则每次运行都会因同一断点反复 416 卡死, 永远无法自愈
-  if (res.status === 416 && hasPartial) {
+  if (is416SelfHeal(res.status, hasPartial)) {
     fs.rmSync(tmpPath, { force: true });
     throw new Error('断点文件与服务器不匹配(HTTP 416), 已删除断点文件, 重试将从头下载');
   }
@@ -233,7 +276,7 @@ export function extractJs(zipPath, workDir, versionTag = '') {
   const extractDir = path.join(workDir, 'extracted');
   // 提取结果与来源包一致时直接复用（配合 CI 缓存，避免每次重复解压 150MB+ 安装包）；
   // 标记含版本号与文件尺寸(旧格式 "文件:尺寸" 因格式变化自然失效重建)
-  const sourceId = `${versionTag || path.basename(zipPath)}:${fs.statSync(zipPath).size}`;
+  const sourceId = extractSourceId(versionTag, path.basename(zipPath), fs.statSync(zipPath).size);
   const markerPath = path.join(extractDir, '.source.txt');
   if (fs.existsSync(markerPath) && fs.readFileSync(markerPath, 'utf8').trim() === sourceId) {
     const cached = findAppDir(extractDir);
