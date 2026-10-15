@@ -152,9 +152,14 @@ def load_config(path: str) -> dict:
 
 
 def list_tracked_files() -> list[str]:
-    """列出 git 跟踪文件（关 quotepath 转义保证中文文件名原样输出）。"""
+    """列出 git 跟踪文件（关 quotepath 转义保证中文文件名原样输出）。
+
+    cwd 固定为仓库根（按脚本位置推导），避免从子目录调用时静默缩至该子目录 (#246)。
+    """
+    repo_root = Path(__file__).resolve().parents[2]
     result = subprocess.run(
         ["git", "-c", "core.quotepath=false", "ls-files"],
+        cwd=str(repo_root),
         capture_output=True,
         check=False,
     )
