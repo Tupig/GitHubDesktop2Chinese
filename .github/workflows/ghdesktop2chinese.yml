@@ -1303,15 +1303,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          declare -A DST=(
-            [openssl-linux-x64]="third_party/openssl-linux-x64"
-            [openssl-windows-x64]="third_party/openssl"
-            [openssl-macos-arm64]="third_party/openssl-macos-arm64"
-            [openssl-macos-x64]="third_party/openssl-macos-x64"
-          )
-          for art in "${!DST[@]}"; do
+          # macOS runner 的 /bin/bash 为 3.2, 不支持关联数组(declare -A);
+          # 改用 case 映射, 兼容 bash 3.2+(Linux/Windows 的 bash 5 同样适用)
+          for art in openssl-linux-x64 openssl-windows-x64 openssl-macos-arm64 openssl-macos-x64; do
+            case "$art" in
+              openssl-linux-x64)   dst="third_party/openssl-linux-x64" ;;
+              openssl-windows-x64) dst="third_party/openssl" ;;
+              openssl-macos-arm64) dst="third_party/openssl-macos-arm64" ;;
+              openssl-macos-x64)   dst="third_party/openssl-macos-x64" ;;
+            esac
             src="vendor-staging/$art"
-            dst="${DST[$art]}"
             [[ -f "$src/include/openssl/ssl.h" ]] || { echo "::error::artifact $art 缺少 include/openssl/ssl.h"; exit 1; }
             rm -rf "$dst/include" "$dst/lib"
             mkdir -p "$dst"
