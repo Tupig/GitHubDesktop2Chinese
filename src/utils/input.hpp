@@ -13,10 +13,22 @@
 
 namespace utils {
 
-    // 上一次 stdin 操作是否为 >> 提取(缓冲中残留待清扫的换行); 由调用方在 >> 成功后置位。
-    // ReadUserInput_bool 仅在该标志置位时清扫残留行: 无 >> 前置的交互(如 PAUSE 后的提示)
-    // 不能吞掉用户输入的整行, 否则用户必须输入两次、空行回退默认值
-    inline bool stdin_after_extract = false;
+    namespace detail {
+        // 上一次 stdin 操作是否为 >> 提取(缓冲中残留待清扫的换行); 由 MarkStdinDirty 置位。
+        // ReadUserInput_bool 仅在该标志置位时清扫残留行: 无 >> 前置的交互(如 PAUSE 后的提示)
+        // 不能吞掉用户输入的整行, 否则用户必须输入两次、空行回退默认值
+        inline bool stdin_after_extract = false;
+    }
+
+    // >> 提取成功后调用: 缓冲中残留换行, 待后续交互清扫
+    inline void MarkStdinDirty() {
+        detail::stdin_after_extract = true;
+    }
+
+    // 缓冲被整行消费(getline/ignore 等)后调用: 残留状态同步失效
+    inline void ClearStdinDirty() {
+        detail::stdin_after_extract = false;
+    }
 
     inline auto ReadUserInput_bool(std::vector<std::string> input = {"false", "true"}, int defaultval = -1) -> bool {
         if (input.size() != 2) throw std::runtime_error("读取 bool 类型值时 input 数组长度必须为两个");
@@ -33,9 +45,9 @@ namespace utils {
             std::cin.clear();
             // 调用契约: 若上一次 stdin 操作是 >> 提取(残留换行留在缓冲), 需先清扫残留行。
             // MSVC filebuf 未重写 showmanyc, in_avail() 恒为 0, 不能用它判断残留 —— 由
-            // stdin_after_extract 标志精确标记(>> 成功后置位); 标志为假时不得吞掉用户输入
-            if(stdin_after_extract) {
-                stdin_after_extract = false;
+            // detail::stdin_after_extract 标志精确标记(>> 成功后置位); 标志为假时不得吞掉用户输入
+            if(detail::stdin_after_extract) {
+                detail::stdin_after_extract = false;
                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             }
             if(!std::getline(std::cin, instr)) {

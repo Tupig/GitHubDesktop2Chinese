@@ -51,9 +51,6 @@
 #pragma comment(lib, "winhttp.lib")
 #endif
 
-// 不进行替换 以便调试
-#define NO_REPLACE 0
-
 // ---------------------------------------------------------------------------
 // 远程端点与业务常量集中定义: 原先散落在各调用点的硬编码 URL / 魔法数字
 // 统一抽取至此, 调整端点或阈值只需修改这一处
@@ -103,7 +100,7 @@ json localization = R"(
                             "select": []
                         }
                     )"_json;
-bool _debug_goto_devoptions;
+bool _debug_goto_devoptions = false;
 
 bool _debug_error_check_mode_main = false;
 bool _debug_error_check_mode_renderer = false;
@@ -126,14 +123,14 @@ inline void WaitAnyKey() {
     HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
     DWORD mode = 0;
     if(hIn != INVALID_HANDLE_VALUE && hIn != nullptr && GetConsoleMode(hIn, &mode)) {
-        (void)_getch(); // _getch 不经过 stdin 流, 缓冲残留状态不变, stdin_after_extract 保持有效
+        (void)_getch(); // _getch 不经过 stdin 流, 缓冲残留状态不变, stdin 脏标记保持有效
         return;
     }
 #endif
     // 等待一行的实现会连同一并消费缓冲中的 >> 残留行, 标志须同步失效, 避免后续交互被多吞一行
     std::cin.clear();
     std::cin.ignore((std::numeric_limits<std::streamsize>::max)(), '\n');
-    utils::stdin_after_extract = false;
+    utils::ClearStdinDirty();
 }
 
 // 转义 std::regex_replace format 串中的 $ (否则 $&/$`/$n 会被展开或吞掉): 用于把捕获文本安全回填到模板
@@ -450,9 +447,6 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
     try {
         for(auto& item : localization[baseKey].items())
         {
-#if NO_REPLACE
-            continue;
-#endif // NO_REPLACE
             // E2: 条目前置校验, 畸形条目跳过而不是抛异常中断剩余替换
             if(!item.value().is_array() || item.value().empty() || !item.value()[0].is_string()) {
                 spdlog::warn("[{}] 跳过格式无效的条目 {}", logTag, item.key());
@@ -590,7 +584,7 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
                     }
                     spdlog::info("已写入. 你希望下次替换多少条后写入:");
                     if(std::cin >> out) {
-                        utils::stdin_after_extract = true; // >> 提取成功, 残留换行待后续交互清扫
+                        utils::MarkStdinDirty();
                         // 0/负数会让 out<=0 在下一轮恒成立, 退化为逐条写盘: 钳制为最小 1
                         if(out < 1) {
                             out = 1;
@@ -1179,7 +1173,7 @@ static int CheckMinVersionGate() {
                 spdlog::info("输入(f)强制执行替换(可能会导致无法打开), 其他退出..");
                 std::string input;
                 if(std::cin >> input) {
-                    utils::stdin_after_extract = true; // >> 提取成功, 残留换行待后续交互清扫
+                    utils::MarkStdinDirty();
                 }
                 if(!std::cin || (input != "f" && input != "F")) {
                     PAUSE
@@ -1503,7 +1497,7 @@ static int RunMain(int argc, char** argv, const fs::path& self_path)
                 spdlog::error("无法读取输入(输入流已结束), 退出版本设置");
                 break;
             }
-            utils::stdin_after_extract = true; // >> 提取成功, 残留换行待后续交互清扫
+            utils::MarkStdinDirty();
             if(instr == "exit") {
                 break;
             }
@@ -1626,7 +1620,7 @@ bool GetBasePath(std::string& out) {
         return false;
     }
     // getline 消费了缓冲中可能的 >> 残留行, 标志须同步失效
-    utils::stdin_after_extract = false;
+    utils::ClearStdinDirty();
     // 去除首尾空白与成对引号: 支持从资源管理器拖拽文件夹到控制台(终端会为路径加引号)
     {
         const size_t first = out.find_first_not_of(" \t\r\n");
@@ -1700,7 +1694,7 @@ void DeveloperOptions() {
             spdlog::warn("输入无效, 请输入数字");
             continue;
         }
-        utils::stdin_after_extract = true; // >> 提取成功, 残留换行待后续交互清扫
+        utils::MarkStdinDirty();
         switch (sys)
         {
         case 0:
