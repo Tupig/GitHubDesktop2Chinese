@@ -2017,7 +2017,7 @@ jobs:
       issues: write
     steps:
       - name: Checkout
-        uses: actions/checkout@93cb6efe182084d492a57081a3e3aae2d28c4b16 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: 通知定时构建结果
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
