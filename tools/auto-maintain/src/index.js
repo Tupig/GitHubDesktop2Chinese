@@ -4,6 +4,7 @@ import os from 'node:os';
 import { parseArgs, help } from './args.js';
 import { fetchLatest } from './fetch.js';
 import { loadLocalization, checkInvalid } from './check-invalid.js';
+import { simulateApply, SIM_REASON_PREEMPTED, SIM_REASON_GATE_MISS, SIM_REASON_GATE_LEFTOVER } from './simulate.js';
 import { extractNew } from './extract-new.js';
 import { renderMarkdown } from './report.js';
 
@@ -55,7 +56,7 @@ async function main() {
     const mainJsText = fs.readFileSync(mainJsPath, 'utf8');
     const rendererJsText = fs.readFileSync(rendererJsPath, 'utf8');
 
-    const report = { version, generatedAt: new Date().toISOString(), checks: null, candidates: null };
+    const report = { version, generatedAt: new Date().toISOString(), checks: null, candidates: null, simulation: null };
 
     if (args.cmds.includes('check') || args.cmds.includes('all')) {
       const result = checkInvalid(localization, mainJsText, rendererJsText);
@@ -78,6 +79,34 @@ async function main() {
         console.log(c('1;33', `  告警项(不阻断): ${result.warnings.length}`));
         for (const w of result.warnings) {
           console.log(`  ${c('33', `[${w.array}#${w.index}]`)} ${w.reason}: ${w.pattern}`);
+        }
+      }
+    }
+
+    if (args.cmds.includes('simulate')) {
+      // 依序模拟检测(#207): 依序应用 main/renderer/select 全部映射, 发现被前面正则抢占的隐性失效
+      const result = simulateApply(localization, mainJsText, rendererJsText);
+      report.simulation = result;
+      // 隐性失效原因的中文呈现(与 check 块 reason 映射风格一致)
+      const SIM_REASON_ZH = {
+        [SIM_REASON_PREEMPTED]: '被前面正则抢占',
+        [SIM_REASON_GATE_MISS]: '条件正则依序失配',
+        [SIM_REASON_GATE_LEFTOVER]: '占位符未回填',
+      };
+      console.log('');
+      console.log(c('1;33', '══════ 依序模拟检测结果 ══════'));
+      console.log(`  模拟条目: ${result.total} (main ${result.counts.main}, renderer ${result.counts.renderer}, select ${result.counts.select})`);
+      // 隐性失效为 warning 级(供人工判断), 不改变退出码
+      console.log(c(result.hiddenCount > 0 ? '33' : '32', `  隐性失效: ${result.hiddenCount}`));
+      for (const h of result.hidden) {
+        console.log(`  ${c('33', `[${h.array}#${h.index}]`)} 隐性失效(${SIM_REASON_ZH[h.reason] ?? h.reason}): ${h.pattern}`);
+      }
+      if (args.verbose) {
+        console.log(c('1;33', `  ── 全量逐条替换计数 (共 ${result.entries.length} 条) ──`));
+        for (const e of result.entries) {
+          // 替换 0 次的条目附带对原始文本的独立匹配数, 便于区分隐性失效与彻底失效
+          const extra = e.replaced === 0 && e.origMatches !== null ? `(独立匹配 ${e.origMatches} 处)` : '';
+          console.log(`  [${e.array}#${e.index}] 替换 ${e.replaced} 处${extra ? ' ' + extra : ''}: ${e.pattern ?? '(无效条目)'}`);
         }
       }
     }
