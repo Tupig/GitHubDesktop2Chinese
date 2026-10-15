@@ -19,7 +19,7 @@ import json
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 # 通过文件路径加载被测模块（文件名含连字符，无法常规 import）
@@ -123,6 +123,7 @@ class CheckWorkflowTest(unittest.TestCase):
         )
         _, violations = check_workflow.run_checks(self.workflows_dir)
         self.assertEqual(self.rules_of(violations), {"W3"})
+        # 分量分组(含分隔格式)是诊断输出本身, 有意断言其内容(#146: 非脆弱文案绑定)
         self.assertIn("{a、b}", violations[0].message)
         self.assertIn("{c、d}", violations[0].message)
 
@@ -136,6 +137,7 @@ class CheckWorkflowTest(unittest.TestCase):
         )
         _, violations = check_workflow.run_checks(self.workflows_dir)
         self.assertEqual(self.rules_of(violations), {"W4"})
+        # 环路径是诊断输出本身, 有意断言其内容(#146: 换算法文案即变属预期诊断变更)
         self.assertIn("b -> a -> b", violations[0].message)
 
     def test_self_cycle_detected(self) -> None:
@@ -146,6 +148,7 @@ class CheckWorkflowTest(unittest.TestCase):
         )
         _, violations = check_workflow.run_checks(self.workflows_dir)
         self.assertEqual(self.rules_of(violations), {"W4"})
+        # 同上: 自环路径为诊断输出内容
         self.assertIn("a -> a", violations[0].message)
 
     # -- W5 未知依赖 --
@@ -171,7 +174,9 @@ class CheckWorkflowTest(unittest.TestCase):
         self.assertEqual(violation.rule, "W0")
         self.assertEqual(violation.target, "ghdesktop2chinese.yml")
         self.assertIn("解析失败", violation.message)
-        self.assertLessEqual(len(violation.message), 400)
+        # #146: 上限引用被测模块导出常量(前缀 + collapse 截断), 改常量测试自动跟随
+        prefix = "工作流 YAML 解析失败: "
+        self.assertLessEqual(len(violation.message), len(prefix) + check_workflow.YAML_ERROR_DETAIL_LIMIT)
 
     def test_non_utf8_workflow_reported(self) -> None:
         # GBK 编码的中文在 UTF-8 解码时抛 UnicodeDecodeError(ValueError 子类, 非 OSError)
@@ -224,6 +229,25 @@ class CheckWorkflowTest(unittest.TestCase):
         self.assertEqual(violations[0].target, "ghdesktop2chinese.yml/b")
         self.assertIn("needs 必须是字符串或字符串列表", violations[0].message)
 
+    # #146: 补覆盖缺口——非字符串 job 名(YAML 数字键被解析为 int)
+    def test_non_string_job_name_reported(self) -> None:
+        self.write_workflow("on: push\njobs:\n  123:\n    runs-on: ubuntu-24.04\n")
+        _, violations = check_workflow.run_checks(self.workflows_dir)
+        self.assertEqual([v.rule for v in violations], ["W0"])
+        self.assertIn("任务名必须是字符串", violations[0].message)
+        self.assertIn("123", violations[0].message)
+
+    # #146: 补覆盖缺口——needs: null 与缺省 needs 同义(空依赖列表), 不应误报
+    def test_needs_null_treated_as_empty(self) -> None:
+        self.write_workflow(
+            "on: push\n"
+            "jobs:\n"
+            "  a:\n    needs: null\n    runs-on: ubuntu-24.04\n"
+            "  b:\n    needs: a\n    runs-on: ubuntu-24.04\n"
+        )
+        _, violations = check_workflow.run_checks(self.workflows_dir)
+        self.assertEqual(violations, [])
+
     # -- 合法形态 --
     def test_needs_variants_accepted(self) -> None:
         self.write_workflow(
@@ -270,6 +294,18 @@ class CheckWorkflowTest(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("::error::", output)
         self.assertIn("[W2]", output)
+
+    # #146: 补覆盖缺口——PyYAML 缺失时 main() 以退出码 2 报环境错误(monkeypatch 可用性标志)
+    def test_main_returns_2_without_pyyaml(self) -> None:
+        self.write_workflow(VALID_CHAIN)
+        original = check_workflow.PYYAML_AVAILABLE
+        check_workflow.PYYAML_AVAILABLE = False
+        try:
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                exit_code = check_workflow.main(["--workflows-dir", str(self.workflows_dir)])
+        finally:
+            check_workflow.PYYAML_AVAILABLE = original
+        self.assertEqual(exit_code, 2)
 
 
 if __name__ == "__main__":

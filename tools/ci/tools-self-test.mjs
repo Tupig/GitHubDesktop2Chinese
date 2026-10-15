@@ -1,7 +1,8 @@
 // 自动维护工具单元测试(提取过滤 + 草稿生成 + 报告体积防护 + 告警通道; 工作流 tools-test job 调用)
 import { isLikelyUiText, buildDraftLine } from '../auto-maintain/src/extract-new.js';
-import { renderMarkdown } from '../auto-maintain/src/report.js';
-import { checkEntry } from '../auto-maintain/src/check-invalid.js';
+// #146: 引用被测模块导出常量, 不在断言里重复绑定实现数值/字符串字面量
+import { renderMarkdown, MAX_FAILED_ROWS } from '../auto-maintain/src/report.js';
+import { checkEntry, WARN_REASON_REDOS_SUSPECT } from '../auto-maintain/src/check-invalid.js';
 const cases = [
   ['Do not show this message again', true],
   ['into ', false],
@@ -32,16 +33,18 @@ for (const text of ['GitHub Desktop', 'Checkout commit?', 'No usage limit']) {
 // 报告体积防护: 大表应截断且总长不超 Issue 上限
 const fakeFailed = Array.from({ length: 1000 }, (_, i) => ({ array: 'renderer', index: i, item: [], errors: [{ reason: 'not-found', pattern: 'pattern-' + i }] }));
 const big = renderMarkdown({ version: 't', generatedAt: 't', checks: { total: 1000, ok: 0, failedCount: 1000, failed: fakeFailed }, candidates: { candidates: [], patternsCount: 0 } });
-if (!big.includes('其余 850 条失效项未展示')) { console.error('FAIL: 失效表截断说明缺失'); process.exit(1); }
+// #146: 截断条数引用导出常量计算, 改 MAX_FAILED_ROWS 测试自动跟随(不再隐式绑定 850)
+if (!big.includes(`其余 ${1000 - MAX_FAILED_ROWS} 条失效项未展示`)) { console.error('FAIL: 失效表截断说明缺失'); process.exit(1); }
 if (big.length >= 65536) { console.error('FAIL: 报告超出体积上限', big.length); process.exit(1); }
 pass++;
 // 告警通道: ReDoS 启发式仅告警不阻断, 且进入报告渲染
 const warned = checkEntry('text', ['(a+)+x', 'y']);
-if (warned.ok !== false || warned.warnings.length !== 1 || warned.warnings[0].reason !== 'redos-suspect') {
+if (warned.ok !== false || warned.warnings.length !== 1 || warned.warnings[0].reason !== WARN_REASON_REDOS_SUSPECT) {
   console.error('FAIL: ReDoS 告警通道异常', JSON.stringify(warned)); process.exit(1);
 }
 const warnedMd = renderMarkdown({ version: 't', generatedAt: 't', checks: { total: 1, ok: 0, failedCount: 1, failed: [{ array: 'main', index: 0, errors: warned.errors }], warnings: [{ array: 'main', index: 0, ...warned.warnings[0] }] }, candidates: null });
-if (!warnedMd.includes('告警（不阻断）') || !warnedMd.includes('redos-suspect')) {
+// #146: 断言稳定语义标记而非"告警（不阻断）"标题文案, 措辞微调不再碎测试
+if (!warnedMd.includes('<!-- section: warnings -->') || !warnedMd.includes(WARN_REASON_REDOS_SUSPECT)) {
   console.error('FAIL: 报告未渲染告警段'); process.exit(1);
 }
 pass++;
