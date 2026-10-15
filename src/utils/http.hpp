@@ -38,6 +38,10 @@ namespace utils {
     // 网络超时(秒): 防止失效代理指向黑洞地址时按 httplib 默认 300s × 4 次重试卡死约 20 分钟
     inline constexpr int kConnectTimeoutSec = 10;
     inline constexpr int kReadTimeoutSec = 30;
+    // 单请求总时长预算(秒): set_read_timeout 只限单次 recv, 滴流服务端每次喂少量数据即可无限续命(#172)
+    inline constexpr int kRequestTotalBudgetSec = 120;
+    // 下载单请求总时长预算(秒): 发布资产体积大, 比普通 json 请求宽松(#172)
+    inline constexpr int kDownloadTotalBudgetSec = 600;
     // 单次请求可接受的响应体上限(32MB): 防止异常/恶意服务端响应撑爆内存
     inline constexpr size_t kMaxResponseBytes = 32 * 1024 * 1024;
     // 哈希计算时文件分块读取的缓冲区大小
@@ -177,10 +181,14 @@ namespace utils {
      *                 为空时保持旧全量行为(res->body 持有响应体)
      * @param max_bytes 流式模式下的响应体上限(body_out 非空时生效, 应 > 0)
      * @param oversized 流式模式下超限中止时置 true(出参, 可为空)
+     * @param total_budget_sec 单请求总时长预算(秒, 0 = 不限): 单次 recv 超时无法约束滴流服务端(#172),
+     *                         超预算经 progress 回调中止连接, 不再重试同通道
+     * @param budget_exceeded 超预算中止时置 true(出参, 可为空)
      * @return 最终结果(可能为 nullptr = 连接层失败/流式中止)
      */
     inline auto GetWithRetry(const std::string& url_host, const std::string& params, const std::pair<std::string, int>& proxy,
-                             std::string* body_out = nullptr, size_t max_bytes = 0, bool* oversized = nullptr) -> httplib::Result {
+                             std::string* body_out = nullptr, size_t max_bytes = 0, bool* oversized = nullptr,
+                             int total_budget_sec = 0, bool* budget_exceeded = nullptr) -> httplib::Result {
         httplib::Client cli = MakeHttpClient(url_host, proxy);
         httplib::Result res;
         int wait_sec = kHttpRetryDelaySec;
@@ -196,7 +204,11 @@ namespace utils {
                 if(oversized != nullptr) {
                     *oversized = false;
                 }
+                if(budget_exceeded != nullptr) {
+                    *budget_exceeded = false;
+                }
                 uint64_t received_bytes = 0;
+                const auto request_start = std::chrono::steady_clock::now();
                 res = cli.Get(params, httplib::Headers{},
                 [&](const char* data, size_t data_length) {
                     received_bytes += data_length;
@@ -208,9 +220,21 @@ namespace utils {
                     }
                     body_out->append(data, data_length);
                     return true;
+                },
+                [&](size_t, size_t) {
+                    // 单请求总时长预算(#172): progress 周期回调中检查累计耗时, 超预算立即断开
+                    if(total_budget_sec > 0 &&
+                       std::chrono::steady_clock::now() - request_start >= std::chrono::seconds(total_budget_sec)) {
+                        if(budget_exceeded != nullptr) {
+                            *budget_exceeded = true;
+                        }
+                        return false;
+                    }
+                    return true;
                 });
-                if(oversized != nullptr && *oversized) {
-                    break; // 超限为确定性失败, 重试必然同样超限
+                // 超限/超预算均为服务端/代理侧确定性异常, 重试必然同样结果
+                if((oversized != nullptr && *oversized) || (budget_exceeded != nullptr && *budget_exceeded)) {
+                    break;
                 }
             }
             else {
@@ -249,7 +273,9 @@ namespace utils {
         // 不再让恶意/受损代理把任意大 body 全量灌入内存后才拒绝(原收后检查的缺口)
         std::string body;
         bool oversized = false;
-        httplib::Result res = GetWithRetry(url_host, params, proxy, &body, kMaxResponseBytes, &oversized);
+        bool budget_exceeded = false;
+        httplib::Result res = GetWithRetry(url_host, params, proxy, &body, kMaxResponseBytes, &oversized,
+                                           kRequestTotalBudgetSec, &budget_exceeded);
 
         // 超限为服务端/代理侧确定性异常, 不触发代理降级(直连同样会被服务端超限拒绝)
         if(oversized) {
@@ -262,12 +288,18 @@ namespace utils {
         // 会让经代理请求全部连接层失败, 最坏阻塞数分钟; 此时自动降级直连重试
         if(proxy.second && !res) {
             spdlog::warn("经代理 {}:{} 请求失败(代理不可达), 已尝试直连", proxy.first, proxy.second);
-            res = GetWithRetry(url_host, params, {}, &body, kMaxResponseBytes, &oversized);
+            res = GetWithRetry(url_host, params, {}, &body, kMaxResponseBytes, &oversized,
+                               kRequestTotalBudgetSec, &budget_exceeded);
             if(oversized) {
                 spdlog::warn("请求 {}{} 响应体超过上限({} bytes), 已断开并拒绝", url_host, params, kMaxResponseBytes);
                 out.clear();
                 return false;
             }
+        }
+
+        // 滴流服务端/代理被单请求总时长预算中止(#172): 单次 recv 超时无法约束持续续命的慢速响应
+        if(budget_exceeded) {
+            spdlog::warn("请求 {}{} 超过单请求总时长预算({} 秒), 已中止", url_host, params, kRequestTotalBudgetSec);
         }
 
         if (res) {
@@ -344,6 +376,9 @@ namespace utils {
 
             int bad_status = 0; // 非 200/206 的状态码(用于错误提示)
             uint64_t received_bytes = 0; // 本次会话已接收字节数(用于流式大小上限)
+            // 单请求总时长预算(#172): set_read_timeout 只限单次 recv, 滴流服务端可无限续命
+            const auto request_start = std::chrono::steady_clock::now();
+            bool budget_exceeded = false;
             auto res = cli.Get(params, headers,
             [&](const httplib::Response& response) {
                 // 服务器忽略 Range 返回 200 时，从头覆盖，避免追加写入导致文件损坏
@@ -377,6 +412,11 @@ namespace utils {
                 return static_cast<bool>(downfile);
             },
             [&](uint64_t len, uint64_t total) {
+                // 超预算立即中止下载(断点续传: 已写入部分保留, 重跑时续传)
+                if(std::chrono::steady_clock::now() - request_start >= std::chrono::seconds(kDownloadTotalBudgetSec)) {
+                    budget_exceeded = true;
+                    return false;
+                }
                 uint64_t total_ = downloaded_bytes + total;  // 文件总大小
                 uint64_t now_ = downloaded_bytes + len;
                 int percent_ = total_ ? static_cast<int>(now_ * 100 / total_) : 0;
@@ -388,7 +428,10 @@ namespace utils {
             downfile.close();
 
             if(!res) {
-                if(bad_status) {
+                if(budget_exceeded) {
+                    spdlog::error("下载超过单请求总时长预算({} 秒), 已中止(已下载部分保留供续传)", kDownloadTotalBudgetSec);
+                }
+                else if(bad_status) {
                     // 416 Range Not Satisfiable: 临时文件大小与服务器端实际长度错位(资产被重新发布), 续传永久失败
                     // #138 回归发现: 416 在上方响应头回调被中止后 Result 无效(operator bool 为 false),
                     // 原 res->status==416 自愈分支不可达(0.15.3 与 0.61 行为一致, 实测复现);
