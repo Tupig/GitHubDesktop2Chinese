@@ -37,12 +37,15 @@ fi
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-# token 经 http.extraHeader 传递(#145): 不内嵌 URL, 避免落盘 .git/config;
-# 后续 pull/push 均需显式携带
-GIT_AUTH_HEADER="Authorization: token ${GH_TOKEN}"
+# 认证(#145 不落盘): Basic 形式 extraHeader。wiki git 端点对 Actions GITHUB_TOKEN
+# 的 "Authorization: token" scheme 认证返回 401(2026-10-15 实测, #180 引入);
+# Basic 形式(x-access-token)为 URL 内嵌时代(2026-10-11~14)多次成功验证的形式。
+# 公开 wiki 匿名可读, 仅 push 携带凭据
+B64_CRED="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')"
+GIT_AUTH_HEADER="Authorization: Basic ${B64_CRED}"
 
 echo "克隆 Wiki 仓库 ${REPO_FULL}.wiki.git ..."
-git -c "http.extraHeader=${GIT_AUTH_HEADER}" clone --quiet "https://github.com/${REPO_FULL}.wiki.git" "$WORK_DIR/wiki"
+git clone --quiet "https://github.com/${REPO_FULL}.wiki.git" "$WORK_DIR/wiki"
 cd "$WORK_DIR/wiki"
 
 # 镜像语义: 清空 Wiki 工作区（保留 .git）后用文档源覆盖
@@ -58,14 +61,14 @@ fi
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-SRC_SHA="${GITHUB_SHA:-本地手动运行}"
+SRC_SHA="${GITHUB_SHA:-manual}"
 git commit --quiet -m "docs: 同步 docs/wiki → GitHub Wiki（源提交 ${SRC_SHA:0:7}）"
 
 # 推送; 远端瞬时前进（Wiki 被并发编辑）时 rebase 一次重试,
 # 仍失败则报错退出——工作流下次触发会基于最新 HEAD 自动恢复
 if ! git -c "http.extraHeader=${GIT_AUTH_HEADER}" push --quiet; then
   echo "推送被拒（远端有新提交），rebase 后重试 ..."
-  git -c "http.extraHeader=${GIT_AUTH_HEADER}" pull --rebase --quiet
+  git pull --rebase --quiet
   git -c "http.extraHeader=${GIT_AUTH_HEADER}" push --quiet
 fi
 
