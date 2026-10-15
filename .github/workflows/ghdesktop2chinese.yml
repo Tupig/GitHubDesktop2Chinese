@@ -392,7 +392,7 @@ jobs:
             # 部署目标 11.0 为 arm64 产物下限; LTO 与打包后 strip 进一步压缩体积
             ARCH="${{ matrix.arch }}"
             CMAKE_ARCH="$ARCH"
-            for [[ "$ARCH" == "x64" ]]; then CMAKE_ARCH="x86_64"; fi
+            if [[ "$ARCH" == "x64" ]]; then CMAKE_ARCH="x86_64"; fi
             EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=$CMAKE_ARCH")
             EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0")
             EXTRA+=("-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=TRUE")
