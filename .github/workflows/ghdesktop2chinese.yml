@@ -303,7 +303,9 @@ jobs:
 
   # ═════════════════════════════════════════════════
   # 1. 构建矩阵（windows-x64 / macos-x64 / macos-arm64 / linux-x64）
-  #    每平台编译 + 产物功能测试（--help / 非法参数拒绝 / 中文路径完整流程）
+  #    每平台编译 + 产物功能测试
+  #    （Windows 调 tools/ci/smoke-test.ps1 T1-T4 与本地同源#178; macOS/Linux 内联:
+  #      --help / 非法参数拒绝 / 中文路径完整流程）
   #    sccache 编译缓存加速增量构建
   #    触发：push main|tag / PR / 定时 / 手动(auto|build|release)
   # ═════════════════════════════════════════════════
@@ -449,11 +451,15 @@ jobs:
               exit 0
             fi
           fi
+          # #178: Windows 与本地冒烟共用同一用例源(tools/ci/smoke-test.ps1 T1-T4),
+          # 消除内联用例与本地脚本两套平行维护漂移; windows runner 预装 pwsh
+          # CI 构建版本 ci-<sha> 解析为 0.0.0 低于 minversion, -Force 追加 --force 显式继续
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            BIN="build/Release/${EXE_NAME}"
-          else
-            BIN="build/GitHubDesktop2Chinese"
+            pwsh -NoProfile -ExecutionPolicy Bypass -File tools/ci/smoke-test.ps1 -Binary "build/Release/${EXE_NAME}" -Force
+            exit 0
           fi
+          BIN="build/GitHubDesktop2Chinese"
+
           [[ -f "$BIN" ]] || { echo "::error::未找到构建产物 $BIN"; exit 1; }
 
           echo "== 测试1: --help 应 exit 0 =="
@@ -475,8 +481,6 @@ jobs:
           printf '// fixture main\n' > "$FIXTURE/main.js"
           printf '// fixture renderer\n' > "$FIXTURE/renderer.js"
           set +e
-          # CI 构建版本为 ci-<sha> 占位符(解析为 0.0.0, 低于映射文件 minversion):
-          # --nopause 下默认中止, 加 --force 显式继续并顺带覆盖该强制执行路径
           OUT="$(echo "" | "$BIN" -g "$FIXTURE" --nopause --force 2>&1)"
           CODE=$?
           set -e
