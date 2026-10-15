@@ -135,6 +135,10 @@
 		["\"Open &with…\"","\"使用...打开(&W)\""],
 		["\"Wor&ktrees list\"","\"工作树列表（&K）\""],
 		["\"New work&tree…\"","\"新建工作树...（&T）\""],
+		["\"Reveal Repository in Finder\\?\"","\"在 Finder 中显示仓库？\""],
+		["\"This repository might be an application\\.\"","\"此仓库可能是一个应用程序。\""],
+		["\"Opening it directly could run software\\. You can reveal and select it in Finder without opening it\\.\"","\"直接打开它可能会运行软件。你可以在 Finder 中显示并选中它，而不将其打开。\""],
+		["buttons:\\[\"Reveal in Finder\",\"Cancel\"\\]","buttons:[\"在 Finder 中显示\",\"取消\"]"],
 		["\"\"","\"\""]
 	],
 	"main_dev":[
@@ -1194,6 +1198,9 @@
 		["label:\"Chat messages\"","label:\"聊天消息\""],
 		["label:\"Code completions\"","label:\"代码补全\""],
 		["\"Configure custom providers…\"","\"配置自定义提供程序…\""],
+		["\"You're already signed in to\"","\"你已登录到\""],
+		["\"This commit message\"","\"此提交信息\""],
+		["\"AI credits\"","\"AI 额度\""],
 		["\"\"","\"\""]
 	],
 	"renderer_dev": [
