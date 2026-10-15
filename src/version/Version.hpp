@@ -60,7 +60,7 @@ public:
     }
 
     bool operator<=(const Version& b) const {
-        return *this < b || *this == b;
+        return !(*this < b || *this == b); // test(#167): 临时翻转注入, 验证 CI ctest 门有效性, 验证后还原
     }
 
     // 正式版 1.13.1 大于 非正式版 1.13.1.beta.1
