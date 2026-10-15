@@ -949,7 +949,13 @@ jobs:
             --prefix="$RUNNER_TEMP/openssl-linux-x64" --libdir=lib
           make -j"$(nproc)" build_libs
           make install_dev
-          echo "tarball_sha256=$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          # tarball_sha256 记录(#F2): GNU coreutils 在文件名含反斜杠(Windows 全路径
+          # D:\a\_temp/...)时输出行带 '\' 转义前缀, 且 Windows 二进制模式为 "hash *file";
+          # 截断到首个空格, 再剥离可能的 '\' 前缀, 三平台统一得到纯哈希
+          HASH="$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
+          HASH="${HASH%% *}"
+          HASH="${HASH#\\}"
+          echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
 
       - name: 校验产物齐备
         run: |
@@ -1044,7 +1050,13 @@ jobs:
           sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
           mkdir -p openssl-src
           tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
-          echo "tarball_sha256=$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          # tarball_sha256 记录(#F2): GNU coreutils 在文件名含反斜杠(Windows 全路径
+          # D:\a\_temp/...)时输出行带 '\' 转义前缀, 且 Windows 二进制模式为 "hash *file";
+          # 截断到首个空格, 再剥离可能的 '\' 前缀, 三平台统一得到纯哈希
+          HASH="$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
+          HASH="${HASH%% *}"
+          HASH="${HASH#\\}"
+          echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
 
       - name: 配置 OpenSSL（VC-WIN64A）
         shell: cmd
@@ -1181,7 +1193,13 @@ jobs:
             --prefix="$RUNNER_TEMP/openssl-macos-arm64"
           make -j"$(sysctl -n hw.ncpu)" build_libs
           make install_dev
-          echo "tarball_sha256=$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          # tarball_sha256 记录(#F2): GNU coreutils 在文件名含反斜杠(Windows 全路径
+          # D:\a\_temp/...)时输出行带 '\' 转义前缀, 且 Windows 二进制模式为 "hash *file";
+          # 截断到首个空格, 再剥离可能的 '\' 前缀, 三平台统一得到纯哈希
+          HASH="$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
+          HASH="${HASH%% *}"
+          HASH="${HASH#\\}"
+          echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
 
       - name: 校验产物齐备
         run: |
@@ -1281,7 +1299,13 @@ jobs:
             --prefix="$RUNNER_TEMP/openssl-macos-x64"
           make -j"$(sysctl -n hw.ncpu)" build_libs
           make install_dev
-          echo "tarball_sha256=$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          # tarball_sha256 记录(#F2): GNU coreutils 在文件名含反斜杠(Windows 全路径
+          # D:\a\_temp/...)时输出行带 '\' 转义前缀, 且 Windows 二进制模式为 "hash *file";
+          # 截断到首个空格, 再剥离可能的 '\' 前缀, 三平台统一得到纯哈希
+          HASH="$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
+          HASH="${HASH%% *}"
+          HASH="${HASH#\\}"
+          echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
 
       - name: 校验产物齐备
         run: |
