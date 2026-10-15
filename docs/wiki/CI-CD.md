@@ -24,7 +24,7 @@
 | `maintain` | 质量校验 + 工具自检 + 自动维护（失效检测 + 候选提取 + Issue） |
 | `vendor` | 仅产库 OpenSSL 静态库（三平台 artifact，版本由 `openssl-version` 指定） |
 
-`version` 为可选覆盖：**留空即自动递增版本**（如 `0.0.1 → 0.0.2`，patch 满 100 进位 minor 并重置为 1）；填写时不带 `v` 前缀（如 `0.0.2`），必须为 `x.y.z` 纯数字，否则 CI 在版本号校验处直接失败；仅对 build / auto / release 的产物命名与发布生效。`openssl-version` 仅 `type=vendor` 生效：产库 OpenSSL 版本（不带 `v` 前缀，须为 `3.x.y` LTS），留空默认 `3.5.9`。
+`version` 为可选覆盖：**留空即自动递增版本**（如 `0.0.1 → 0.0.2`，patch 满 100 进位 minor 并重置为 1）；填写时不带 `v` 前缀（如 `0.0.2`），必须为 `x.y.z` 纯数字，否则 CI 在版本号校验处直接失败；仅对 build / auto / release 的产物命名与发布生效。`openssl-version` 仅 `type=vendor` 生效：产库 OpenSSL 版本（不带 `v` 前缀，如 `3.5.9`），留空自动取 **3.5 LTS 系列最新 patch**（官方政策：3.5 为 LTS 支持至 2030-04，4.0 非 LTS 不采纳）。
 
 并发控制：同一 ref 的重复触发会取消进行中的旧运行（PR 场景 `cancel-in-progress`），避免排队堆积。
 
@@ -187,7 +187,7 @@ Execution scope per `type` for manual (`workflow_dispatch`) runs:
 | `maintain` | Quality validation + tool self-tests + maintenance (invalid detection + candidate extraction + Issues) |
 | `vendor` | OpenSSL static-library vendoring only (three-platform artifacts; version via `openssl-version`) |
 
-`version` is an optional override: **leave it empty to auto-increment the version** (e.g. `0.0.1 → 0.0.2`; a full patch of 100 carries into minor, resetting it to 1); when provided, omit the `v` prefix (e.g. `0.0.2`) and it must be plain digits `x.y.z`, otherwise CI fails at version validation; it only affects artifact naming and releases for build / auto / release. `openssl-version` only takes effect for `type=vendor`: the OpenSSL version to vendor (no `v` prefix, must be `3.x.y` LTS); empty defaults to `3.5.9`.
+`version` is an optional override: **leave it empty to auto-increment the version** (e.g. `0.0.1 → 0.0.2`; a full patch of 100 carries into minor, resetting it to 1); when provided, omit the `v` prefix (e.g. `0.0.2`) and it must be plain digits `x.y.z`, otherwise CI fails at version validation; it only affects artifact naming and releases for build / auto / release. `openssl-version` only takes effect for `type=vendor`: the OpenSSL version to vendor (no `v` prefix, e.g. `3.5.9`); empty auto-selects the **latest patch in the 3.5 LTS series** (per official policy: 3.5 is LTS supported until 2030-04; 4.0 is non-LTS and not adopted).
 
 Concurrency: repeated triggers for the same ref cancel older in-progress runs (`cancel-in-progress` in the PR scenario), avoiding queue pile-ups.
 

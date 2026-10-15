@@ -25,14 +25,15 @@
 #   注5: PR 打 vendor-openssl 标签触发 labeled 事件, 单次产库四连并行产库;
 #        labeled 运行取消同 PR 进行中的常规运行, 完成后重跑 PR 常规检查;
 #        移除后重加标签可重新产库
-#   注6: 手动 vendor 经 openssl-version 输入指定版本(留空自动取官方最新 Release, 注7), 与常规运行共享
+#   注6: 手动 vendor 经 openssl-version 输入指定版本(留空自动取 3.5 LTS 系列最新 patch, 注7), 与常规运行共享
 #        concurrency 组(产库期间 push main 排队)
-#   注7: 产库版本强制跟随 openssl/openssl 官方最新 Release(供应链): 四连全部成功后
-#        OpensslVendorPR 校验所产版本 == 官方最新 Release, 否则拒绝开入库 PR
+#   注7: 产库版本强制跟随 openssl/openssl 3.5 LTS 系列最新 patch(供应链; 官方政策
+#        openssl-library.org/policies/releasestrat: 3.5 为 LTS 支持至 2030-04, 4.0 非 LTS 不采纳):
+#        四连全部成功后 OpensslVendorPR 校验所产版本 == 3.5 LTS 系列最新, 否则拒绝开入库 PR
 #   注8: 定时构建失败通知(#131): 任一任务失败时 CiNotify 创建/更新单条 "[CI 失败]"
 #        Issue(连续失败计数, 恢复后自动关闭); 仅限定时触发——push/PR 失败在 Actions/PR
 #        页即时可见, 无需 Issue 渠道
-#   注9: OpenSSL 版本定时检测(周一 UTC 02:00): 查官方最新 Release, 与仓库当前版本对比;
+#   注9: OpenSSL 版本定时检测(周一 UTC 02:00): 查 3.5 LTS 系列最新, 与仓库当前版本对比;
 #        有新版本 → 自动触发产库并行矩阵 + 开入库 PR; 无新版本 → 跳过
 #   防重复: push 仅绑定 main 与 tag → PR 分支的推送不会二次触发(PR 由 pull_request 单路径负责);
 #           同一 PR 连续推送由 concurrency 取消陈旧运行
@@ -52,14 +53,14 @@
 #                         ├ 自动维护: 失效检测 + 候选提取（原 auto-maintain）
 #                         ├ 同步 docs/wiki → GitHub Wiki（原 sync-wiki）
 #                         └ 构建跳过说明（原 build-skip-notice, 见注4）
-#   4. OpensslCheck       OpenSSL 版本定时检测（周一 UTC 02:00）: 查官方最新 vs 仓库当前
+#   4. OpensslCheck       OpenSSL 版本定时检测（周一 UTC 02:00）: 查 3.5 LTS 系列最新 vs 仓库当前
 #   5. OpensslLinux       产库 OpenSSL（linux x64 静态库; PR 标签 vendor-openssl / 手动 vendor / OpensslCheck 触发）
 #   6. OpensslWin         产库 OpenSSL（windows x64 .lib; 同上触发, 产物用于替换内置库）
 #   7. OpensslMacosArm64  产库 OpenSSL（macOS arm64 交叉编译; 同上触发, macos-15 原生 ARM）
 #   8. OpensslMacosX64    产库 OpenSSL（macOS x64 交叉编译; 同上触发, macos-15-intel 原生 x64）
 #   9. OpensslVerify      产库验证（四连全部成功后, 组装 third_party, 四平台矩阵构建验证新库可用）
 #  10. OpensslVendorPR   产库自动开 PR（验证通过后组装 third_party 并自动开入库 PR,
-#                         版本须为官方最新 Release 见注7; GITHUB_TOKEN PR 不触发 CI,
+#                         版本须为 3.5 LTS 系列最新 见注7; GITHUB_TOKEN PR 不触发 CI,
 #                         由维护者按 PR 内审查清单确认后合并）
 #  11. Release            汇总产物并发布
 #  12. CiNotify           CI 失败通知（仅定时构建, #131）: 有失败 job 时创建/更新单条
@@ -142,7 +143,7 @@ on:
     - cron: "23 1 * * *"
     # OpenSSL 版本定时检测: 每周一 UTC 02:00, 与每日构建错开避免资源竞争
     - cron: "0 2 * * 1"
-  # OpenSSL 版本定时检测: 每周一 UTC 02:00（北京时间 10:00）, 查官方最新 Release vs 仓库当前版本
+  # OpenSSL 版本定时检测: 每周一 UTC 02:00（北京时间 10:00）, 查 3.5 LTS 系列最新 vs 仓库当前版本
   # 与每日构建错开, 避免同时段资源竞争; 有新版本时自动触发产库并行矩阵 + 开入库 PR
   workflow_dispatch:
     inputs:
@@ -159,7 +160,7 @@ on:
           - vendor
           - release
       openssl-version:
-        description: "OpenSSL 产库版本（不带 v/openssl- 前缀, 如 3.5.9; 仅 type=vendor 生效; 留空自动取官方最新 Release）"
+        description: "OpenSSL 产库版本（不带 v/openssl- 前缀, 如 3.5.9; 仅 type=vendor 生效; 留空自动取 3.5 LTS 系列最新）"
         required: false
         default: ""
         type: string
@@ -422,6 +423,16 @@ jobs:
             JOBS="$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
             cmake --build build --config "$BUILD_TYPE" -j "$JOBS"
           fi
+
+      # ── #167: version_test 单测真实执行(此前仅被构建从不运行, 104 项断言闲置) ──
+      # 四平台均为原生 runner(含 macos-15 原生 ARM), 无交叉编译, 测试可原生执行;
+      # --no-tests=error: version_test 为唯一注册测试, 0 项被发现视为 CTest 接入回归
+      - name: 运行单元测试 (ctest)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # MSVC 多配置生成器须 -C; 单配置生成器(Unix Makefiles)忽略 -C 无害
+          ctest --test-dir build --output-on-failure -C "$BUILD_TYPE" --no-tests=error
 
       # ── 产物验证：功能冒烟（x64 原生执行）+ macOS 架构/自包含断言 ──
       - name: 产物功能测试
@@ -830,7 +841,7 @@ jobs:
 
   # ═════════════════════════════════════════════════
   # 4. OpenSSL 版本定时检测（周一 UTC 02:00）
-  #    查官方最新 Release, 与仓库当前版本对比; 有新版本输出 trigger_vendor=true
+  #    查 3.5 LTS 系列最新, 与仓库当前版本对比; 有新版本输出 trigger_vendor=true
   # ═════════════════════════════════════════════════
   OpensslCheck:
     name: OpenSSL 版本检测
@@ -846,30 +857,39 @@ jobs:
       - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: 检测 OpenSSL 最新版本
+      - name: 检测 OpenSSL 3.5 LTS 系列最新版本
         id: check
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          LATEST_TAG="$(curl --fail --location --retry 3 --retry-delay 5 -sS \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/openssl/openssl/releases/latest" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')"
-          LATEST_VER="${LATEST_TAG#openssl-}"
+          # 版本策略: 跟随 3.5 LTS 系列最新 patch（官方政策 openssl-library.org/policies/releasestrat:
+          # 3.5 为 LTS 支持至 2030-04; 4.0 非 LTS 2027-05 到期, 不采纳——LTS 维护成本最低）。
+          # 正则精确匹配 3.5.x 纯数字 patch, 排除 beta/alpha 等预发布; 数值排序取最大
+          LATEST_VER=""
+          for attempt in 1 2 3; do
+            LATEST_VER="$(gh api "repos/openssl/openssl/releases?per_page=100" \
+              --jq '[.[] | select(.tag_name | test("^openssl-3\\.5\\.[0-9]+$")) | .tag_name | ltrimstr("openssl-")] | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null || true)"
+            [[ -n "$LATEST_VER" && "$LATEST_VER" != "null" ]] && break
+            echo "::warning::查询 OpenSSL 3.5 LTS 最新版本失败(第 ${attempt} 次), 10 秒后重试"
+            sleep 10
+          done
+          if [[ -z "$LATEST_VER" || "$LATEST_VER" == "null" ]]; then
+            echo "::error::无法查询 OpenSSL 3.5 LTS 系列最新版本（连续 3 次失败, 请检查网络或稍后重试）"
+            exit 1
+          fi
           CUR_VER="$(sed -n 's/^# *define *OPENSSL_VERSION_STR "\(.*\)".*/\1/p' \
             third_party/openssl/include/openssl/opensslv.h | head -n1)"
           echo "latest_ver=$LATEST_VER" >> "$GITHUB_OUTPUT"
           echo "current_ver=$CUR_VER" >> "$GITHUB_OUTPUT"
-          echo "官方最新: $LATEST_VER, 仓库当前: $CUR_VER"
+          echo "3.5 LTS 系列最新: $LATEST_VER, 仓库当前: $CUR_VER"
           if [[ "$CUR_VER" != "$LATEST_VER" ]]; then
             echo "trigger_vendor=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::检测到 OpenSSL 新版本: $CUR_VER -> $LATEST_VER, 将触发产库"
+            echo "::notice::检测到 3.5 LTS 系列新版本: $CUR_VER -> $LATEST_VER, 将触发产库"
           else
             echo "trigger_vendor=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::OpenSSL 已是最新: $CUR_VER, 跳过产库"
+            echo "::notice::已是最新: $CUR_VER, 跳过产库"
           fi
 
   # ═════════════════════════════════════════════════
@@ -905,22 +925,24 @@ jobs:
           if [[ -n "$INPUT_VER" ]]; then
             OSSL_VER="$INPUT_VER"
           else
-            # 留空自动取官方最新 Release(注7): 与 OpensslVendorPR 校验同源。
-            # 防御式解析(#F1): 用 gh CLI 解析 JSON(跨平台行为一致, 避开 macOS BSD grep/sed 与 bash 3.2
+            # 留空自动取 3.5 LTS 系列最新 patch(注7): 与 OpensslVendorPR 校验同源。
+            # 版本策略: 3.5 为 LTS 支持至 2030-04, 4.0 非 LTS 不采纳(维护成本最低);
+            # 防御式解析(#F1): gh CLI 解析 JSON(跨平台行为一致, 避开 macOS BSD grep/sed 与 bash 3.2
             # 的管道差异——此前 curl|grep|sed 在 macOS 失败路径下致 set -u 报 unbound variable);
             # 变量先初始化 + 3 次重试 + 失败给出明确错误
             for attempt in 1 2 3; do
-              LATEST_TAG="$(gh api repos/openssl/openssl/releases/latest --jq '.tag_name' 2>/dev/null || true)"
+              LATEST_TAG="$(gh api "repos/openssl/openssl/releases?per_page=100" \
+                --jq '[.[] | select(.tag_name | test("^openssl-3\\.5\\.[0-9]+$")) | .tag_name | ltrimstr("openssl-")] | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null || true)"
               OSSL_VER="${LATEST_TAG#openssl-}"
-              [[ -n "$OSSL_VER" ]] && break
-              echo "::warning::获取 OpenSSL 最新 Release 失败(第 ${attempt} 次), 10 秒后重试"
+              [[ -n "$OSSL_VER" && "$OSSL_VER" != "null" ]] && break
+              echo "::warning::获取 OpenSSL 3.5 LTS 最新版本失败(第 ${attempt} 次), 10 秒后重试"
               sleep 10
             done
-            if [[ -z "$OSSL_VER" ]]; then
-              echo "::error::无法获取 OpenSSL 官方最新 Release（连续 3 次失败, 请检查网络或稍后重试）"
+            if [[ -z "$OSSL_VER" || "$OSSL_VER" == "null" ]]; then
+              echo "::error::无法获取 OpenSSL 3.5 LTS 系列最新版本（连续 3 次失败, 请检查网络或稍后重试）"
               exit 1
             fi
-            echo "未指定 openssl-version, 自动取官方最新 Release: $OSSL_VER"
+            echo "未指定 openssl-version, 自动取 3.5 LTS 系列最新: $OSSL_VER"
           fi
           if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::openssl-version 格式非法: $OSSL_VER（应为 X.Y.Z, 不带 v/openssl- 前缀）"
@@ -1010,22 +1032,24 @@ jobs:
           if [[ -n "$INPUT_VER" ]]; then
             OSSL_VER="$INPUT_VER"
           else
-            # 留空自动取官方最新 Release(注7): 与 OpensslVendorPR 校验同源。
-            # 防御式解析(#F1): 用 gh CLI 解析 JSON(跨平台行为一致, 避开 macOS BSD grep/sed 与 bash 3.2
+            # 留空自动取 3.5 LTS 系列最新 patch(注7): 与 OpensslVendorPR 校验同源。
+            # 版本策略: 3.5 为 LTS 支持至 2030-04, 4.0 非 LTS 不采纳(维护成本最低);
+            # 防御式解析(#F1): gh CLI 解析 JSON(跨平台行为一致, 避开 macOS BSD grep/sed 与 bash 3.2
             # 的管道差异——此前 curl|grep|sed 在 macOS 失败路径下致 set -u 报 unbound variable);
             # 变量先初始化 + 3 次重试 + 失败给出明确错误
             for attempt in 1 2 3; do
-              LATEST_TAG="$(gh api repos/openssl/openssl/releases/latest --jq '.tag_name' 2>/dev/null || true)"
+              LATEST_TAG="$(gh api "repos/openssl/openssl/releases?per_page=100" \
+                --jq '[.[] | select(.tag_name | test("^openssl-3\\.5\\.[0-9]+$")) | .tag_name | ltrimstr("openssl-")] | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null || true)"
               OSSL_VER="${LATEST_TAG#openssl-}"
-              [[ -n "$OSSL_VER" ]] && break
-              echo "::warning::获取 OpenSSL 最新 Release 失败(第 ${attempt} 次), 10 秒后重试"
+              [[ -n "$OSSL_VER" && "$OSSL_VER" != "null" ]] && break
+              echo "::warning::获取 OpenSSL 3.5 LTS 最新版本失败(第 ${attempt} 次), 10 秒后重试"
               sleep 10
             done
-            if [[ -z "$OSSL_VER" ]]; then
-              echo "::error::无法获取 OpenSSL 官方最新 Release（连续 3 次失败, 请检查网络或稍后重试）"
+            if [[ -z "$OSSL_VER" || "$OSSL_VER" == "null" ]]; then
+              echo "::error::无法获取 OpenSSL 3.5 LTS 系列最新版本（连续 3 次失败, 请检查网络或稍后重试）"
               exit 1
             fi
-            echo "未指定 openssl-version, 自动取官方最新 Release: $OSSL_VER"
+            echo "未指定 openssl-version, 自动取 3.5 LTS 系列最新: $OSSL_VER"
           fi
           if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::openssl-version 格式非法: $OSSL_VER（应为 X.Y.Z, 不带 v/openssl- 前缀）"
@@ -1147,22 +1171,24 @@ jobs:
           if [[ -n "$INPUT_VER" ]]; then
             OSSL_VER="$INPUT_VER"
           else
-            # 留空自动取官方最新 Release(注7): 与 OpensslVendorPR 校验同源。
-            # 防御式解析(#F1): 用 gh CLI 解析 JSON(跨平台行为一致, 避开 macOS BSD grep/sed 与 bash 3.2
+            # 留空自动取 3.5 LTS 系列最新 patch(注7): 与 OpensslVendorPR 校验同源。
+            # 版本策略: 3.5 为 LTS 支持至 2030-04, 4.0 非 LTS 不采纳(维护成本最低);
+            # 防御式解析(#F1): gh CLI 解析 JSON(跨平台行为一致, 避开 macOS BSD grep/sed 与 bash 3.2
             # 的管道差异——此前 curl|grep|sed 在 macOS 失败路径下致 set -u 报 unbound variable);
             # 变量先初始化 + 3 次重试 + 失败给出明确错误
             for attempt in 1 2 3; do
-              LATEST_TAG="$(gh api repos/openssl/openssl/releases/latest --jq '.tag_name' 2>/dev/null || true)"
+              LATEST_TAG="$(gh api "repos/openssl/openssl/releases?per_page=100" \
+                --jq '[.[] | select(.tag_name | test("^openssl-3\\.5\\.[0-9]+$")) | .tag_name | ltrimstr("openssl-")] | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null || true)"
               OSSL_VER="${LATEST_TAG#openssl-}"
-              [[ -n "$OSSL_VER" ]] && break
-              echo "::warning::获取 OpenSSL 最新 Release 失败(第 ${attempt} 次), 10 秒后重试"
+              [[ -n "$OSSL_VER" && "$OSSL_VER" != "null" ]] && break
+              echo "::warning::获取 OpenSSL 3.5 LTS 最新版本失败(第 ${attempt} 次), 10 秒后重试"
               sleep 10
             done
-            if [[ -z "$OSSL_VER" ]]; then
-              echo "::error::无法获取 OpenSSL 官方最新 Release（连续 3 次失败, 请检查网络或稍后重试）"
+            if [[ -z "$OSSL_VER" || "$OSSL_VER" == "null" ]]; then
+              echo "::error::无法获取 OpenSSL 3.5 LTS 系列最新版本（连续 3 次失败, 请检查网络或稍后重试）"
               exit 1
             fi
-            echo "未指定 openssl-version, 自动取官方最新 Release: $OSSL_VER"
+            echo "未指定 openssl-version, 自动取 3.5 LTS 系列最新: $OSSL_VER"
           fi
           if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::openssl-version 格式非法: $OSSL_VER（应为 X.Y.Z, 不带 v/openssl- 前缀）"
@@ -1253,22 +1279,24 @@ jobs:
           if [[ -n "$INPUT_VER" ]]; then
             OSSL_VER="$INPUT_VER"
           else
-            # 留空自动取官方最新 Release(注7): 与 OpensslVendorPR 校验同源。
-            # 防御式解析(#F1): 用 gh CLI 解析 JSON(跨平台行为一致, 避开 macOS BSD grep/sed 与 bash 3.2
+            # 留空自动取 3.5 LTS 系列最新 patch(注7): 与 OpensslVendorPR 校验同源。
+            # 版本策略: 3.5 为 LTS 支持至 2030-04, 4.0 非 LTS 不采纳(维护成本最低);
+            # 防御式解析(#F1): gh CLI 解析 JSON(跨平台行为一致, 避开 macOS BSD grep/sed 与 bash 3.2
             # 的管道差异——此前 curl|grep|sed 在 macOS 失败路径下致 set -u 报 unbound variable);
             # 变量先初始化 + 3 次重试 + 失败给出明确错误
             for attempt in 1 2 3; do
-              LATEST_TAG="$(gh api repos/openssl/openssl/releases/latest --jq '.tag_name' 2>/dev/null || true)"
+              LATEST_TAG="$(gh api "repos/openssl/openssl/releases?per_page=100" \
+                --jq '[.[] | select(.tag_name | test("^openssl-3\\.5\\.[0-9]+$")) | .tag_name | ltrimstr("openssl-")] | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null || true)"
               OSSL_VER="${LATEST_TAG#openssl-}"
-              [[ -n "$OSSL_VER" ]] && break
-              echo "::warning::获取 OpenSSL 最新 Release 失败(第 ${attempt} 次), 10 秒后重试"
+              [[ -n "$OSSL_VER" && "$OSSL_VER" != "null" ]] && break
+              echo "::warning::获取 OpenSSL 3.5 LTS 最新版本失败(第 ${attempt} 次), 10 秒后重试"
               sleep 10
             done
-            if [[ -z "$OSSL_VER" ]]; then
-              echo "::error::无法获取 OpenSSL 官方最新 Release（连续 3 次失败, 请检查网络或稍后重试）"
+            if [[ -z "$OSSL_VER" || "$OSSL_VER" == "null" ]]; then
+              echo "::error::无法获取 OpenSSL 3.5 LTS 系列最新版本（连续 3 次失败, 请检查网络或稍后重试）"
               exit 1
             fi
-            echo "未指定 openssl-version, 自动取官方最新 Release: $OSSL_VER"
+            echo "未指定 openssl-version, 自动取 3.5 LTS 系列最新: $OSSL_VER"
           fi
           if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::openssl-version 格式非法: $OSSL_VER（应为 X.Y.Z, 不带 v/openssl- 前缀）"
@@ -1486,7 +1514,7 @@ jobs:
   # ═════════════════════════════════════════════════
   # 10. 产库自动开 PR（验证通过后组装 third_party 并自动开入库 PR, 由维护者审查合并）
   #    GITHUB_TOKEN 创建的 PR 不触发 CI(GitHub 防递归), 审查清单见 PR 描述;
-  #    所产版本强制等于 openssl/openssl 官方最新 Release(注7), 防止产旧版本入库
+  #    所产版本强制等于 openssl/openssl 3.5 LTS 系列最新(注7), 防止产旧版本入库
   # ═════════════════════════════════════════════════
   OpensslVendorPR:
     name: 产库自动开 PR
@@ -1517,7 +1545,7 @@ jobs:
         with:
           ref: main
 
-      - name: 校验所产版本为官方最新 Release
+      - name: 校验所产版本为 3.5 LTS 系列最新
         run: |
           set -euo pipefail
           V_WIN="${{ needs.OpensslWin.outputs.resolved_ver }}"
@@ -1528,15 +1556,17 @@ jobs:
             echo "  linux=$OSSL_VER windows=$V_WIN macos-arm64=$V_ARM macos-x64=$V_X64"
             exit 1
           fi
-          LATEST_TAG="$(curl --fail --location --retry 3 --retry-delay 5 -sS \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/openssl/openssl/releases/latest" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')"
-          LATEST_VER="${LATEST_TAG#openssl-}"
-          echo "官方最新 Release: $LATEST_VER（$LATEST_TAG）"
+          # 版本策略(注7): 产库须跟随 3.5 LTS 系列最新 patch(3.5 为 LTS 支持至 2030-04;
+          # 4.0 非 LTS 不采纳)。正则精确匹配 3.5.x 纯数字 patch, 数值排序取最大
+          LATEST_VER="$(gh api "repos/openssl/openssl/releases?per_page=100" \
+            --jq '[.[] | select(.tag_name | test("^openssl-3\\.5\\.[0-9]+$")) | .tag_name | ltrimstr("openssl-")] | sort_by(split(".") | map(tonumber)) | last')"
+          if [[ -z "$LATEST_VER" || "$LATEST_VER" == "null" ]]; then
+            echo "::error::无法查询 OpenSSL 3.5 LTS 系列最新版本（供应链校验依赖）"
+            exit 1
+          fi
+          echo "3.5 LTS 系列最新: $LATEST_VER"
           if [[ "$OSSL_VER" != "$LATEST_VER" ]]; then
-            echo "::error::所产版本 $OSSL_VER 非官方最新 Release（最新为 $LATEST_VER）。产库必须跟随最新版本, 请以最新版本重新触发"
+            echo "::error::所产版本 $OSSL_VER 非 3.5 LTS 系列最新（最新为 $LATEST_VER）。产库须跟随 LTS 最新 patch, 请以最新版本重新触发"
             exit 1
           fi
 
@@ -1608,7 +1638,7 @@ jobs:
             echo "- 触发运行：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "- 上游源码包：\`openssl-$OSSL_VER.tar.gz\`（[官方 Release](https://github.com/openssl/openssl/releases/tag/openssl-$OSSL_VER)）"
             echo "- 源码包 SHA256（四平台产库任务各自独立下载并经官方 \`.sha256\` 校验，已验证四值一致）：\`${{ needs.OpensslLinux.outputs.tarball_sha256 }}\`"
-            echo "- 官方最新 Release 校验：所产版本已核验为 openssl/openssl 最新 Release"
+            echo "- 3.5 LTS 系列最新校验：所产版本已核验为 openssl/openssl 3.5 LTS 最新 patch"
             echo ""
             echo "### 产物清单与 SHA256"
             echo ""
@@ -1651,7 +1681,7 @@ jobs:
           git checkout -b "$BRANCH"
           git add third_party
           git commit -m "vendor: OpenSSL $OSSL_VER 四平台静态库入库（产库自动 PR）" \
-            -m "版本: $CUR -> $OSSL_VER（官方最新 Release）; 产物: linux-x64 / windows-x64 / macos-arm64 / macos-x64; 溯源与审查清单见 PR 描述"
+            -m "版本: $CUR -> $OSSL_VER（3.5 LTS 系列最新）; 产物: linux-x64 / windows-x64 / macos-arm64 / macos-x64; 溯源与审查清单见 PR 描述"
           git push origin "$BRANCH"
           gh pr create --title "vendor: OpenSSL $OSSL_VER 四平台静态库入库" --body-file pr-body.md
 
