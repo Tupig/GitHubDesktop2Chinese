@@ -6,11 +6,14 @@
     { "regex": "\\(\\?<[A-Za-z_]", "why": "命名分组 (?<name>)" },
     { "regex": "\\(\\?P[<a-zA-Z]", "why": "Python 命名分组 (?P<name>)" },
     { "regex": "\\\\p\\{", "why": "Unicode 属性转义 \\p{...}" },
-    { "regex": "\\(\\?[a-zA-Z]+[):]", "why": "内联 flag (?i:...)" }
+    { "regex": "\\(\\?[a-zA-Z-]+[):]", "why": "内联 flag (?i:...) / (?i-s:...) / (?-i:...)" },
+    { "regex": "\\(\\?>", "why": "原子分组 (?>...)" },
+    { "regex": "\\(\\?\\(", "why": "条件分组 (?(...)" },
+    { "regex": "\\(\\?#", "why": "注释分组 (?#...)" }
   ],
   "redos_heuristic": {
     "comment": "ReDoS 启发式（#128 CI 侧命中即阻断；check-invalid.js 侧保持报告语义）：嵌套量词在长文本上可能灾难性回溯；check-invalid.js 与 check-localization.py 共用（#119 单一事实来源）",
-    "regex": "\\([^()]*[+*][^()]*\\)\\s*[+*{]",
+    "regex": "\\(.*[+*].*\\)\\s*[+*{]",
     "why": "疑似灾难性回溯(嵌套量词)"
   }
 }
