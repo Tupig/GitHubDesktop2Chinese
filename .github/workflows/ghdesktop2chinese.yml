@@ -1560,6 +1560,16 @@ jobs:
             echo "  linux=$H_LINUX windows=$H_WIN macos-arm64=$H_ARM macos-x64=$H_X64"
             exit 1
           fi
+          # 同版本跳过判断(#F3): 必须在覆盖 third_party 之前读取仓库现有版本。
+          # 此前读取时机在 cp 覆盖之后, 读到的恒为刚复制的新版本 → skip_pr 恒真, 自动开 PR 永不生效;
+          # 同版本时提前退出, 既不开 PR 也避免无意义的文件复制
+          cur="$(sed -n 's/^# *define *OPENSSL_VERSION_STR "\(.*\)".*/\1/p' third_party/openssl/include/openssl/opensslv.h | head -n1)"
+          echo "cur_ver=$cur" >> "$GITHUB_OUTPUT"
+          if [[ "$cur" == "$OSSL_VER" ]]; then
+            echo "::notice::仓库 third_party 已是 $OSSL_VER, 跳过开 PR"
+            echo "skip_pr=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           declare -A DST=(
             [openssl-linux-x64]="third_party/openssl-linux-x64"
             [openssl-windows-x64]="third_party/openssl"
@@ -1582,12 +1592,6 @@ jobs:
             cp -a "$src/include" "$src/lib" "$dst/"
           done
           echo "四平台产物组装完成, 版本宏一致: $OSSL_VER"
-          cur="$(sed -n 's/^# *define *OPENSSL_VERSION_STR "\(.*\)".*/\1/p' third_party/openssl/include/openssl/opensslv.h | head -n1)"
-          echo "cur_ver=$cur" >> "$GITHUB_OUTPUT"
-          if [[ "$cur" == "$OSSL_VER" ]]; then
-            echo "::notice::仓库 third_party 已是 $OSSL_VER, 跳过开 PR"
-            echo "skip_pr=true" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: 生成 PR 描述
         run: |
