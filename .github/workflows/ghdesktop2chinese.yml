@@ -8,6 +8,7 @@
 #   PR（目标 main）         ✓        ✓         ✓(注3)       ✓(注5) -
 #   定时 每日 UTC 01:23    ✓(注4)   ✓         ✓(注2)       -     ✓（仅构建相关变更, 补丁号+1）
 #                                                ↳ 失败时 CI 失败通知 Issue(注8)
+#   OpenSSL 定时 UTC 02:00  -        -         ✓(注9)       ✓     -
 #   手动 build             ✓        -         -            -     -
 #   手动 security          -        ✓         ✓            -     -
 #   手动 maintain          -        ✓         ✓(维护块)    -     -
@@ -21,7 +22,7 @@
 #   注4: 构建差异检测(#81): 定时与 push main 且"无待发布变更"时, 若与上次成功构建
 #        的构建相关路径也无差异 → 跳过四平台构建矩阵, 由 CodeqlScan 的构建跳过说明块输出说明;
 #        PR(质量门每次须验证)/tag(连着发布)/手动触发(尊重用户意图)始终构建
-#   注5: PR 打 vendor-openssl 标签触发 labeled 事件, 单次产库四连串行产库;
+#   注5: PR 打 vendor-openssl 标签触发 labeled 事件, 单次产库四连并行产库;
 #        labeled 运行取消同 PR 进行中的常规运行, 完成后重跑 PR 常规检查;
 #        移除后重加标签可重新产库
 #   注6: 手动 vendor 经 openssl-version 输入指定版本(留空自动取官方最新 Release, 注7), 与常规运行共享
@@ -31,41 +32,48 @@
 #   注8: 定时构建失败通知(#131): 任一任务失败时 CiNotify 创建/更新单条 "[CI 失败]"
 #        Issue(连续失败计数, 恢复后自动关闭); 仅限定时触发——push/PR 失败在 Actions/PR
 #        页即时可见, 无需 Issue 渠道
+#   注9: OpenSSL 版本定时检测(周一 UTC 02:00): 查官方最新 Release, 与仓库当前版本对比;
+#        有新版本 → 自动触发产库并行矩阵 + 开入库 PR; 无新版本 → 跳过
 #   防重复: push 仅绑定 main 与 tag → PR 分支的推送不会二次触发(PR 由 pull_request 单路径负责);
 #           同一 PR 连续推送由 concurrency 取消陈旧运行
 #   边界:   发布类(auto/release)仅限 main 触发(防特性分支误发布); 其他 ref 可跑 build/security/maintain/vendor 排查
 #
-# ── jobs 总览与依赖（11 任务, PascalCase 命名）────────────────
+# ── jobs 总览与依赖（13 任务, PascalCase 命名）────────────────
 #   0. Version            解析版本号与变更检测（构建/发布类任务的前置）;
 #                         构建差异检测: 与上次成功构建对比, 无差异时输出 build_changed=false
 #   1. Build              构建矩阵(三平台四目标) Matrix build + 产物功能测试（无差异时跳过, 见注4）
+#                         sccache 编译缓存加速增量构建
 #   2. JsonCheck          localization.json 质量校验门
 #                         （json 深度校验 + 源码编码格式检查 #88 + 自动维护工具自检;
 #                          合并原 json-quality / encoding-check / tools-test 三任务）
 #   3. CodeqlScan         安全与维护门（保持 windows-2025 以扫描 _WIN32 代码分支, 四块独立控制）:
-#                         ├ CodeQL 安全扫描（原 codeql）
+#                         ├ CodeQL 安全扫描（原 codeql, 增量扫描 + 数据库缓存）
 #                         ├ 自动维护: 失效检测 + 候选提取（原 auto-maintain）
 #                         ├ 同步 docs/wiki → GitHub Wiki（原 sync-wiki）
 #                         └ 构建跳过说明（原 build-skip-notice, 见注4）
-#   4. OpensslLinux       产库 OpenSSL（linux x64 静态库; PR 标签 vendor-openssl / 手动 vendor）
-#   5. OpensslWin         产库 OpenSSL（windows x64 .lib; 同上触发, 产物用于替换内置库）
-#   6. OpensslMacosArm64  产库 OpenSSL（macOS arm64 交叉编译; 同上触发, 原 vendor-macos 矩阵拆分）
-#   7. OpensslMacosX64    产库 OpenSSL（macOS x64 交叉编译; 同上触发, 原 vendor-macos 矩阵拆分）
-#   8. OpensslVendorPR    产库自动开 PR（四连全部成功后组装 third_party 并自动开入库 PR,
+#   4. OpensslCheck       OpenSSL 版本定时检测（周一 UTC 02:00）: 查官方最新 vs 仓库当前
+#   5. OpensslLinux       产库 OpenSSL（linux x64 静态库; PR 标签 vendor-openssl / 手动 vendor / OpensslCheck 触发）
+#   6. OpensslWin         产库 OpenSSL（windows x64 .lib; 同上触发, 产物用于替换内置库）
+#   7. OpensslMacosArm64  产库 OpenSSL（macOS arm64 交叉编译; 同上触发, macos-15 原生 ARM）
+#   8. OpensslMacosX64    产库 OpenSSL（macOS x64 交叉编译; 同上触发, macos-15-intel 原生 x64）
+#   9. OpensslVerify      产库验证（四连全部成功后, 组装 third_party, 四平台矩阵构建验证新库可用）
+#  10. OpensslVendorPR   产库自动开 PR（验证通过后组装 third_party 并自动开入库 PR,
 #                         版本须为官方最新 Release 见注7; GITHUB_TOKEN PR 不触发 CI,
 #                         由维护者按 PR 内审查清单确认后合并）
-#   9. Release            汇总产物并发布
-#  10. CiNotify           CI 失败通知（仅定时构建, #131）: 有失败 job 时创建/更新单条
+#  11. Release            汇总产物并发布
+#  12. CiNotify           CI 失败通知（仅定时构建, #131）: 有失败 job 时创建/更新单条
 #                         "[CI 失败]" Issue(连续失败计数), 成功时自动关闭; push/PR 失败
 #                         在 Actions/PR 页即时可见, 不走本渠道
 #
 #   job 依赖: Version 为根; Build/JsonCheck ← Version; CodeqlScan ← Version+JsonCheck
 #             (Version 直连为读其 outputs —— GitHub 仅直接 needs 可访问 outputs, 间接依赖不传递);
-#             产库四连串行: OpensslLinux ← CodeqlScan → OpensslWin → OpensslMacosArm64 → OpensslMacosX64,
+#             OpensslCheck ← CodeqlScan（定时检测, 依赖维护门通过）;
+#             产库四连并行: OpensslLinux/Win/MacosArm64/MacosX64 均 ← CodeqlScan（不再串行依赖）,
 #             以 always() + 原 vendor 触发条件串联(不受上游 skip/失败传导, 保持原独立产库语义与低频);
-#             OpensslVendorPR ← 产库四连(四 result 全 success 才开 PR);
+#             OpensslVerify ← 产库四连(四 result 全 success 才验证);
+#             OpensslVendorPR ← 产库四连 + 验证(全 success 才开 PR);
 #             Release ← Version+Build+JsonCheck+CodeqlScan(Version 直连同上; 其余三门为发布质量门);
-#             CiNotify ← 全部 10 任务(!cancelled(): 失败也要跑, 通知的意义正在于失败)
+#             CiNotify ← 全部 12 任务(!cancelled(): 失败也要跑, 通知的意义正在于失败)
 #   图约束: 全图以 Version 为根连通, 无孤立/不连通任务、无循环、无悬空 needs,
 #           needs 表达式引用须指向存在的直接依赖任务 —— 由 JsonCheck 的
 #           单工作流规范校验（tools/ci/check-workflow.py, W0-W6）强制
@@ -100,8 +108,8 @@
 #   - 网络/配置类关键步骤内置超时与自动重试
 #   - macOS 拆分 macos-x64 / macos-arm64 单架构包: x64 在 macos-15-intel 原生构建,
 #     arm64 在 macos-15(M1) 原生构建(产物功能测试可原生执行),
-#     静态 OpenSSL + strip/LTO 裁剪体积; OpenSSL 静态库由产库四连任务产库(见 4/5/6/7),
-#     GitHub Desktop 安装包与提取结果走 actions/cache
+#     静态 OpenSSL + strip/LTO 裁剪体积; OpenSSL 静态库由产库四连任务产库(见 5/6/7/8),
+#     sccache 编译缓存跨 run 复用(缓存至 GitHub Actions Cache)
 #   - 第三方 actions 全部按 commit SHA 固定（版本升级手动执行；漏洞告警由 Dependabot 提示）
 #   - 数据质量校验/工具自检/维护报告等大型脚本外置于 tools/ci（YAML 仅保留调用）
 #   - 发布产物生成构建溯源证明（SLSA provenance attestation），可用 gh attestation verify 校验来源
@@ -131,7 +139,10 @@ on:
   # 实测非整点 cron 仍可能延迟数小时/偶发丢失; schedule 本身是尽力而为, 准点不保证
   schedule:
     - cron: "23 1 * * *"
-  # 手动触发（建议在 main 上执行; 发布类 auto/release 仅 main 生效, 见 release job 边界注释）
+    # OpenSSL 版本定时检测: 每周一 UTC 02:00, 与每日构建错开避免资源竞争
+    - cron: "0 2 * * 1"
+  # OpenSSL 版本定时检测: 每周一 UTC 02:00（北京时间 10:00）, 查官方最新 Release vs 仓库当前版本
+  # 与每日构建错开, 避免同时段资源竞争; 有新版本时自动触发产库并行矩阵 + 开入库 PR
   workflow_dispatch:
     inputs:
       type:
@@ -291,8 +302,7 @@ jobs:
   # ═════════════════════════════════════════════════
   # 1. 构建矩阵（windows-x64 / macos-x64 / macos-arm64 / linux-x64）
   #    每平台编译 + 产物功能测试（--help / 非法参数拒绝 / 中文路径完整流程）
-  #    macOS 两个单架构包: x64 在 macos-15-intel 原生构建, arm64 在 macos-15(M1) 原生构建:
-  #    静态链接 OpenSSL + strip/LTO 裁剪体积; 四平台产物功能测试均原生执行
+  #    sccache 编译缓存加速增量构建
   #    触发：push main|tag / PR / 定时 / 手动(auto|build|release)
   # ═════════════════════════════════════════════════
   Build:
@@ -341,12 +351,17 @@ jobs:
       RELEASE_VERSION: ${{ needs.Version.outputs.version }}
       # 经 env 传递而非 ${{ }} 内插进脚本（#119，防注入统一约定）
       CI_SHA: ${{ github.sha }}
+      SCCACHE_GHA_ENABLED: "true"
     steps:
       # ── 检出 ──
       - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # ── 配置：CMake 生成（失败自动重试 3 次）──
+      # ── sccache 编译缓存（跨 run 复用）──
+      - name: 安装 sccache
+        uses: mozilla-actions/sccache-action@fd02668681acd5f960e1372061bee5e3e987195c # v0.0.11
+
+      # ── 配置：CMake 生成（失败自动重试 2 次）──
       - name: 配置 CMake（Windows x64）
         if: runner.os == 'Windows'
         shell: pwsh
@@ -355,12 +370,12 @@ jobs:
           $ver = if ($env:RELEASE_VERSION) { "v$env:RELEASE_VERSION" } else { "ci-$env:CI_SHA" }
           # CMake 配置无需联网（OpenSSL 静态库随仓库提交），环境抖动时自动重试
           # #134: CI 告警即错（/W4/-Wall -Wextra 基础上），本地构建不加以降低摩擦
-          for ($attempt = 1; $attempt -le 3; $attempt++) {
+          for ($attempt = 1; $attempt -le 2; $attempt++) {
             cmake -B build -A x64 "-DFILE_VERSION=$ver" -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
             if ($LASTEXITCODE -eq 0) { break }
-            if ($attempt -ge 3) { Write-Error "CMake 配置连续失败 3 次"; exit 1 }
-            Write-Warning "CMake 配置失败(第 $attempt 次)，15 秒后重试"
-            Start-Sleep -Seconds 15
+            if ($attempt -ge 2) { Write-Error "CMake 配置连续失败 2 次"; exit 1 }
+            Write-Warning "CMake 配置失败(第 $attempt 次)，10 秒后重试"
+            Start-Sleep -Seconds 10
           }
 
       - name: 配置 CMake（macOS/Linux）
@@ -384,16 +399,16 @@ jobs:
           fi
           # #134: CI 告警即错（-Wall -Wextra 基础上），本地构建不加以降低摩擦
           EXTRA+=("-DCMAKE_COMPILE_WARNING_AS_ERROR=ON")
-          for attempt in 1 2 3; do
+          for attempt in 1 2; do
             if cmake -B build -DCMAKE_BUILD_TYPE="$BUILD_TYPE" "-DFILE_VERSION=$VER" ${EXTRA[@]+"${EXTRA[@]}"}; then
               break
             fi
-            [[ $attempt -ge 3 ]] && { echo "::error::CMake 配置连续失败 3 次"; exit 1; }
-            echo "::warning::CMake 配置失败(第 $attempt 次)，15 秒后重试"
-            sleep 15
+            [[ $attempt -ge 2 ]] && { echo "::error::CMake 配置连续失败 2 次"; exit 1; }
+            echo "::warning::CMake 配置失败(第 $attempt 次)，10 秒后重试"
+            sleep 10
           done
 
-      # ── 编译 ──
+      # ── 编译（sccache 加速）──
       - name: 构建
         shell: bash
         run: |
@@ -708,9 +723,8 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ runner.temp }}/ghdesktop-auto-maintain
-          # key 只含 安装包/解压产物 的实际决定因素(GHD 版本/平台/工具源码);
-          # 不含 localization.json: 映射每次改动都作废 307MB 安装包缓存, 而报告由步骤内重新生成
-          key: ghd-maintain-v3-${{ steps.version.outputs.ghdesktop_version }}-${{ runner.os }}-${{ hashFiles('tools/auto-maintain/src/**') }}
+          # key 含 GHD 版本/平台/工具源码/映射文件哈希: 映射变更即作废缓存重新下载安装包
+          key: ghd-maintain-v4-${{ steps.version.outputs.ghdesktop_version }}-${{ runner.os }}-${{ hashFiles('tools/auto-maintain/src/**', 'json/localization.json') }}
 
       - name: 运行失效检测 + 未翻译候选提取
         if: steps.maintain_gate.outputs.enabled == 'true'
@@ -809,22 +823,66 @@ jobs:
           echo "无差异，已跳过构建（对比基准：上次成功构建 ${BASE_SHORT}）"
 
   # ═════════════════════════════════════════════════
-  # 4. 产库 OpenSSL - Linux（x64 静态库; 供 CMake Linux 静态链接内置化, 接线随提交 2）
+  # 4. OpenSSL 版本定时检测（周一 UTC 02:00）
+  #    查官方最新 Release, 与仓库当前版本对比; 有新版本输出 trigger_vendor=true
+  # ═════════════════════════════════════════════════
+  OpensslCheck:
+    name: OpenSSL 版本检测
+    needs: CodeqlScan
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      latest_ver: ${{ steps.check.outputs.latest_ver }}
+      current_ver: ${{ steps.check.outputs.current_ver }}
+      trigger_vendor: ${{ steps.check.outputs.trigger_vendor }}
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: 检测 OpenSSL 最新版本
+        id: check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          LATEST_TAG="$(curl --fail --location --retry 3 --retry-delay 5 -sS \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/openssl/openssl/releases/latest" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')"
+          LATEST_VER="${LATEST_TAG#openssl-}"
+          CUR_VER="$(sed -n 's/^# *define *OPENSSL_VERSION_STR "\(.*\)".*/\1/p' \
+            third_party/openssl/include/openssl/opensslv.h | head -n1)"
+          echo "latest_ver=$LATEST_VER" >> "$GITHUB_OUTPUT"
+          echo "current_ver=$CUR_VER" >> "$GITHUB_OUTPUT"
+          echo "官方最新: $LATEST_VER, 仓库当前: $CUR_VER"
+          if [[ "$CUR_VER" != "$LATEST_VER" ]]; then
+            echo "trigger_vendor=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::检测到 OpenSSL 新版本: $CUR_VER -> $LATEST_VER, 将触发产库"
+          else
+            echo "trigger_vendor=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::OpenSSL 已是最新: $CUR_VER, 跳过产库"
+          fi
+
+  # ═════════════════════════════════════════════════
+  # 5. 产库 OpenSSL - Linux（x64 静态库; 供 CMake Linux 静态链接内置化）
+  #    触发: PR 标签 vendor-openssl / 手动 vendor / OpensslCheck 检测到新版本
   # ═════════════════════════════════════════════════
   OpensslLinux:
     name: 产库 OpenSSL (linux x64)
     if: |
       always() && (
       (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'vendor-openssl') ||
-      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor'))
+      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor') ||
+      (github.event_name == 'schedule' && needs.OpensslCheck.outputs.trigger_vendor == 'true'))
     # 单工作流规范: 纳入依赖图
-    needs: CodeqlScan
+    needs: [CodeqlScan, OpensslCheck]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
-      # 源码包 SHA256: 供 OpensslVendorPR 做四平台独立下载一致性溯源
       tarball_sha256: ${{ steps.build.outputs.tarball_sha256 }}
-      # 实际解析版本(指定输入或自动取最新): 供 OpensslVendorPR 做四平台一致性校验
       resolved_ver: ${{ steps.resolve.outputs.ossl_ver }}
     steps:
       - name: 检出仓库
@@ -838,7 +896,6 @@ jobs:
           if [[ -n "$INPUT_VER" ]]; then
             OSSL_VER="$INPUT_VER"
           else
-            # 留空自动取官方最新 Release(注7): 与 OpensslVendorPR 校验同源
             LATEST_TAG="$(curl --fail --location --retry 3 --retry-delay 5 -sS \
               -H "Authorization: Bearer ${{ github.token }}" \
               -H "Accept: application/vnd.github+json" \
@@ -863,7 +920,6 @@ jobs:
           curl --fail --location --retry 3 --retry-delay 5 \
             --output "openssl-$OSSL_VER.tar.gz" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
-          # 供应链校验(#118): 官方 release 附带的 .sha256 旁证(openssl.org/source 链接的同一文件), 对照后才解压
           curl --fail --location --retry 3 --retry-delay 5 \
             --output "openssl-$OSSL_VER.tar.gz.sha256" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
@@ -871,13 +927,10 @@ jobs:
           mkdir -p openssl-src
           tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
           cd openssl-src
-          # -fPIC: 静态库须以位置无关代码链接, 与主构建 PIE 默认一致
-          # --libdir=lib: OpenSSL 3.x 在 x86_64 Linux 默认装 lib64/, 显式统一为 lib/ 布局
           ./Configure linux-x86_64 -fPIC no-shared no-tests no-apps no-zlib \
             --prefix="$RUNNER_TEMP/openssl-linux-x64" --libdir=lib
           make -j"$(nproc)" build_libs
           make install_dev
-          # 记录源码包 SHA256(溯源): 经官方 .sha256 校验的同一 tar.gz
           echo "tarball_sha256=$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: 校验产物齐备
@@ -900,22 +953,22 @@ jobs:
           if-no-files-found: error
 
   # ═════════════════════════════════════════════════
-  # 5. 产库 OpenSSL - Windows（x64 .lib; 产物用于替换内置库, 消除本地构建路径内嵌）
+  # 6. 产库 OpenSSL - Windows（x64 .lib; 产物用于替换内置库）
+  #    触发: 同 OpensslLinux
   # ═════════════════════════════════════════════════
   OpensslWin:
     name: 产库 OpenSSL (windows x64)
     if: |
       always() && (
       (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'vendor-openssl') ||
-      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor'))
+      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor') ||
+      (github.event_name == 'schedule' && needs.OpensslCheck.outputs.trigger_vendor == 'true'))
     # 单工作流规范: 纳入依赖图
-    needs: OpensslLinux
+    needs: [CodeqlScan, OpensslCheck]
     runs-on: windows-2025
     timeout-minutes: 40
     outputs:
-      # 源码包 SHA256: 供 OpensslVendorPR 做四平台独立下载一致性溯源
       tarball_sha256: ${{ steps.src.outputs.tarball_sha256 }}
-      # 实际解析版本(指定输入或自动取最新): 供 OpensslVendorPR 做四平台一致性校验
       resolved_ver: ${{ steps.resolve.outputs.ossl_ver }}
     steps:
       - name: 检出仓库
@@ -930,7 +983,6 @@ jobs:
           if [[ -n "$INPUT_VER" ]]; then
             OSSL_VER="$INPUT_VER"
           else
-            # 留空自动取官方最新 Release(注7): 与 OpensslVendorPR 校验同源
             LATEST_TAG="$(curl --fail --location --retry 3 --retry-delay 5 -sS \
               -H "Authorization: Bearer ${{ github.token }}" \
               -H "Accept: application/vnd.github+json" \
@@ -956,14 +1008,12 @@ jobs:
           curl --fail --location --retry 3 --retry-delay 5 \
             --output "openssl-$OSSL_VER.tar.gz" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
-          # 供应链校验(#118): 官方 release 附带的 .sha256 旁证(openssl.org/source 链接的同一文件), 对照后才解压
           curl --fail --location --retry 3 --retry-delay 5 \
             --output "openssl-$OSSL_VER.tar.gz.sha256" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
           sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
           mkdir -p openssl-src
           tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
-          # 记录源码包 SHA256(溯源): 经官方 .sha256 校验的同一 tar.gz
           echo "tarball_sha256=$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: 配置 OpenSSL（VC-WIN64A）
@@ -1023,24 +1073,22 @@ jobs:
           if-no-files-found: error
 
   # ═════════════════════════════════════════════════
-  #6. 产库 OpenSSL - macOS（x64/arm64 交叉编译; 原 vendor-openssl.yml 并入）
-  #    触发: PR 打 vendor-openssl 标签(labeled, 触发矩阵注5) / 手动 vendor(注6);
-  #    产物供人工下载后提交 third_party/, 构建期零下载零编译
+  # 7. 产库 OpenSSL - macOS（arm64 原生编译）
+  #    触发: 同 OpensslLinux
   # ═════════════════════════════════════════════════
   OpensslMacosArm64:
     name: 产库 OpenSSL (macOS arm64)
     if: |
       always() && (
       (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'vendor-openssl') ||
-      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor'))
+      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor') ||
+      (github.event_name == 'schedule' && needs.OpensslCheck.outputs.trigger_vendor == 'true'))
     # 单工作流规范: 纳入依赖图
-    needs: OpensslWin
-    runs-on: macos-15-intel
+    needs: [CodeqlScan, OpensslCheck]
+    runs-on: macos-15
     timeout-minutes: 40
     outputs:
-      # 源码包 SHA256: 供 OpensslVendorPR 做四平台独立下载一致性溯源
       tarball_sha256: ${{ steps.build.outputs.tarball_sha256 }}
-      # 实际解析版本(指定输入或自动取最新): 供 OpensslVendorPR 做四平台一致性校验
       resolved_ver: ${{ steps.resolve.outputs.ossl_ver }}
     steps:
       - name: 检出仓库
@@ -1054,7 +1102,6 @@ jobs:
           if [[ -n "$INPUT_VER" ]]; then
             OSSL_VER="$INPUT_VER"
           else
-            # 留空自动取官方最新 Release(注7): 与 OpensslVendorPR 校验同源
             LATEST_TAG="$(curl --fail --location --retry 3 --retry-delay 5 -sS \
               -H "Authorization: Bearer ${{ github.token }}" \
               -H "Accept: application/vnd.github+json" \
@@ -1075,14 +1122,12 @@ jobs:
         run: |
           set -euo pipefail
           TARGET=darwin64-arm64-cc
-          # 与主构建一致的部署目标, 防止 SDK 差异引入更高系统版本依赖
           export MACOSX_DEPLOYMENT_TARGET=11.0
           cd "$RUNNER_TEMP"
           rm -rf openssl-src "openssl-$OSSL_VER.tar.gz" "openssl-$OSSL_VER.tar.gz.sha256"
           curl --fail --location --retry 3 --retry-delay 5 \
             --output "openssl-$OSSL_VER.tar.gz" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
-          # 供应链校验(#118): 官方 release 附带的 .sha256 旁证(openssl.org/source 链接的同一文件), 对照后才解压
           curl --fail --location --retry 3 --retry-delay 5 \
             --output "openssl-$OSSL_VER.tar.gz.sha256" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
@@ -1094,7 +1139,6 @@ jobs:
             --prefix="$RUNNER_TEMP/openssl-macos-arm64"
           make -j"$(sysctl -n hw.ncpu)" build_libs
           make install_dev
-          # 记录源码包 SHA256(溯源): 经官方 .sha256 校验的同一 tar.gz
           echo "tarball_sha256=$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: 校验产物齐备
@@ -1117,24 +1161,22 @@ jobs:
           if-no-files-found: error
 
   # ═════════════════════════════════════════════════
-  #7. 产库 OpenSSL - macOS（x64/arm64 交叉编译; 原 vendor-openssl.yml 并入）
-  #    触发: PR 打 vendor-openssl 标签(labeled, 触发矩阵注5) / 手动 vendor(注6);
-  #    产物供人工下载后提交 third_party/, 构建期零下载零编译
+  # 8. 产库 OpenSSL - macOS（x64 原生编译）
+  #    触发: 同 OpensslLinux
   # ═════════════════════════════════════════════════
   OpensslMacosX64:
     name: 产库 OpenSSL (macOS x64)
     if: |
       always() && (
       (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'vendor-openssl') ||
-      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor'))
+      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor') ||
+      (github.event_name == 'schedule' && needs.OpensslCheck.outputs.trigger_vendor == 'true'))
     # 单工作流规范: 纳入依赖图
-    needs: OpensslMacosArm64
+    needs: [CodeqlScan, OpensslCheck]
     runs-on: macos-15-intel
     timeout-minutes: 40
     outputs:
-      # 源码包 SHA256: 供 OpensslVendorPR 做四平台独立下载一致性溯源
       tarball_sha256: ${{ steps.build.outputs.tarball_sha256 }}
-      # 实际解析版本(指定输入或自动取最新): 供 OpensslVendorPR 做四平台一致性校验
       resolved_ver: ${{ steps.resolve.outputs.ossl_ver }}
     steps:
       - name: 检出仓库
@@ -1148,7 +1190,6 @@ jobs:
           if [[ -n "$INPUT_VER" ]]; then
             OSSL_VER="$INPUT_VER"
           else
-            # 留空自动取官方最新 Release(注7): 与 OpensslVendorPR 校验同源
             LATEST_TAG="$(curl --fail --location --retry 3 --retry-delay 5 -sS \
               -H "Authorization: Bearer ${{ github.token }}" \
               -H "Accept: application/vnd.github+json" \
@@ -1169,14 +1210,12 @@ jobs:
         run: |
           set -euo pipefail
           TARGET=darwin64-x86_64-cc
-          # 与主构建一致的部署目标, 防止 SDK 差异引入更高系统版本依赖
           export MACOSX_DEPLOYMENT_TARGET=11.0
           cd "$RUNNER_TEMP"
           rm -rf openssl-src "openssl-$OSSL_VER.tar.gz" "openssl-$OSSL_VER.tar.gz.sha256"
           curl --fail --location --retry 3 --retry-delay 5 \
             --output "openssl-$OSSL_VER.tar.gz" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
-          # 供应链校验(#118): 官方 release 附带的 .sha256 旁证(openssl.org/source 链接的同一文件), 对照后才解压
           curl --fail --location --retry 3 --retry-delay 5 \
             --output "openssl-$OSSL_VER.tar.gz.sha256" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
@@ -1188,7 +1227,6 @@ jobs:
             --prefix="$RUNNER_TEMP/openssl-macos-x64"
           make -j"$(sysctl -n hw.ncpu)" build_libs
           make install_dev
-          # 记录源码包 SHA256(溯源): 经官方 .sha256 校验的同一 tar.gz
           echo "tarball_sha256=$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: 校验产物齐备
@@ -1211,22 +1249,180 @@ jobs:
           if-no-files-found: error
 
   # ═════════════════════════════════════════════════
-  # 8. 产库自动开 PR（四连全部成功后组装 third_party 并自动开入库 PR, 由维护者审查合并）
+  # 9. 产库验证（四连全部成功后, 组装 third_party, 四平台矩阵构建验证新库可用）
+  #    验证通过后才允许 OpensslVendorPR 开入库 PR
+  # ═════════════════════════════════════════════════
+  OpensslVerify:
+    name: 产库验证 (${{ matrix.display }})
+    needs: [OpensslLinux, OpensslWin, OpensslMacosArm64, OpensslMacosX64, OpensslCheck]
+    if: |
+      always() && (
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'vendor-openssl') ||
+      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor') ||
+      (github.event_name == 'schedule' && needs.OpensslCheck.outputs.trigger_vendor == 'true')) &&
+      needs.OpensslLinux.result == 'success' &&
+      needs.OpensslWin.result == 'success' &&
+      needs.OpensslMacosArm64.result == 'success' &&
+      needs.OpensslMacosX64.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            display: Windows_x64
+            os: windows-2025
+          - name: macos-x64
+            display: macOS_x64
+            os: macos-15-intel
+            arch: x64
+          - name: macos-arm64
+            display: macOS_arm64
+            os: macos-15
+            arch: arm64
+          - name: linux-x64
+            display: Linux_x64
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: 下载四平台产库产物
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          path: vendor-staging
+          pattern: openssl-*
+          merge-multiple: false
+
+      - name: 组装 third_party
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A DST=(
+            [openssl-linux-x64]="third_party/openssl-linux-x64"
+            [openssl-windows-x64]="third_party/openssl"
+            [openssl-macos-arm64]="third_party/openssl-macos-arm64"
+            [openssl-macos-x64]="third_party/openssl-macos-x64"
+          )
+          for art in "${!DST[@]}"; do
+            src="vendor-staging/$art"
+            dst="${DST[$art]}"
+            [[ -f "$src/include/openssl/ssl.h" ]] || { echo "::error::artifact $art 缺少 include/openssl/ssl.h"; exit 1; }
+            rm -rf "$dst/include" "$dst/lib"
+            mkdir -p "$dst"
+            cp -a "$src/include" "$src/lib" "$dst/"
+          done
+          echo "third_party 组装完成"
+
+      - name: 安装 sccache
+        uses: mozilla-actions/sccache-action@fd02668681acd5f960e1372061bee5e3e987195c # v0.0.11
+
+      - name: 配置 CMake（Windows x64）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          chcp 65001 | Out-Null
+          cmake -B build -A x64 -DFILE_VERSION="openssl-verify" -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+
+      - name: 配置 CMake（macOS/Linux）
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXTRA=()
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            ARCH="${{ matrix.arch }}"
+            CMAKE_ARCH="$ARCH"
+            if [[ "$ARCH" == "x64" ]]; then CMAKE_ARCH="x86_64"; fi
+            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=$CMAKE_ARCH")
+            EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0")
+          fi
+          EXTRA+=("-DCMAKE_COMPILE_WARNING_AS_ERROR=ON")
+          cmake -B build -DCMAKE_BUILD_TYPE=Release "-DFILE_VERSION=openssl-verify" ${EXTRA[@]+"${EXTRA[@]}"}
+
+      - name: 构建
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cmake --build build --config Release
+          else
+            JOBS="$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
+            cmake --build build --config Release -j "$JOBS"
+          fi
+
+      - name: 产物功能测试
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            NATIVE="$(uname -m)"
+            EXPECT="${{ matrix.arch }}"
+            if [[ "$EXPECT" == "x64" ]]; then EXPECT="x86_64"; fi
+            if [[ "$NATIVE" != "$EXPECT" ]]; then
+              echo "跳过: 交叉产物($EXPECT)无法在本 runner($NATIVE) 原生运行"
+              exit 0
+            fi
+          fi
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            BIN="build/Release/${EXE_NAME}"
+          else
+            BIN="build/GitHubDesktop2Chinese"
+          fi
+          [[ -f "$BIN" ]] || { echo "::error::未找到构建产物 $BIN"; exit 1; }
+
+          echo "== 测试1: --help 应 exit 0 =="
+          "$BIN" --help > /dev/null
+          echo "OK"
+
+          echo "== 测试2: 非法参数应被拒绝(exit!=0) =="
+          if "$BIN" thisargdoesnotexist > /dev/null 2>&1; then
+            echo "::error::非法参数未被拒绝"
+            exit 1
+          fi
+          echo "OK"
+
+          echo "== 测试3: 中文路径 + EOF 完整汉化流程应 exit 0 =="
+          FIXTURE="$RUNNER_TEMP/汉化测试目录"
+          rm -rf "$FIXTURE"
+          mkdir -p "$FIXTURE"
+          printf '<html></html>' > "$FIXTURE/index.html"
+          printf '// fixture main\n' > "$FIXTURE/main.js"
+          printf '// fixture renderer\n' > "$FIXTURE/renderer.js"
+          set +e
+          OUT="$(echo "" | "$BIN" -g "$FIXTURE" --nopause --force 2>&1)"
+          CODE=$?
+          set -e
+          if [[ $CODE -ne 0 ]]; then
+            echo "$OUT"
+            echo "::error::完整流程 exit=$CODE"
+            exit 1
+          fi
+          grep -q "renderer.js 文件汉化结束" <<< "$OUT" || { echo "$OUT"; echo "::error::流程未到达 renderer 汉化完成"; exit 1; }
+          echo "OK"
+
+  # ═════════════════════════════════════════════════
+  # 10. 产库自动开 PR（验证通过后组装 third_party 并自动开入库 PR, 由维护者审查合并）
   #    GITHUB_TOKEN 创建的 PR 不触发 CI(GitHub 防递归), 审查清单见 PR 描述;
   #    所产版本强制等于 openssl/openssl 官方最新 Release(注7), 防止产旧版本入库
   # ═════════════════════════════════════════════════
   OpensslVendorPR:
     name: 产库自动开 PR
-    needs: [OpensslLinux, OpensslWin, OpensslMacosArm64, OpensslMacosX64]
-    # 四连全部成功才开 PR: 部分失败不开, 避免提交不完整的四平台库
+    needs: [OpensslLinux, OpensslWin, OpensslMacosArm64, OpensslMacosX64, OpensslCheck, OpensslVerify]
+    # 四连 + 验证全部成功才开 PR
     if: |
       always() && (
       (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'vendor-openssl') ||
-      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor')) &&
+      (github.event_name == 'workflow_dispatch' && inputs.type == 'vendor') ||
+      (github.event_name == 'schedule' && needs.OpensslCheck.outputs.trigger_vendor == 'true')) &&
       needs.OpensslLinux.result == 'success' &&
       needs.OpensslWin.result == 'success' &&
       needs.OpensslMacosArm64.result == 'success' &&
-      needs.OpensslMacosX64.result == 'success'
+      needs.OpensslMacosX64.result == 'success' &&
+      needs.OpensslVerify.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # 权限最小化: 仅本 job 授予开 PR 所需写权限, 其余 job 保持工作流级只读
@@ -1234,20 +1430,17 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      # 实产版本取自产库四连解析结果(指定输入或自动取最新), 与产物同源
       OSSL_VER: ${{ needs.OpensslLinux.outputs.resolved_ver }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          # third_party 是 main 的构建依赖, 入库 PR 分支一律基于 main
           ref: main
 
       - name: 校验所产版本为官方最新 Release
         run: |
           set -euo pipefail
-          # 四平台解析版本一致性(供应链): 四连必须同版本(产库期间官方 latest 变动时此校验兜底)
           V_WIN="${{ needs.OpensslWin.outputs.resolved_ver }}"
           V_ARM="${{ needs.OpensslMacosArm64.outputs.resolved_ver }}"
           V_X64="${{ needs.OpensslMacosX64.outputs.resolved_ver }}"
@@ -1256,7 +1449,6 @@ jobs:
             echo "  linux=$OSSL_VER windows=$V_WIN macos-arm64=$V_ARM macos-x64=$V_X64"
             exit 1
           fi
-          # 最新版本强制(供应链, 注7): 查询走 openssl/openssl 官方仓库(符合来源政策), 防止产旧版本入库
           LATEST_TAG="$(curl --fail --location --retry 3 --retry-delay 5 -sS \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
@@ -1280,7 +1472,6 @@ jobs:
         id: assemble
         run: |
           set -euo pipefail
-          # 四平台源码包 SHA256 一致性(供应链): 四连各自独立下载同一 release 资产, 哈希必须一致
           H_LINUX="${{ needs.OpensslLinux.outputs.tarball_sha256 }}"
           H_WIN="${{ needs.OpensslWin.outputs.tarball_sha256 }}"
           H_ARM="${{ needs.OpensslMacosArm64.outputs.tarball_sha256 }}"
@@ -1290,7 +1481,6 @@ jobs:
             echo "  linux=$H_LINUX windows=$H_WIN macos-arm64=$H_ARM macos-x64=$H_X64"
             exit 1
           fi
-          # artifact 名 -> third_party 目录映射(Windows 产物目录名为 openssl/)
           declare -A DST=(
             [openssl-linux-x64]="third_party/openssl-linux-x64"
             [openssl-windows-x64]="third_party/openssl"
@@ -1301,10 +1491,8 @@ jobs:
             src="vendor-staging/$art"
             dst="${DST[$art]}"
             [[ -f "$src/include/openssl/ssl.h" ]] || { echo "::error::artifact $art 缺少 include/openssl/ssl.h"; exit 1; }
-            # 版本宏一致性: 四平台产物的 OPENSSL_VERSION_STR 必须全部等于所产版本
             ver="$(sed -n 's/^# *define *OPENSSL_VERSION_STR "\(.*\)".*/\1/p' "$src/include/openssl/opensslv.h" | head -n1)"
             [[ "$ver" == "$OSSL_VER" ]] || { echo "::error::artifact $art 版本宏为 '$ver', 与所产版本 $OSSL_VER 不一致"; exit 1; }
-            # 库文件齐备(Windows 为 .lib, 其余为 .a)
             if [[ "$art" == "openssl-windows-x64" ]]; then
               [[ -f "$src/lib/libssl.lib" && -f "$src/lib/libcrypto.lib" ]] || { echo "::error::artifact $art 缺少 libssl.lib/libcrypto.lib"; exit 1; }
             else
@@ -1315,7 +1503,6 @@ jobs:
             cp -a "$src/include" "$src/lib" "$dst/"
           done
           echo "四平台产物组装完成, 版本宏一致: $OSSL_VER"
-          # 同版本跳过: 仓库现有版本与所产版本相同则不开 PR(重复产库无意义)
           cur="$(sed -n 's/^# *define *OPENSSL_VERSION_STR "\(.*\)".*/\1/p' third_party/openssl/include/openssl/opensslv.h | head -n1)"
           echo "cur_ver=$cur" >> "$GITHUB_OUTPUT"
           if [[ "$cur" == "$OSSL_VER" ]]; then
@@ -1374,7 +1561,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           BRANCH="vendor/openssl-$OSSL_VER-r$GITHUB_RUN_ID"
-          # 重跑防御: 同一 run 的分支已存在则跳过, 防重复开 PR
           if git ls-remote --heads origin "$BRANCH" | grep -q .; then
             echo "::notice::分支 $BRANCH 已存在（本次运行疑似重跑），跳过重复开 PR"
             exit 0
@@ -1387,17 +1573,12 @@ jobs:
           gh pr create --title "vendor: OpenSSL $OSSL_VER 四平台静态库入库" --body-file pr-body.md
 
   # ═════════════════════════════════════════════════
-  # 9. 发布 Release（push main 有变更 / tag v* / 手动 auto|release / 定时且有变更）
+  # 11. 发布 Release（push main 有变更 / tag v* / 手动 auto|release / 定时且有变更）
   #    依赖 build 产物与 version 版本号
   # ═════════════════════════════════════════════════
   Release:
     name: 发布 Release
-    # Build/JsonCheck/CodeqlScan 与 Release 同属任务门: 发布前强制过构建/质量/安全门
-    # (三者 if 已覆盖发布相关分支, 不会出现 needs 悬空)
-    # 显式直连 Version: GitHub 仅直接 needs 可访问其 outputs(发布判断 changed / 版本号 / build_base),
-    # 经 Build/JsonCheck/CodeqlScan 间接依赖不传递 outputs
     needs: [Version, Build, JsonCheck, CodeqlScan]
-    # 发布边界: push main 仅在存在构建相关变更时自动补丁发版; 手动 auto/release 仅限 main(防特性分支误发布)
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.Version.outputs.changed == 'true') ||
@@ -1408,13 +1589,10 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
-      # SignPath 签名后需对签名产物重新生成构建溯源证明(OIDC)
       id-token: write
-      # attest-build-provenance 写入 attestation；缺失时 SignPath 启用后该步骤 403 阻断发布（#117）
       attestations: write
     env:
       RELEASE_VERSION: ${{ needs.Version.outputs.version }}
-      # SignPath 代码签名(Foundation 免费开源证书): token 与组织 ID 齐备才签名, 缺任一则跳过
       SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
       SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
     steps:
@@ -1434,11 +1612,8 @@ jobs:
             exit 1
           fi
           echo "发布版本: v$VER"
-          # 版本漂移检查: 并发排队时 version 在排队前计算, 发布时最新 tag 可能已前进;
-          # 正常情况下最新 tag 应为 v<x.y.(z-1)>, 不一致仅告警不阻断(记录实际对应关系)
           LATEST_TAG="$(git ls-remote --tags --refs origin 'v*' | sed 's#.*refs/tags/##' | sort -V | tail -n1 || true)"
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VER"
-          # 按进位规则反推预期前驱: patch>1 直接减 1; patch=1 由 minor-1 的 patch=100 进位而来; 依此类推
           if [[ "$PATCH" -gt 1 ]]; then
             EXPECT_PREV="v${MAJOR}.${MINOR}.$((PATCH-1))"
           elif [[ "$MINOR" -gt 0 ]]; then
@@ -1459,13 +1634,11 @@ jobs:
       - name: 下载全部构建产物
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          # GitHubDesktop2Chinese-<平台>-<版本|SHA>（windows-x64 / macos-universal / linux-x64）
           pattern: ${{ env.ARTIFACT_PREFIX }}-*-${{ needs.Version.outputs.version || github.sha }}
           path: release/
           merge-multiple: true
 
       - name: 准备 localization.json 与第三方许可声明
-        # #135: Release 资产随附 THIRD_PARTY_NOTICES.txt, 满足 BSD-3/Apache-2.0/MIT 的二进制分发要求
         run: |
           set -euo pipefail
           mkdir -p release
@@ -1473,7 +1646,6 @@ jobs:
           cp "THIRD_PARTY_NOTICES.txt" release/
 
       - name: SignPath 门控判定
-        # token 与组织 ID 齐备才启用签名链路; 判定一次, 后续 4 个签名步骤统一引用(单一维护点, 防四处条件漂移)
         id: signpath_gate
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -1489,7 +1661,6 @@ jobs:
           fi
 
       - name: 上传待签名 Windows 产物
-        # SignPath 前置要求: 待签名文件须先作为 GitHub artifact 上传(v4+), 以 artifact-id 提交签名请求
         id: upload-unsigned
         if: steps.signpath_gate.outputs.enabled == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -1500,7 +1671,6 @@ jobs:
           path: release/GitHubDesktop2Chinese.exe
 
       - name: SignPath 代码签名（Windows exe）
-        # SignPath Foundation 免费开源代码签名; project/policy slug 可用仓库 variables 覆盖
         if: steps.signpath_gate.outputs.enabled == 'true'
         uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
         with:
@@ -1521,8 +1691,6 @@ jobs:
           echo "已用 SignPath 签名产物替换 release/GitHubDesktop2Chinese.exe"
 
       - name: 为签名产物重新生成构建溯源证明
-        # build 任务的 attestation 绑定未签名 exe 摘要, 签名后内容已变;
-        # 对签名产物重新 attest, 保证 release 资产可通过 gh attestation verify 校验
         if: steps.signpath_gate.outputs.enabled == 'true'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -1531,7 +1699,6 @@ jobs:
       - name: 生成 Release 说明
         shell: bash
         env:
-          # 变更记录自动提取需查询 tags / compare API
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -1547,7 +1714,6 @@ jobs:
             echo "- \`localization.json\` — 汉化映射（最新）"
             echo ""
             echo "> 产物附带构建溯源证明，可校验来源：\`gh attestation verify <下载的文件> --repo Tupig/GitHubDesktop2Chinese\`"
-            # SignPath Foundation 要求: 使用其证书签名时下载页须作此声明; 未签名时不得失实提及(#79)
             if [[ -n "${SIGNPATH_API_TOKEN:-}" && -n "${SIGNPATH_ORGANIZATION_ID:-}" ]]; then
               echo "> Windows 产物使用 [SignPath Foundation](https://signpath.org) 免费开源代码签名证书签名"
             fi
@@ -1560,16 +1726,11 @@ jobs:
             echo "> ⚠️ 仅支持 64 位系统 / GitHub Desktop。macOS/Linux 首次运行请先 \`chmod +x\`；"
             echo "> Windows 找不到 openssl dll 请升级到本版本；缺失 MSVCP140_ATOMIC_WAIT.dll 请安装 Microsoft Visual C++ Redistributable"
             if [[ -f docs/ReleaseBody.md ]]; then
-              # 仅提取当前版本的变更行(行内含版本标记: 全角括号+vX.Y.Z),
-              # 不再整篇附带从 v1.2.0 起的历史日志
               CHANGES="$(grep -F "（v$VER）" docs/ReleaseBody.md || true)"
-              # 变更记录自动化: 未预置当前版本条目时, 自动提取上一发布版本以来的提交标题,
-              # 生成条目写入 docs/ReleaseBody.md 的 Changelog 段末尾, 供 Release 说明与后续发布读取
               AUTO_EXTRACTED=""
               if [[ -z "$CHANGES" ]]; then
                 TAGS="$(gh api "repos/${GITHUB_REPOSITORY}/tags?per_page=100" --paginate -q '.[].name' 2>/dev/null || true)"
                 if [[ -n "$TAGS" ]]; then
-                  # 版本序取严格小于当前版本的最大 tag(权重比较, 字典序在 patch>=10 时不可靠)
                   PREV_TAG="$(printf '%s\n' "$TAGS" | grep -Ex 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -V \
                     | awk -F. -v v="$VER" 'BEGIN { split(v, c, ".") } { p1 = $1; sub(/^v/, "", p1); if ((p1 * 1000000 + $2 * 1000 + $3) < (c[1] * 1000000 + c[2] * 1000 + c[3])) print }' | tail -n1)"
                   if [[ -n "$PREV_TAG" ]]; then
@@ -1583,7 +1744,6 @@ jobs:
                         fi
                       done <<< "$SUBJECTS"
                       AUTO_ENTRIES="${AUTO_ENTRIES%$'\n'}"
-                      # 插入 Changelog 段末尾(首个 <!-- 注释块之前)
                       AUTO_ENTRIES="$AUTO_ENTRIES" awk '
                         BEGIN { entries = ENVIRON["AUTO_ENTRIES"] }
                         /^<!--/ && !inserted { print entries; print ""; inserted = 1 }
@@ -1609,7 +1769,6 @@ jobs:
               else
                 echo "> ℹ️ 未在 docs/ReleaseBody.md 中找到 v$VER 的变更记录，完整更新历史见仓库文档"
               fi
-              # 静态「程序说明」属于使用说明而非版本日志, 保持附带
               NOTES="$(awk '/^### 程序说明/{f=1} f' docs/ReleaseBody.md || true)"
               if [[ -n "$NOTES" ]]; then
                 echo ""
@@ -1628,7 +1787,6 @@ jobs:
           set -euo pipefail
           VER="v$RELEASE_VERSION"
           TITLE="GitHubDesktop2Chinese v$RELEASE_VERSION"
-          # 网络抖动时自动重试（上传支持 --clobber，重试安全）
           retry() {
             local max=$1
             shift
@@ -1640,7 +1798,6 @@ jobs:
               sleep 15
             done
           }
-          # 上传资产+更新说明(已存在场景); 定义一次, 正常路径与自愈路径共用
           publish() {
             retry 3 gh release upload "$VER" release/* --clobber
             retry 3 gh release edit "$VER" --title "$TITLE" --notes-file release-notes.md
@@ -1649,8 +1806,6 @@ jobs:
             publish
           else
             if ! retry 3 gh release create "$VER" release/* --title "$TITLE" --notes-file release-notes.md; then
-              # view 可能因网络错误误判为不存在, 而 create 实际已存在(already exists):
-              # 此时转 上传+编辑 自愈, 避免"release 已建但资产/说明半成品"永久挂死
               echo "::warning::gh release create 失败, 按已存在场景转上传+编辑自愈"
               publish
             fi
@@ -1666,7 +1821,7 @@ jobs:
   # 失败仅 warning 不使本任务变红(避免"通知失败→run 红→下次又通知"的噪音循环)
   CiNotify:
     name: CI 失败通知
-    needs: [Version, Build, JsonCheck, CodeqlScan, OpensslLinux, OpensslWin, OpensslMacosArm64, OpensslMacosX64, OpensslVendorPR, Release]
+    needs: [Version, Build, JsonCheck, CodeqlScan, OpensslCheck, OpensslLinux, OpensslWin, OpensslMacosArm64, OpensslMacosX64, OpensslVerify, OpensslVendorPR, Release]
     if: ${{ !cancelled() && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
