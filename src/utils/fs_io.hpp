@@ -48,7 +48,10 @@ namespace utils {
     // 失败返回 false 并将原因记入 ec; 落盘未确认的文件不允许进入 rename。
     inline auto FlushToDisk(const fs::path& file, std::error_code& ec) -> bool {
 #ifdef _WIN32
-        HANDLE h = CreateFileW(file.wstring().c_str(), GENERIC_WRITE, 0, nullptr,
+        // 共享模式放开(#244): FlushFileBuffers 只需写权限; 独占打开(0)在杀软/索引器
+        // 短暂持有句柄时会误判"落盘失败", 进而使 WriteFile/AtomicCopyFile 无谓失败
+        HANDLE h = CreateFileW(file.wstring().c_str(), GENERIC_WRITE,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if(h == INVALID_HANDLE_VALUE) {
             ec = std::error_code(static_cast<int>(GetLastError()), std::system_category());

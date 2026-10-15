@@ -1143,8 +1143,13 @@ static void CleanupStaleTempFiles() {
     // 先收集后删除: 标准不保证 directory_iterator 遍历中删除条目安全(迭代器失效)
     for(fs::directory_iterator it(Base, ec), end; !ec && it != end; it.increment(ec)) {
         const std::string name = it->path().filename().string();
+        // #244: 追加覆盖历史命名的更新脚本残留 "<self>.update*.sh"(旧自更新链遗留)
+        const bool is_legacy_update_script =
+            name.find(".update") != std::string::npos &&
+            name.size() >= 3 && name.compare(name.size() - 3, 3, ".sh") == 0;
         if(name.find(".writing.") != std::string::npos ||
-            name.find(".restoring.") != std::string::npos) {
+            name.find(".restoring.") != std::string::npos ||
+            is_legacy_update_script) {
             stale.push_back(it->path());
         }
     }
