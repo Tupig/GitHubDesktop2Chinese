@@ -908,7 +908,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
-      tarball_sha256: ${{ steps.build.outputs.tarball_sha256 }}
+      # tarball_sha256 由校验步骤统一输出: 编译路径写入 prefix/tarball.sha256, 缓存命中时从该文件恢复
+      tarball_sha256: ${{ steps.verify.outputs.tarball_sha256 }}
       resolved_ver: ${{ steps.resolve.outputs.ossl_ver }}
     steps:
       - name: 检出仓库
@@ -951,8 +952,16 @@ jobs:
           echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
           echo "ossl_ver=$OSSL_VER" >> "$GITHUB_OUTPUT"
 
+      - name: 恢复产库编译产物缓存（同版本重跑秒级完成）
+        id: cache-ossl
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/openssl-linux-x64
+          key: openssl-linux-x64-${{ env.OSSL_VER }}
+
       - name: 编译 OpenSSL（x64）
         id: build
+        if: steps.cache-ossl.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP"
@@ -973,20 +982,28 @@ jobs:
           make install_dev
           # tarball_sha256 记录(#F2): GNU coreutils 在文件名含反斜杠(Windows 全路径
           # D:\a\_temp/...)时输出行带 '\' 转义前缀, 且 Windows 二进制模式为 "hash *file";
-          # 截断到首个空格, 再剥离可能的 '\' 前缀, 三平台统一得到纯哈希
+          # 截断到首个空格, 再剥离可能的 '\' 前缀, 三平台统一得到纯哈希。
+          # 写入 prefix 目录(缓存内容): 缓存命中时由校验步骤从该文件恢复输出
           HASH="$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
           HASH="${HASH%% *}"
           HASH="${HASH#\\}"
-          echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
+          echo "$HASH" > "$RUNNER_TEMP/openssl-linux-x64/tarball.sha256"
 
       - name: 校验产物齐备
+        id: verify
         run: |
           set -euo pipefail
           PREFIX="$RUNNER_TEMP/openssl-linux-x64"
           for f in "$PREFIX/include/openssl/ssl.h" "$PREFIX/lib/libssl.a" "$PREFIX/lib/libcrypto.a"; do
             [[ -f "$f" ]] || { echo "::error::缺少产物: $f"; exit 1; }
           done
-          echo "产库产物齐备: $PREFIX"
+          HASH="$(cat "$PREFIX/tarball.sha256" 2>/dev/null || true)"
+          if [[ ! "$HASH" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::tarball.sha256 缺失或非法: '$HASH'（编译/缓存异常, 可删除对应缓存后重试）"
+            exit 1
+          fi
+          echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
+          echo "产库产物齐备: $PREFIX（tarball SHA256: $HASH）"
 
       - name: 上传产库产物
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -1014,7 +1031,8 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 40
     outputs:
-      tarball_sha256: ${{ steps.src.outputs.tarball_sha256 }}
+      # tarball_sha256 由校验步骤统一输出: 编译路径写入 prefix/tarball.sha256, 缓存命中时从该文件恢复
+      tarball_sha256: ${{ steps.verify.outputs.tarball_sha256 }}
       resolved_ver: ${{ steps.resolve.outputs.ossl_ver }}
     steps:
       - name: 检出仓库
@@ -1058,9 +1076,17 @@ jobs:
           echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
           echo "ossl_ver=$OSSL_VER" >> "$GITHUB_OUTPUT"
 
+      - name: 恢复产库编译产物缓存（同版本重跑秒级完成）
+        id: cache-ossl
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/openssl-windows-x64
+          key: openssl-windows-x64-${{ env.OSSL_VER }}
+
       - name: 下载并解压 OpenSSL 源码
         id: src
         shell: bash
+        if: steps.cache-ossl.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP"
@@ -1084,6 +1110,7 @@ jobs:
 
       - name: 配置 OpenSSL（VC-WIN64A）
         shell: cmd
+        if: steps.cache-ossl.outputs.cache-hit != 'true'
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSPATH=%%i"
           if not defined VSPATH (
@@ -1098,6 +1125,7 @@ jobs:
 
       - name: 编译并安装（build_libs + install_dev）
         shell: cmd
+        if: steps.cache-ossl.outputs.cache-hit != 'true'
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSPATH=%%i"
           if not defined VSPATH (
@@ -1113,20 +1141,30 @@ jobs:
           if errorlevel 1 exit /b 1
 
       - name: 校验产物齐备
-        shell: cmd
+        id: verify
+        shell: bash
+        env:
+          # 编译路径的源码包 SHA256(缓存命中时 src 步骤被跳过, 值为空)
+          SRC_HASH: ${{ steps.src.outputs.tarball_sha256 }}
         run: |
-          if not exist "%RUNNER_TEMP%\openssl-windows-x64\include\openssl\ssl.h" (
-            echo ::error::缺少产物: include\openssl\ssl.h
-            exit /b 1
-          )
-          if not exist "%RUNNER_TEMP%\openssl-windows-x64\lib\libssl.lib" (
-            echo ::error::缺少产物: lib\libssl.lib
-            exit /b 1
-          )
-          if not exist "%RUNNER_TEMP%\openssl-windows-x64\lib\libcrypto.lib" (
-            echo ::error::缺少产物: lib\libcrypto.lib
-            exit /b 1
-          )
+          set -euo pipefail
+          PREFIX="$RUNNER_TEMP/openssl-windows-x64"
+          for f in "$PREFIX/include/openssl/ssl.h" "$PREFIX/lib/libssl.lib" "$PREFIX/lib/libcrypto.lib"; do
+            [[ -f "$f" ]] || { echo "::error::缺少产物: $f"; exit 1; }
+          done
+          # tarball_sha256: 编译路径由 src 步骤输出, 写入 prefix(缓存内容)供下次命中复用;
+          # 缓存命中时直接读文件
+          HASH_FILE="$PREFIX/tarball.sha256"
+          if [[ -n "$SRC_HASH" ]]; then
+            echo "$SRC_HASH" > "$HASH_FILE"
+          fi
+          HASH="$(cat "$HASH_FILE" 2>/dev/null || true)"
+          if [[ ! "$HASH" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::tarball.sha256 缺失或非法: '$HASH'（编译/缓存异常, 可删除对应缓存后重试）"
+            exit 1
+          fi
+          echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
+          echo "产库产物齐备: $PREFIX（tarball SHA256: $HASH）"
 
       - name: 上传产库产物
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -1154,7 +1192,8 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 40
     outputs:
-      tarball_sha256: ${{ steps.build.outputs.tarball_sha256 }}
+      # tarball_sha256 由校验步骤统一输出: 编译路径写入 prefix/tarball.sha256, 缓存命中时从该文件恢复
+      tarball_sha256: ${{ steps.verify.outputs.tarball_sha256 }}
       resolved_ver: ${{ steps.resolve.outputs.ossl_ver }}
     steps:
       - name: 检出仓库
@@ -1197,8 +1236,16 @@ jobs:
           echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
           echo "ossl_ver=$OSSL_VER" >> "$GITHUB_OUTPUT"
 
+      - name: 恢复产库编译产物缓存（同版本重跑秒级完成）
+        id: cache-ossl
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/openssl-macos-arm64
+          key: openssl-macos-arm64-${{ env.OSSL_VER }}
+
       - name: 编译 OpenSSL（arm64 ≈8 分钟）
         id: build
+        if: steps.cache-ossl.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           TARGET=darwin64-arm64-cc
@@ -1221,20 +1268,28 @@ jobs:
           make install_dev
           # tarball_sha256 记录(#F2): GNU coreutils 在文件名含反斜杠(Windows 全路径
           # D:\a\_temp/...)时输出行带 '\' 转义前缀, 且 Windows 二进制模式为 "hash *file";
-          # 截断到首个空格, 再剥离可能的 '\' 前缀, 三平台统一得到纯哈希
+          # 截断到首个空格, 再剥离可能的 '\' 前缀, 三平台统一得到纯哈希。
+          # 写入 prefix 目录(缓存内容): 缓存命中时由校验步骤从该文件恢复输出
           HASH="$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
           HASH="${HASH%% *}"
           HASH="${HASH#\\}"
-          echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
+          echo "$HASH" > "$RUNNER_TEMP/openssl-macos-arm64/tarball.sha256"
 
       - name: 校验产物齐备
+        id: verify
         run: |
           set -euo pipefail
           PREFIX="$RUNNER_TEMP/openssl-macos-arm64"
           for f in "$PREFIX/include/openssl/ssl.h" "$PREFIX/lib/libssl.a" "$PREFIX/lib/libcrypto.a"; do
             [[ -f "$f" ]] || { echo "::error::缺少产物: $f"; exit 1; }
           done
-          echo "产库产物齐备: $PREFIX"
+          HASH="$(cat "$PREFIX/tarball.sha256" 2>/dev/null || true)"
+          if [[ ! "$HASH" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::tarball.sha256 缺失或非法: '$HASH'（编译/缓存异常, 可删除对应缓存后重试）"
+            exit 1
+          fi
+          echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
+          echo "产库产物齐备: $PREFIX（tarball SHA256: $HASH）"
 
       - name: 上传产库产物
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -1262,7 +1317,8 @@ jobs:
     runs-on: macos-15-intel
     timeout-minutes: 40
     outputs:
-      tarball_sha256: ${{ steps.build.outputs.tarball_sha256 }}
+      # tarball_sha256 由校验步骤统一输出: 编译路径写入 prefix/tarball.sha256, 缓存命中时从该文件恢复
+      tarball_sha256: ${{ steps.verify.outputs.tarball_sha256 }}
       resolved_ver: ${{ steps.resolve.outputs.ossl_ver }}
     steps:
       - name: 检出仓库
@@ -1305,8 +1361,16 @@ jobs:
           echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
           echo "ossl_ver=$OSSL_VER" >> "$GITHUB_OUTPUT"
 
+      - name: 恢复产库编译产物缓存（同版本重跑秒级完成）
+        id: cache-ossl
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/openssl-macos-x64
+          key: openssl-macos-x64-${{ env.OSSL_VER }}
+
       - name: 编译 OpenSSL（x64 ≈8 分钟）
         id: build
+        if: steps.cache-ossl.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           TARGET=darwin64-x86_64-cc
@@ -1329,20 +1393,28 @@ jobs:
           make install_dev
           # tarball_sha256 记录(#F2): GNU coreutils 在文件名含反斜杠(Windows 全路径
           # D:\a\_temp/...)时输出行带 '\' 转义前缀, 且 Windows 二进制模式为 "hash *file";
-          # 截断到首个空格, 再剥离可能的 '\' 前缀, 三平台统一得到纯哈希
+          # 截断到首个空格, 再剥离可能的 '\' 前缀, 三平台统一得到纯哈希。
+          # 写入 prefix 目录(缓存内容): 缓存命中时由校验步骤从该文件恢复输出
           HASH="$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
           HASH="${HASH%% *}"
           HASH="${HASH#\\}"
-          echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
+          echo "$HASH" > "$RUNNER_TEMP/openssl-macos-x64/tarball.sha256"
 
       - name: 校验产物齐备
+        id: verify
         run: |
           set -euo pipefail
           PREFIX="$RUNNER_TEMP/openssl-macos-x64"
           for f in "$PREFIX/include/openssl/ssl.h" "$PREFIX/lib/libssl.a" "$PREFIX/lib/libcrypto.a"; do
             [[ -f "$f" ]] || { echo "::error::缺少产物: $f"; exit 1; }
           done
-          echo "产库产物齐备: $PREFIX"
+          HASH="$(cat "$PREFIX/tarball.sha256" 2>/dev/null || true)"
+          if [[ ! "$HASH" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::tarball.sha256 缺失或非法: '$HASH'（编译/缓存异常, 可删除对应缓存后重试）"
+            exit 1
+          fi
+          echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
+          echo "产库产物齐备: $PREFIX（tarball SHA256: $HASH）"
 
       - name: 上传产库产物
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -1432,7 +1504,7 @@ jobs:
         shell: pwsh
         run: |
           chcp 65001 | Out-Null
-          cmake -B build -A x64 -DFILE_VERSION="openssl-verify" -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+          cmake -B build -A x64 -DFILE_VERSION="openssl-verify" -DCMAKE_COMPILE_WARNING_AS_ERROR=ON -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: 配置 CMake（macOS/Linux）
         if: runner.os != 'Windows'
@@ -1448,6 +1520,8 @@ jobs:
             EXTRA+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0")
           fi
           EXTRA+=("-DCMAKE_COMPILE_WARNING_AS_ERROR=ON")
+          EXTRA+=("-DCMAKE_C_COMPILER_LAUNCHER=sccache")
+          EXTRA+=("-DCMAKE_CXX_COMPILER_LAUNCHER=sccache")
           cmake -B build -DCMAKE_BUILD_TYPE=Release "-DFILE_VERSION=openssl-verify" ${EXTRA[@]+"${EXTRA[@]}"}
 
       - name: 构建
