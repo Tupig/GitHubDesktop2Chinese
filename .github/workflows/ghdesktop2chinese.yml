@@ -1927,6 +1927,11 @@ jobs:
                   if [[ -n "$PREV_TAG" ]]; then
                     SUBJECTS="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${GITHUB_SHA}" \
                       -q '.commits[] | select((.parents | length) == 1) | .commit.message | split("\n")[0]' 2>/dev/null || true)"
+                    # compare API 最多返回区间最旧 250 个 commit(#230): 超出静默截断, 取总提交数与实返条数备查
+                    COMPARE_COUNTS="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${GITHUB_SHA}" \
+                      -q '[.total_commits, (.commits | length)] | @tsv' 2>/dev/null || true)"
+                    COMPARE_TOTAL="${COMPARE_COUNTS%%$'\t'*}"
+                    COMPARE_LISTED="${COMPARE_COUNTS##*$'\t'}"
                     if [[ -n "$SUBJECTS" ]]; then
                       AUTO_ENTRIES=""
                       while IFS= read -r subject; do
@@ -1935,6 +1940,10 @@ jobs:
                         fi
                       done <<< "$SUBJECTS"
                       AUTO_ENTRIES="${AUTO_ENTRIES%$'\n'}"
+                      # 截断时追加说明条目(#230): 标记本次提取不完整, 避免静默缺失提交记录误导回溯
+                      if [[ "$COMPARE_TOTAL" =~ ^[0-9]+$ && "$COMPARE_LISTED" =~ ^[0-9]+$ && "$COMPARE_TOTAL" -gt "$COMPARE_LISTED" ]]; then
+                        AUTO_ENTRIES+=$'\n'"- ⚠️ 两次发布间共 ${COMPARE_TOTAL} 条提交，超出 compare API 展示上限（本次返回 ${COMPARE_LISTED} 条），以上仅含部分提交，完整历史见 [compare 记录](https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${GITHUB_SHA})（v${VER}）"
+                      fi
                       AUTO_ENTRIES="$AUTO_ENTRIES" awk '
                         BEGIN { entries = ENVIRON["AUTO_ENTRIES"] }
                         /^<!--/ && !inserted { print entries; print ""; inserted = 1 }
