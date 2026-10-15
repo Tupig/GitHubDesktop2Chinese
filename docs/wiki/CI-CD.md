@@ -103,6 +103,17 @@ Windows 产物（`GitHubDesktop2Chinese.exe`）的发布前代码签名流程已
 - **后续启用路径**（维护者，二选一）：社区可见度提升后**重新申请** [SignPath Foundation](https://signpath.org/apply)（可再次审核），或转[付费订阅](https://docs.signpath.io/change-subscription)；获批后按下述一次性配置接入即可，无需改动代码；
 - **SignPath 侧一次性配置**（维护者）：创建项目（slug 与仓库名一致；Artifact Configuration 引用 [`.signpath/artifact-configuration.xml`](../../.signpath/artifact-configuration.xml)；Trusted Build System 关联 GitHub.com 本仓库）→ 创建 `release-signing` 签名策略 → 生成 API Token 与组织 ID 分别存入仓库 Secrets / Variables。
 
+## OpenSSL 产库供应链校验
+
+四个产库任务（`OpensslLinux` / `OpensslWin` / `OpensslMacosArm64` / `OpensslMacosX64`）从 GitHub release 下载 OpenSSL 源码包后执行**双重哈希校验**（实现：[`tools/ci/verify-openssl-tarball.sh`](../../tools/ci/verify-openssl-tarball.sh)，#184）：
+
+1. **GitHub release 旁证**（#118）：下载同一 release 提供的 `.sha256` 并 `sha256sum -c` 校验；
+2. **openssl.org 独立旁证**（#184）：再与 [openssl.org 官方公示](https://www.openssl.org/source/)的 SHA256 交叉核对——优先查脚本内置的**常备版本映射表**（3.5 LTS 系列，硬编码 openssl.org 官网公布值）；版本未收录（新版本刚发布）时回退在线抓取 `https://www.openssl.org/source/openssl-<版本>.tar.gz.sha256` 比对（openssl.org 自有 Azure Blob 直出，与 GitHub 分属两源）。
+
+源码包 tarball 与 `.sha256` 旁证来自同一 GitHub release，平台被攻破时可被同时篡改；openssl.org 与 GitHub 分属两源，构成独立第二旁证。任一比对不通过、或映射表未收录且 openssl.org 连续抓取失败，产库任务即失败（fail-closed），不产出库文件。四平台源码包 SHA256 一致性另由 `OpensslVendorPR` 汇总核验后才开入库 PR。
+
+> 升级 OpenSSL 版本时需同步在常备映射表登记新版本的 openssl.org 官方哈希（附 `https://www.openssl.org/source/openssl-<版本>.tar.gz.sha256` 来源链接与获取日期）。
+
 ## 质量门明细（localization.json 校验）
 
 PR 与发布前对 `localization.json` 做静态校验（脚本：`tools/ci/check-localization.py`）：
@@ -265,6 +276,17 @@ The pre-release code-signing flow for the Windows artifact (`GitHubDesktop2Chine
 - **Flow** (inside the release job): download build artifacts → upload the exe to be signed separately (SignPath requires the signing subject to exist as a GitHub artifact first) → submit the signing request and wait for completion → replace the original exe with the signed one → **regenerate the build provenance attestation** for the signed artifact (signing changes the file content, so the unsigned version's attestation digest no longer matches);
 - **Paths to enable it later** (maintainers, either one): **reapply** to [SignPath Foundation](https://signpath.org/apply) once community visibility grows (applications are welcome again), or switch to a [paid subscription](https://docs.signpath.io/change-subscription); once approved, complete the one-time setup below — no code changes needed;
 - **One-time SignPath-side setup** (maintainers): create a project (slug matching the repository name; Artifact Configuration referencing [`.signpath/artifact-configuration.xml`](../../.signpath/artifact-configuration.xml); Trusted Build System linked to this repository on GitHub.com) → create the `release-signing` signing policy → generate an API Token and organization ID and store them in repository Secrets / Variables respectively.
+
+## OpenSSL Vendoring Supply-Chain Verification
+
+The four vendoring jobs (`OpensslLinux` / `OpensslWin` / `OpensslMacosArm64` / `OpensslMacosX64`) run a **two-layer hash verification** after downloading the OpenSSL source tarball from the GitHub release (implementation: [`tools/ci/verify-openssl-tarball.sh`](../../tools/ci/verify-openssl-tarball.sh), #184):
+
+1. **GitHub release digest** (#118): the `.sha256` shipped with the same release is verified via `sha256sum -c`;
+2. **openssl.org independent corroboration** (#184): the tarball is additionally cross-checked against the SHA256 published by [openssl.org](https://www.openssl.org/source/) — first against the script's built-in **standby-version map** (3.5 LTS series, hardcoded from openssl.org); for versions not yet registered (a fresh release) it falls back to fetching `https://www.openssl.org/source/openssl-<version>.tar.gz.sha256` for comparison (served from openssl.org's own Azure Blob storage, independent of GitHub).
+
+The tarball and its `.sha256` digest come from the same GitHub release, so a compromised platform could tamper with both at once; openssl.org and GitHub are independent origins, forming a second corroboration. Any mismatch — or a version missing from the map while openssl.org fetches keep failing — fails the vendoring run (fail-closed), producing no library artifacts. Cross-platform tarball SHA256 consistency is additionally asserted by `OpensslVendorPR` before the intake PR is opened.
+
+> When upgrading the OpenSSL version, register the new version's official openssl.org hash in the standby map as well (attaching the `https://www.openssl.org/source/openssl-<version>.tar.gz.sha256` source link and retrieval date).
 
 ## Quality Gate Details (localization.json validation)
 
