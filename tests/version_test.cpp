@@ -76,6 +76,12 @@ const ParseCase kCases[] = {
     {"1.2-rc1", true, 1, 2, 0, 0, Status::Release},
     {"1.2.3-4", true, 1, 2, 3, 0, Status::Release},
     {"1.2.3-rc.2", true, 1, 2, 3, 0, Status::Release},
+    // 无分隔符垃圾字符: 终止当前段解析并保留已识别部分, 其后数字不并入版本号(#175)
+    {"1.2abc3", true, 1, 2, 0, 0, Status::Release},
+    {"1.2.3x4", true, 1, 2, 3, 0, Status::Release},
+    {"1.2.3rc4", true, 1, 2, 3, 0, Status::Release},
+    {"1.2.x3", true, 1, 2, 0, 0, Status::Release},
+    {"1.x2", false, 0, 0, 0, 0, Status::Release},
     // 组件上限 99999: 累积后检查(边界恰为上限值, #122 A2); 至少要读出 major.minor 两段
     {"99999.1", true, 99999, 1, 0, 0, Status::Release},
     {"1.99999", true, 1, 99999, 0, 0, Status::Release},
