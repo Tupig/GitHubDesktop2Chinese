@@ -35,6 +35,10 @@
 #        页即时可见, 无需 Issue 渠道
 #   注9: OpenSSL 版本定时检测(周一 UTC 02:00): 查 3.5 LTS 系列最新, 与仓库当前版本对比;
 #        有新版本 → 自动触发产库并行矩阵 + 开入库 PR; 无新版本 → 跳过
+#   注10: 产库源码包双重哈希校验(#184): GitHub release .sha256 旁证(#118)之外, 四个产库任务
+#         下载 tarball 后另与 openssl.org 公示 SHA256 独立比对(tools/ci/verify-openssl-tarball.sh:
+#         常备映射表硬编码官方哈希, 未收录版本回退在线抓取 openssl.org, 无旁证即失败 fail-closed),
+#         防 GitHub 平台被攻破时 tarball 与同源旁证一并篡改
 #   防重复: push 仅绑定 main 与 tag → PR 分支的推送不会二次触发(PR 由 pull_request 单路径负责);
 #           同一 PR 连续推送由 concurrency 取消陈旧运行
 #   边界:   发布类(auto/release)仅限 main 触发(防特性分支误发布); 其他 ref 可跑 build/security/maintain/vendor 排查
@@ -977,6 +981,10 @@ jobs:
             --output "openssl-$OSSL_VER.tar.gz.sha256" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
           sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
+          # openssl.org 官方哈希独立比对(#184): GitHub release 的 tarball 与 .sha256 旁证同源,
+          # 平台被攻破可同时篡改; 再与 openssl.org 公示 SHA256 交叉核对(常备映射表硬编码,
+          # 未收录版本回退在线抓取 openssl.org), 无独立旁证即失败退出(fail-closed)。
+          bash "$GITHUB_WORKSPACE/tools/ci/verify-openssl-tarball.sh" "$OSSL_VER" "openssl-$OSSL_VER.tar.gz"
           mkdir -p openssl-src
           tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
           cd openssl-src
@@ -1102,6 +1110,10 @@ jobs:
             --output "openssl-$OSSL_VER.tar.gz.sha256" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
           sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
+          # openssl.org 官方哈希独立比对(#184): GitHub release 的 tarball 与 .sha256 旁证同源,
+          # 平台被攻破可同时篡改; 再与 openssl.org 公示 SHA256 交叉核对(常备映射表硬编码,
+          # 未收录版本回退在线抓取 openssl.org), 无独立旁证即失败退出(fail-closed)。
+          bash "$GITHUB_WORKSPACE/tools/ci/verify-openssl-tarball.sh" "$OSSL_VER" "openssl-$OSSL_VER.tar.gz"
           mkdir -p openssl-src
           tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
           # tarball_sha256 记录(#F2): GNU coreutils 在文件名含反斜杠(Windows 全路径
@@ -1263,6 +1275,10 @@ jobs:
             --output "openssl-$OSSL_VER.tar.gz.sha256" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
           sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
+          # openssl.org 官方哈希独立比对(#184): GitHub release 的 tarball 与 .sha256 旁证同源,
+          # 平台被攻破可同时篡改; 再与 openssl.org 公示 SHA256 交叉核对(常备映射表硬编码,
+          # 未收录版本回退在线抓取 openssl.org), 无独立旁证即失败退出(fail-closed)。
+          bash "$GITHUB_WORKSPACE/tools/ci/verify-openssl-tarball.sh" "$OSSL_VER" "openssl-$OSSL_VER.tar.gz"
           mkdir -p openssl-src
           tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
           cd openssl-src
@@ -1388,6 +1404,10 @@ jobs:
             --output "openssl-$OSSL_VER.tar.gz.sha256" \
             "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
           sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
+          # openssl.org 官方哈希独立比对(#184): GitHub release 的 tarball 与 .sha256 旁证同源,
+          # 平台被攻破可同时篡改; 再与 openssl.org 公示 SHA256 交叉核对(常备映射表硬编码,
+          # 未收录版本回退在线抓取 openssl.org), 无独立旁证即失败退出(fail-closed)。
+          bash "$GITHUB_WORKSPACE/tools/ci/verify-openssl-tarball.sh" "$OSSL_VER" "openssl-$OSSL_VER.tar.gz"
           mkdir -p openssl-src
           tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
           cd openssl-src
@@ -1715,7 +1735,7 @@ jobs:
             echo ""
             echo "- 触发运行：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "- 上游源码包：\`openssl-$OSSL_VER.tar.gz\`（[官方 Release](https://github.com/openssl/openssl/releases/tag/openssl-$OSSL_VER)）"
-            echo "- 源码包 SHA256（四平台产库任务各自独立下载并经官方 \`.sha256\` 校验，已验证四值一致）：\`${{ needs.OpensslLinux.outputs.tarball_sha256 }}\`"
+            echo "- 源码包 SHA256（四平台产库任务各自独立下载，经 GitHub release \`.sha256\` 校验 + openssl.org 官方哈希独立比对 #184，已验证四值一致）：\`${{ needs.OpensslLinux.outputs.tarball_sha256 }}\`"
             echo "- 3.5 LTS 系列最新校验：所产版本已核验为 openssl/openssl 3.5 LTS 最新 patch"
             echo ""
             echo "### 产物清单与 SHA256"
@@ -1732,7 +1752,7 @@ jobs:
             echo "### 审查清单（合并前逐项确认）"
             echo ""
             echo "- [ ] 四个产库任务全部成功（见上方运行链接）"
-            echo "- [ ] 源码包 SHA256 与 [openssl.org/source](https://www.openssl.org/source/) 公示值交叉核对"
+            echo "- [ ] 源码包 SHA256 与 [openssl.org/source](https://www.openssl.org/source/) 公示值一致（四个产库任务已自动比对 #184，此处人工抽查复核）"
             echo "- [ ] 检出本 PR 分支本地构建通过（Windows：CMake 构建 + version_test + 冒烟）"
             echo "- [ ] 同步更新文档版本号：\`third_party/README.md\`、\`README.md\`、\`SECURITY.md\`、\`docs/wiki/编译指南.md\`"
             echo "- [ ] 按 \`--squash\` 合并并删除分支"
