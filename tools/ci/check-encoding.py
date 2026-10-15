@@ -47,6 +47,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+# 仓库根（按脚本位置推导, #246）: 使"子目录调用"时的相对路径枚举与读取一致
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 # ── 内置默认配置（优先级最低，可被 --config 配置文件与命令行参数覆盖） ──
 DEFAULTS = {
     # 允许编码白名单（检测标签小写；ascii 为 utf-8 子集，单独列出仅为统计展示）
@@ -83,6 +86,9 @@ CONFIG_KEY_TYPES = {
 
 def detect_encoding(path: Path, sample_size: int = DEFAULTS["sample_size"]) -> str:
     """检测单个文件的实际编码，返回检测标签（小写）。"""
+    # 相对路径按仓库根解析(#246): 子目录调用时进程 CWD 可能非仓库根
+    if not path.is_absolute():
+        path = REPO_ROOT / path
     try:
         raw = path.read_bytes()
     except OSError as error:
