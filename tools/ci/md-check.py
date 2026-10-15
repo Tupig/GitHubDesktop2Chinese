@@ -16,7 +16,7 @@ if isinstance(sys.stdout, io.TextIOWrapper):
 # 路径按脚本位置推导(tools/ci -> 仓库根), 不依赖当前工作目录
 ROOT = Path(__file__).resolve().parents[2]
 # 构建产物/依赖缓存目录不参与扫描
-PRUNE_DIRS = {".git", "out", "build", "dist", "node_modules"}
+PRUNE_DIRS = {".git", "out", "build", "dist", "node_modules", ".deveco"}
 
 SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:")
 HEADING_RE = re.compile(r"^ {0,3}(#{1,6})\s+(.*?)\s*$")

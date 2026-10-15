@@ -11,13 +11,14 @@ module.exports = async ({ github, context, core }) => {
     const repo = context.repo.repo;
 
     // 本次 run 的失败 job 清单(conclusion === 'failure'; skipped/cancelled/success 均不计)
-    const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+    // paginate 聚合全部页(#247): 单 run job 数超 100 时只取首页会漏检失败 job
+    const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
       owner,
       repo,
       run_id: context.runId,
       per_page: 100,
     });
-    const failedJobs = jobs.jobs.filter(j => j.conclusion === 'failure');
+    const failedJobs = jobs.filter(j => j.conclusion === 'failure');
 
     // 列 open issue 按标题前缀识别(不按 label 过滤, 与 report-issue.js #144 同因:
     // label 被人工移除会漏查导致重复开单; 该前缀仅本脚本使用)
