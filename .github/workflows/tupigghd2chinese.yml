@@ -648,7 +648,12 @@ jobs:
           ./build-cov/version_test
           ./build-cov/replace_engine_test
           ./build-cov/utils_test
-          gcovr --root . --filter '.*/src/.*' --txt --fail-under-line 65
+          # 仅度量本仓被这三个单测目标编译到的头(src/utils、src/version)；
+          # 必须排除 third_party —— vendored googletest 的源码路径同样含 /src/(否则被误计入分母)
+          gcovr --root . \
+            --filter '.*/src/utils/.*' --filter '.*/src/version/.*' \
+            --exclude '.*/third_party/.*' \
+            --txt --fail-under-line 65
 
   # ═════════════════════════════════════════════════
   # 3. 安全与维护门（CodeQL 安全扫描 + 自动维护 + Wiki 同步 + 构建跳过说明）
