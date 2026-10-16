@@ -602,10 +602,13 @@ jobs:
       - name: 全量扫描源码编码（UTF-8 无 BOM）
         run: python tools/ci/check-encoding.py --config tools/ci/encoding-check.json
 
+      # #276: 钉到具体 patch（原 '24' 为主版本浮动）；启用 npm 缓存加速 npm ci
       - name: 安装 Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 24
+          node-version: 24.22.0
+          cache: npm
+          cache-dependency-path: tools/auto-maintain/package-lock.json
 
       - name: 语法检查
         working-directory: tools/auto-maintain
@@ -635,6 +638,18 @@ jobs:
       - name: 校验器单元测试（pytest + 覆盖率门禁）
         run: python -m pytest --cov --cov-report=term-missing
 
+      # #276: tools/ci 下的 bash 脚本此前无任何校验 —— 至少做语法检查（bash -n）
+      - name: Shell 脚本语法检查（bash -n）
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          scripts=(tools/ci/*.sh)
+          if [ ${#scripts[@]} -eq 0 ]; then
+            echo "::error::未找到任何 tools/ci/*.sh（脚本被误删？）"
+            exit 1
+          fi
+          for f in "${scripts[@]}"; do bash -n "$f" && echo "语法通过: $f"; done
+
       # 覆盖率门禁(#263/#271): Python 见上(pytest-cov, 阈值在 .coveragerc)；Node 见 npm test(Vitest v8 阈值在 vitest.config.mjs)；
       # C++ 在此以 gcov 度量 —— 仅构建无 OpenSSL 依赖的单测目标(快), 阈值针对 src/ 下的头文件逻辑
       - name: 安装 C++ 覆盖率报告工具（gcovr，版本钉扎见 requirements-dev.txt）
@@ -644,11 +659,12 @@ jobs:
         run: |
           cmake -B build-cov -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_FLAGS=--coverage -DCMAKE_EXE_LINKER_FLAGS=--coverage
-          cmake --build build-cov --target version_test replace_engine_test utils_test l10n_rules_test
+          cmake --build build-cov --target version_test replace_engine_test utils_test l10n_rules_test backup_policy_test
           ./build-cov/version_test
           ./build-cov/replace_engine_test
           ./build-cov/utils_test
           ./build-cov/l10n_rules_test
+          ./build-cov/backup_policy_test
           # 仅度量本仓被这四个单测目标编译到的头(src/utils、src/version)。
           # 注意: gcovr 的 --filter/--exclude 按相对 --root 的路径匹配, 且是子串匹配,
           # 故不能用 '.*/src/.*'(会连带匹配 vendored googletest 的 src/); 用目录子串最稳。
@@ -748,7 +764,7 @@ jobs:
         if: steps.maintain_gate.outputs.enabled == 'true'
         continue-on-error: true
         with:
-          node-version: 24
+          node-version: 24.22.0
 
       # Git Bash 自带 unzip; Linux 才走 apt 安装; 均缺失则显式失败
       - name: 安装解压工具（缺失时）
