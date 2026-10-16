@@ -197,7 +197,7 @@ npm run all        # 失效检测 + 未翻译候选提取, 报告写入系统临
 
 > [!NOTE]
 > **定时与发布规则**
-> - **定时调度**：每日北京时间 10:00（UTC 02:00）自动执行构建与自动维护。
+> - **定时调度**：每日 UTC 01:23（北京时间 09:23）自动执行构建与自动维护；另每周一 UTC 02:00 执行 OpenSSL 版本检测。
 > - **变更检测**：以最新 `v*` tag 为基准，检测 `json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 的实际变更。
 > - **条件发布**：push `main`、定时与手动 `auto` 仅在检测到上述变更时发布新版本（补丁号 +1）；无变更自动跳过，避免空版本。`type=release` 与推送 tag 始终发布。
 
@@ -524,7 +524,7 @@ npm run all        # invalid-entry detection + untranslated candidate extraction
 
 > [!NOTE]
 > **Scheduling and release rules**
-> - **Scheduled runs**: build and auto-maintenance run daily at 10:00 Beijing time (02:00 UTC).
+> - **Scheduled runs**: build and auto-maintenance run daily at 01:23 UTC (09:23 Beijing time); the OpenSSL version check runs Mondays at 02:00 UTC.
 > - **Change detection**: actual changes to `json/`, `src/`, `third_party/`, `CMakeLists.txt`, `CMakePresets.json` are detected against the latest `v*` tag.
 > - **Conditional releases**: push to `main`, scheduled runs, and manual `auto` publish a new version (patch number +1) only when such changes are detected; otherwise the release step is skipped to avoid empty versions. `type=release` and pushed tags always publish.
 

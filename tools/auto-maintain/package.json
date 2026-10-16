@@ -5,7 +5,7 @@
   "description": "自动维护 TuPigGHD2Chinese 的 localization.json：失效检测 + 未翻译候选提取",
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
   },
   "scripts": {
     "check": "node src/index.js check",

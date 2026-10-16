@@ -22,28 +22,32 @@
 | `release` | 构建 + 检查 + 发布（仅 main 分支可用） |
 | `security` | 质量校验 + 工具自检 + CodeQL |
 | `maintain` | 质量校验 + 工具自检 + 自动维护（失效检测 + 候选提取 + Issue） |
-| `vendor` | 仅产库 OpenSSL 静态库（三平台 artifact，版本由 `openssl-version` 指定） |
+| `vendor` | 仅产库 OpenSSL 静态库（四平台 artifact：linux-x64 / windows-x64 / macos-arm64 / macos-x64，版本由 `openssl-version` 指定） |
 
 `version` 为可选覆盖：**留空即自动递增版本**（如 `0.0.1 → 0.0.2`，patch 满 100 进位 minor 并重置为 1）；填写时不带 `v` 前缀（如 `0.0.2`），必须为 `x.y.z` 纯数字，否则 CI 在版本号校验处直接失败；仅对 build / auto / release 的产物命名与发布生效。`openssl-version` 仅 `type=vendor` 生效：产库 OpenSSL 版本（不带 `v` 前缀，如 `3.5.9`），留空自动取 **3.5 LTS 系列最新 patch**（官方政策：3.5 为 LTS 支持至 2030-04，4.0 非 LTS 不采纳）。
 
 并发控制：同一 ref 的重复触发会取消进行中的旧运行（PR 场景 `cancel-in-progress`），避免排队堆积。
 
-权限收敛：`contents: read`、`issues: write`、`security-events: write`，仅声明所需。
+权限收敛：工作流级仅 `contents: read`；`issues: write` 与 `security-events: write` 声明在需要它们的 `CodeqlScan` job 级 —— 按 job 最小化（#241）。
 
 ## Job 矩阵
 
-Job 依赖关系：`Build` / `JsonCheck` ← `Version`；`CodeqlScan` ← `Version` + `JsonCheck`；产库四连 `OpensslLinux` ← `CodeqlScan` → `OpensslWin` → `OpensslMacosArm64` → `OpensslMacosX64`（以 `always()` + 产库触发条件串联，不受上游跳过/失败传导，保持低频独立产库）；`Release` ← `Version` + `Build` + `JsonCheck` + `CodeqlScan`。`Version` 的直连边为读取其 outputs（GitHub 仅直接 `needs` 可访问 outputs，间接依赖不传递）；全图以 `Version` 为根连通、无孤立任务、无循环、无悬空 needs，needs 表达式引用须指向存在的直接依赖任务，由单工作流规范校验（`tools/ci/check-workflow.py`，W0-W6）强制。`CodeqlScan` 内四个功能块按各自触发判定独立执行，CodeQL 块失败不阻断后续维护块（`!cancelled()`），但**整个 job 失败会阻断 `Release`**。
+Job 依赖关系：`Build` / `JsonCheck` ← `Version`；`CodeqlScan` ← `Version` + `JsonCheck`；产库四连 `OpensslLinux` / `OpensslWin` / `OpensslMacosArm64` / `OpensslMacosX64` 均 ← `CodeqlScan` + `OpensslCheck`（**并行**，不再串行依赖；以 `always()` + 产库触发条件串联，不受上游跳过/失败传导，保持低频独立产库）；`OpensslVerify` ← 产库四连；`OpensslVendorPR` ← 产库四连 + `OpensslVerify`；`CiNotify` ← 全部 12 任务（`!cancelled()`）；`Release` ← `Version` + `Build` + `JsonCheck` + `CodeqlScan`。`Version` 的直连边为读取其 outputs（GitHub 仅直接 `needs` 可访问 outputs，间接依赖不传递）；全图以 `Version` 为根连通、无孤立任务、无循环、无悬空 needs，needs 表达式引用须指向存在的直接依赖任务，由单工作流规范校验（`tools/ci/check-workflow.py`，W0-W6）强制。`CodeqlScan` 内四个功能块按各自触发判定独立执行，CodeQL 块失败不阻断后续维护块（`!cancelled()`），但**整个 job 失败会阻断 `Release`**。
 
 | Job | 触发 | 内容 |
 | --- | --- | --- |
 | `Version`（变更检测） | 全部触发场景（PR / push / tag / 定时 / 手动） | 以最新 `v*` tag 为基准，检测 `json/`、`src/`、`third_party/`、`CMakeLists.txt`、`CMakePresets.json` 的实际变更（排除纯文档 `third_party/README.md`），输出 `changed` 供发布环节判断；并与上次成功构建对比输出 `build_changed`（见[构建差异检测](#构建差异检测构建跳过)） |
 | `Build` | PR / push / tag / 定时 / 手动 auto、build、release；无差异的定时 / push main 跳过（见[构建差异检测](#构建差异检测构建跳过)） | **四目标构建矩阵 + 产物功能测试**：Windows x64、macOS x64 / arm64（单架构包，静态链接 OpenSSL + strip/LTO 裁剪）、Linux x64；`fail-fast` 关闭，单平台失败不取消其余平台 |
-| `JsonCheck` | PR / push / tag / 定时 / 手动 auto、security、maintain、release | 质量校验门（合并原 `json-quality` / `encoding-check` / `tools-test`）：`localization.json` 深度校验（正则合法性、结构完整性、占位符、`std::regex` 兼容黑名单、ReDoS、译文风格）+ 源码编码格式检查（UTF-8 无 BOM）+ 自动维护工具语法检查与单元测试 + Markdown 链接检查 + 单工作流规范校验（W0-W6）+ 校验器单元测试 + **覆盖率门禁**（Python `pytest-cov` ≥90% / Node Vitest v8 阈值 / C++ `gcov`+`gcovr` 行覆盖率 ≥65%）；显示名即分支保护必需 check，改名须同步 `branches/main/protection` 的 `required_status_checks` |
+| `JsonCheck` | PR / push / tag / 定时 / 手动 auto、security、maintain、release | 质量校验门（合并原 `json-quality` / `encoding-check` / `tools-test`）：`localization.json` 深度校验（正则合法性、结构完整性、占位符、`std::regex` 兼容黑名单、ReDoS、译文风格）+ 源码编码格式检查（UTF-8 无 BOM）+ 自动维护工具语法检查与单元测试 + Markdown 链接检查 + 单工作流规范校验（W0-W6）+ 校验器单元测试 + **覆盖率门禁**（Python `pytest-cov` ≥90% / Node Vitest v8 阈值 / C++ `gcov`+`gcovr` 行覆盖率 ≥80%）；显示名即分支保护必需 check，改名须同步 `branches/main/protection` 的 `required_status_checks` |
 | `CodeqlScan` | PR（同仓分支；fork PR 跳过 CodeQL 块——其令牌无 security-events 写权限，上传必失败）/ push main / tag（空跑保连通）/ 定时（仅维护块）/ 手动 auto、security、maintain、release | 安全与维护门，运行于 Windows runner（扫描 `_WIN32` 代码分支；合并原 `codeql` / `auto-maintain` / `sync-wiki` / `build-skip-notice`），四个功能块按触发判定独立执行：① CodeQL C/C++ 安全扫描（不含定时，节省资源）；② 自动维护：失效检测 + 候选提取 + Issue（详见[自动维护工具](自动维护工具.md#ci-自动维护)）；③ `docs/wiki/**` 变更后同步 GitHub Wiki（见[Wiki 自动同步](#wiki-自动同步)）；④ 构建跳过说明 |
-| `OpensslLinux` | PR 打 `vendor-openssl` 标签 / 手动 `vendor` | 产库 OpenSSL（linux x64 静态库，保留 7 天），供维护者下载后提交 `third_party/`，构建期零下载零编译 |
+| `OpensslLinux` | PR 打 `vendor-openssl` 标签 / 手动 `vendor` / OpenSSL 版本检测 | 产库 OpenSSL（linux x64 静态库，保留 7 天）；由 `OpensslVendorPR` 在验证通过后组装并自动开入库 PR（不再人工下载提交），构建期零下载零编译 |
 | `OpensslWin` | 同上 | 产库 OpenSSL（windows x64 `.lib`，保留 7 天） |
-| `OpensslMacosArm64` | 同上 | 产库 OpenSSL（macOS arm64，`macos-15-intel` 交叉编译，保留 7 天） |
-| `OpensslMacosX64` | 同上 | 产库 OpenSSL（macOS x64，`macos-15-intel` 交叉编译，保留 7 天） |
+| `OpensslMacosArm64` | 同上 | 产库 OpenSSL（macOS arm64，`macos-15` **原生 ARM** 构建，保留 7 天） |
+| `OpensslMacosX64` | 同上 | 产库 OpenSSL（macOS x64，`macos-15-intel` **原生 x64** 构建，保留 7 天） |
+| `OpensslCheck` | 定时（周一 UTC 02:00）/ 手动 vendor | OpenSSL 版本定时检测：查 3.5 LTS 系列最新版与仓库当前版本差异，供产库决策 |
+| `OpensslVerify` | 产库四连全部成功后 | 产库验证：组装 `third_party/` 并在四平台矩阵构建验证新静态库可用 |
+| `OpensslVendorPR` | 产库四连 + 验证全部成功后 | 产库自动开 PR：组装 `third_party/` 并自动创建入库 PR（`GITHUB_TOKEN` 创建的 PR 不触发 CI，由维护者按 PR 内审查清单确认合并） |
+| `CiNotify` | 仅定时构建 | CI 失败通知：有失败 job 时创建/更新单条 `[CI 失败]` Issue（连续失败计数），恢复后自动关闭 |
 | `Release` | push main（有变更）/ tag `v*` / 定时（有变更）/ 手动 auto（main，有变更）、release（main） | 发布，见下节 |
 
 ## 发布规则
@@ -196,28 +200,32 @@ Execution scope per `type` for manual (`workflow_dispatch`) runs:
 | `release` | Build + checks + release (main branch only) |
 | `security` | Quality validation + tool self-tests + CodeQL |
 | `maintain` | Quality validation + tool self-tests + maintenance (invalid detection + candidate extraction + Issues) |
-| `vendor` | OpenSSL static-library vendoring only (three-platform artifacts; version via `openssl-version`) |
+| `vendor` | OpenSSL static-library vendoring only (four-platform artifacts: linux-x64 / windows-x64 / macos-arm64 / macos-x64; version via `openssl-version`) |
 
 `version` is an optional override: **leave it empty to auto-increment the version** (e.g. `0.0.1 → 0.0.2`; a full patch of 100 carries into minor, resetting it to 1); when provided, omit the `v` prefix (e.g. `0.0.2`) and it must be plain digits `x.y.z`, otherwise CI fails at version validation; it only affects artifact naming and releases for build / auto / release. `openssl-version` only takes effect for `type=vendor`: the OpenSSL version to vendor (no `v` prefix, e.g. `3.5.9`); empty auto-selects the **latest patch in the 3.5 LTS series** (per official policy: 3.5 is LTS supported until 2030-04; 4.0 is non-LTS and not adopted).
 
 Concurrency: repeated triggers for the same ref cancel older in-progress runs (`cancel-in-progress` in the PR scenario), avoiding queue pile-ups.
 
-Scoped permissions: `contents: read`, `issues: write`, `security-events: write` — only what is needed.
+Scoped permissions: workflow-level is `contents: read` only; `issues: write` and `security-events: write` are declared at the `CodeqlScan` job level — minimized per job (#241).
 
 ## The Job Matrix
 
-Job dependencies: `Build` / `JsonCheck` ← `Version`; `CodeqlScan` ← `Version` + `JsonCheck`; the vendoring chain `OpensslLinux` ← `CodeqlScan` → `OpensslWin` → `OpensslMacosArm64` → `OpensslMacosX64` (chained with `always()` + the vendor trigger conditions, immune to upstream skips/failures, keeping vendoring rare and independent); `Release` ← `Version` + `Build` + `JsonCheck` + `CodeqlScan`. The direct `Version` edges exist to read its outputs (GitHub only exposes outputs to direct `needs`, not transitive ones); the whole graph is rooted at `Version`, connected, cycle-free, with no orphaned jobs or dangling needs, and every `needs`-expression reference pointing at an existing direct dependency — enforced by the single-workflow spec validation (`tools/ci/check-workflow.py`, W0-W6). The four function blocks inside `CodeqlScan` run independently per their trigger gates; a CodeQL-block failure doesn't stop the maintenance block (`!cancelled()`), but **a failure of the whole job blocks `Release`**.
+Job dependencies: `Build` / `JsonCheck` ← `Version`; `CodeqlScan` ← `Version` + `JsonCheck`; the four vendoring jobs `OpensslLinux` / `OpensslWin` / `OpensslMacosArm64` / `OpensslMacosX64` all ← `CodeqlScan` + `OpensslCheck` (**in parallel**, no longer chained; `always()` + the vendor trigger conditions keep them immune to upstream skips/failures and rare); `OpensslVerify` ← the four vendoring jobs; `OpensslVendorPR` ← the four vendoring jobs + `OpensslVerify`; `CiNotify` ← all 12 jobs (`!cancelled()`); `Release` ← `Version` + `Build` + `JsonCheck` + `CodeqlScan`. The direct `Version` edges exist to read its outputs (GitHub only exposes outputs to direct `needs`, not transitive ones); the whole graph is rooted at `Version`, connected, cycle-free, with no orphaned jobs or dangling needs, and every `needs`-expression reference pointing at an existing direct dependency — enforced by the single-workflow spec validation (`tools/ci/check-workflow.py`, W0-W6). The four function blocks inside `CodeqlScan` run independently per their trigger gates; a CodeQL-block failure doesn't stop the maintenance block (`!cancelled()`), but **a failure of the whole job blocks `Release`**.
 
 | Job | Triggers | Contents |
 | --- | --- | --- |
 | `Version` (change detection) | All trigger scenarios (PR / push / tag / schedule / manual) | Using the latest `v*` tag as the baseline, detects actual changes in `json/`, `src/`, `third_party/`, `CMakeLists.txt`, `CMakePresets.json` (excluding the docs-only `third_party/README.md`) and outputs `changed` for the release stage; also compares against the last successful build to output `build_changed` (see [Build Diff Detection](#build-diff-detection-build-skipping)) |
 | `Build` | PR / push / tag / schedule / manual auto, build, release; skipped for unchanged schedule / push main runs (see [Build Diff Detection](#build-diff-detection-build-skipping)) | **Four-target build matrix + artifact functional tests**: Windows x64, macOS x64 / arm64 (single-arch packages, statically linked OpenSSL + strip/LTO trimming), Linux x64; `fail-fast` disabled so a single-platform failure doesn't cancel the others |
-| `JsonCheck` | PR / push / tag / schedule / manual auto, security, maintain, release | The quality gate (merges the former `json-quality` / `encoding-check` / `tools-test`): deep `localization.json` validation (regex validity, structure, placeholders, `std::regex` compatibility blacklist, ReDoS, translation style) + source encoding check (UTF-8 no BOM) + auto-maintain tool syntax check & unit tests + Markdown link check + single-workflow spec validation (W0-W6) + validator unit tests + **coverage gates** (Python `pytest-cov` ≥90% / Node Vitest v8 thresholds / C++ `gcov`+`gcovr` line coverage ≥65%) |
+| `JsonCheck` | PR / push / tag / schedule / manual auto, security, maintain, release | The quality gate (merges the former `json-quality` / `encoding-check` / `tools-test`): deep `localization.json` validation (regex validity, structure, placeholders, `std::regex` compatibility blacklist, ReDoS, translation style) + source encoding check (UTF-8 no BOM) + auto-maintain tool syntax check & unit tests + Markdown link check + single-workflow spec validation (W0-W6) + validator unit tests + **coverage gates** (Python `pytest-cov` ≥90% / Node Vitest v8 thresholds / C++ `gcov`+`gcovr` line coverage ≥80%) |
 | `CodeqlScan` | PR (same-repo branches; fork PRs skip the CodeQL block — their token lacks security-events write permission, so upload would always fail) / push main / tag (no-op, keeps the graph connected) / schedule (maintenance block only) / manual auto, security, maintain, release | Security & maintenance gate on a Windows runner (scanning `_WIN32` code branches; merges the former `codeql` / `auto-maintain` / `sync-wiki` / `build-skip-notice`), four function blocks gated independently: ① CodeQL C/C++ scanning (excludes schedule to save resources); ② auto-maintenance: invalid-entry detection + candidate extraction + Issues (see [Auto-Maintain Tool](自动维护工具.md#ci-自动维护)); ③ wiki sync of `docs/wiki/**` (see [Automatic Wiki Sync](#automatic-wiki-sync)); ④ build-skip notice |
-| `OpensslLinux` | PR labeled `vendor-openssl` / manual `vendor` | Vendor OpenSSL (linux x64 static library, retained 7 days) for maintainers to download and commit under `third_party/`; zero downloads or compilation at build time |
+| `OpensslLinux` | PR labeled `vendor-openssl` / manual `vendor` / OpenSSL version check | Vendor OpenSSL (linux x64 static library, retained 7 days); `OpensslVendorPR` assembles and opens the commit PR automatically after verification (no manual download/commit); zero downloads or compilation at build time |
 | `OpensslWin` | Same as above | Vendor OpenSSL (windows x64 `.lib`, retained 7 days) |
-| `OpensslMacosArm64` | Same as above | Vendor OpenSSL (macOS arm64, cross-compiled on `macos-15-intel`, retained 7 days) |
-| `OpensslMacosX64` | Same as above | Vendor OpenSSL (macOS x64, cross-compiled on `macos-15-intel`, retained 7 days) |
+| `OpensslMacosArm64` | Same as above | Vendor OpenSSL (macOS arm64, built **natively** on `macos-15` ARM, retained 7 days) |
+| `OpensslMacosX64` | Same as above | Vendor OpenSSL (macOS x64, built **natively** on `macos-15-intel`, retained 7 days) |
+| `OpensslCheck` | Schedule (Mondays 02:00 UTC) / manual vendor | Periodic OpenSSL version check: compares the latest 3.5 LTS release against the version in the repo, to inform vendoring decisions |
+| `OpensslVerify` | After all four vendoring jobs succeed | Vendoring verification: assembles `third_party/` and builds the four-platform matrix against the new static libraries |
+| `OpensslVendorPR` | After the four vendoring jobs and verification all succeed | Vendoring auto-PR: assembles `third_party/` and opens the commit PR automatically (PRs created with `GITHUB_TOKEN` do not trigger CI; a maintainer merges after the checklist in the PR) |
+| `CiNotify` | Schedule runs only | CI failure notification: creates/updates a single `[CI 失败]` issue while jobs are failing (with a consecutive-failure count) and closes it on recovery |
 | `Release` | push main (with changes) / tag `v*` / schedule (with changes) / manual auto (main, with changes), release (main) | The release; see the next section |
 
 ## Release Rules
