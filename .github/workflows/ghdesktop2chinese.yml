@@ -1852,6 +1852,32 @@ jobs:
             fi
           fi
 
+      - name: 同 commit 去重判定（#255）
+        id: dedup
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # 最新 Release 的 tag 指向的提交 == 本次 GITHUB_SHA 时跳过发布(幂等发布):
+          # 防止"push main 自动补丁发版"与紧随其后的 type=release 手动派发, 对同一提交
+          # 并行各自读到同一最新 tag 而各发一版(v0.1.8 / v0.1.9 类重复, #255)。
+          LATEST_TAG="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name' 2>/dev/null || true)"
+          if [[ -z "$LATEST_TAG" ]]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "无既有 Release, 正常发布"
+            exit 0
+          fi
+          # 经 API 把 tag 解析为其指向的 commit SHA(无需 fetch-depth: 0 拉全量 tag)
+          LATEST_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${LATEST_TAG}" --jq '.sha' 2>/dev/null || true)"
+          if [[ -n "$LATEST_SHA" && "$LATEST_SHA" == "$GITHUB_SHA" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::最新 Release ${LATEST_TAG} 已对应本提交 ${GITHUB_SHA:0:7}, 跳过重复发布(#255)"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "最新 Release ${LATEST_TAG} 未对应当前提交, 正常发布"
+          fi
+
       - name: 下载全部构建产物
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -2010,6 +2036,7 @@ jobs:
           } > release-notes.md
 
       - name: 创建或更新 Release
+        if: steps.dedup.outputs.skip != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
