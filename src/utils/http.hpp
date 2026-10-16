@@ -326,7 +326,10 @@ namespace utils {
                 out = std::move(body);
                 return true;
             }
-            spdlog::warn("请求 {}{} 返回状态码 {}", url_host, params, res->status);
+            // 403/429 已在 GetWithRetry 内给出具体诊断(配额重置时刻 / 无限流信息), 此处不重复打印(#256)
+            if(res->status != 403 && res->status != 429) {
+                spdlog::warn("请求 {}{} 返回状态码 {}", url_host, params, res->status);
+            }
             out.clear();
             return false;
         }
