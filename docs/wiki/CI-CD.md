@@ -109,7 +109,7 @@ Windows 产物（`TuPigGHD2Chinese.exe`）的发布前代码签名流程已内�
 
 ## OpenSSL 产库供应链校验
 
-四个产库任务（`OpensslLinux` / `OpensslWin` / `OpensslMacosArm64` / `OpensslMacosX64`）从 GitHub release 下载 OpenSSL 源码包后执行**双重哈希校验**（实现：[`tools/ci/verify-openssl-tarball.sh`](../../tools/ci/verify-openssl-tarball.sh)，#184）：
+四个产库任务（`OpensslLinux` / `OpensslWin` / `OpensslMacosArm64` / `OpensslMacosX64`）从 GitHub release 下载 OpenSSL 源码包后执行**双重哈希校验**（实现：[`tools/ci/verify-openssl-tarball.sh`](../../tools/ci/verify-openssl-tarball.sh)，#184）；版本解析、源码下载、哈希规范化和产物校验由共用脚本 [`tools/ci/vendor-openssl-common.sh`](../../tools/ci/vendor-openssl-common.sh) 统一处理（#283）。
 
 1. **GitHub release 旁证**（#118）：下载同一 release 提供的 `.sha256` 并 `sha256sum -c` 校验；
 2. **openssl.org 独立旁证**（#184）：再与 [openssl.org 官方公示](https://www.openssl.org/source/)的 SHA256 交叉核对——优先查脚本内置的**常备版本映射表**（3.5 LTS 系列，硬编码 openssl.org 官网公布值）；版本未收录（新版本刚发布）时回退在线抓取 `https://www.openssl.org/source/openssl-<版本>.tar.gz.sha256` 比对（openssl.org 自有 Azure Blob 直出，与 GitHub 分属两源）。
@@ -287,7 +287,7 @@ The pre-release code-signing flow for the Windows artifact (`TuPigGHD2Chinese.ex
 
 ## OpenSSL Vendoring Supply-Chain Verification
 
-The four vendoring jobs (`OpensslLinux` / `OpensslWin` / `OpensslMacosArm64` / `OpensslMacosX64`) run a **two-layer hash verification** after downloading the OpenSSL source tarball from the GitHub release (implementation: [`tools/ci/verify-openssl-tarball.sh`](../../tools/ci/verify-openssl-tarball.sh), #184):
+The four vendoring jobs (`OpensslLinux` / `OpensslWin` / `OpensslMacosArm64` / `OpensslMacosX64`) run a **two-layer hash verification** after downloading the OpenSSL source tarball from the GitHub release (implementation: [`tools/ci/verify-openssl-tarball.sh`](../../tools/ci/verify-openssl-tarball.sh), #184); shared version resolution, source download, hash normalization, and artifact checks live in [`tools/ci/vendor-openssl-common.sh`](../../tools/ci/vendor-openssl-common.sh) (#283):
 
 1. **GitHub release digest** (#118): the `.sha256` shipped with the same release is verified via `sha256sum -c`;
 2. **openssl.org independent corroboration** (#184): the tarball is additionally cross-checked against the SHA256 published by [openssl.org](https://www.openssl.org/source/) — first against the script's built-in **standby-version map** (3.5 LTS series, hardcoded from openssl.org); for versions not yet registered (a fresh release) it falls back to fetching `https://www.openssl.org/source/openssl-<version>.tar.gz.sha256` for comparison (served from openssl.org's own Azure Blob storage, independent of GitHub).

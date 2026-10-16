@@ -650,6 +650,10 @@ jobs:
           fi
           for f in "${scripts[@]}"; do bash -n "$f" && echo "语法通过: $f"; done
 
+      # #283: vendor 共用逻辑、Wiki 镜像与 OpenSSL 哈希脚本功能级测试
+      - name: Shell 脚本功能测试
+        run: bash tools/ci/bash-scripts-test.sh
+
       # 覆盖率门禁(#263/#271): Python 见上(pytest-cov, 阈值在 .coveragerc)；Node 见 npm test(Vitest v8 阈值在 vitest.config.mjs)；
       # C++ 在此以 gcov 度量 —— 仅构建无 OpenSSL 依赖的单测目标(快), 阈值针对 src/ 下的头文件逻辑
       - name: 安装 C++ 覆盖率报告工具（gcovr，版本钉扎见 requirements-dev.txt）
@@ -995,33 +999,7 @@ jobs:
           INPUT_VER: ${{ github.event.inputs.openssl-version }}
         run: |
           set -euo pipefail
-          OSSL_VER=""
-          if [[ -n "$INPUT_VER" ]]; then
-            OSSL_VER="$INPUT_VER"
-          else
-            # 留空自动取 3.5 LTS 系列最新 patch(注7): 与 OpensslVendorPR 校验同源。
-            # 版本策略: 3.5 为 LTS 支持至 2030-04, 4.0 非 LTS 不采纳(维护成本最低);
-            # 防御式解析(#F1): gh CLI 解析 JSON(跨平台行为一致, 避开 macOS BSD grep/sed 与 bash 3.2
-            # 的管道差异——此前 curl|grep|sed 在 macOS 失败路径下致 set -u 报 unbound variable);
-            # 变量先初始化 + 3 次重试 + 失败给出明确错误
-            for attempt in 1 2 3; do
-              LATEST_TAG="$(gh api "repos/openssl/openssl/releases?per_page=100" \
-                --jq '[.[] | select(.tag_name | test("^openssl-3\\.5\\.[0-9]+$")) | .tag_name | ltrimstr("openssl-")] | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null || true)"
-              OSSL_VER="${LATEST_TAG#openssl-}"
-              [[ -n "$OSSL_VER" && "$OSSL_VER" != "null" ]] && break
-              echo "::warning::获取 OpenSSL 3.5 LTS 最新版本失败(第 ${attempt} 次), 10 秒后重试"
-              sleep 10
-            done
-            if [[ -z "$OSSL_VER" || "$OSSL_VER" == "null" ]]; then
-              echo "::error::无法获取 OpenSSL 3.5 LTS 系列最新版本（连续 3 次失败, 请检查网络或稍后重试）"
-              exit 1
-            fi
-            echo "未指定 openssl-version, 自动取 3.5 LTS 系列最新: $OSSL_VER"
-          fi
-          if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::openssl-version 格式非法: ${OSSL_VER}（应为 X.Y.Z, 不带 v/openssl- 前缀）"
-            exit 1
-          fi
+          OSSL_VER="$(bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" resolve "$INPUT_VER")"
           echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
           echo "ossl_ver=$OSSL_VER" >> "$GITHUB_OUTPUT"
 
@@ -1037,21 +1015,8 @@ jobs:
         if: steps.cache-ossl.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
+          bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" fetch "$OSSL_VER" "$RUNNER_TEMP"
           cd "$RUNNER_TEMP"
-          rm -rf openssl-src "openssl-$OSSL_VER.tar.gz" "openssl-$OSSL_VER.tar.gz.sha256"
-          curl --fail --location --retry 3 --retry-delay 5 \
-            --output "openssl-$OSSL_VER.tar.gz" \
-            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
-          curl --fail --location --retry 3 --retry-delay 5 \
-            --output "openssl-$OSSL_VER.tar.gz.sha256" \
-            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
-          sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
-          # openssl.org 官方哈希独立比对(#184): GitHub release 的 tarball 与 .sha256 旁证同源,
-          # 平台被攻破可同时篡改; 再与 openssl.org 公示 SHA256 交叉核对(常备映射表硬编码,
-          # 未收录版本回退在线抓取 openssl.org), 无独立旁证即失败退出(fail-closed)。
-          bash "$GITHUB_WORKSPACE/tools/ci/verify-openssl-tarball.sh" "$OSSL_VER" "openssl-$OSSL_VER.tar.gz"
-          mkdir -p openssl-src
-          tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
           cd openssl-src
           ./Configure linux-x86_64 -fPIC no-shared no-tests no-apps no-zlib \
             --prefix="$RUNNER_TEMP/openssl-linux-x64" --libdir=lib
@@ -1061,9 +1026,7 @@ jobs:
           # D:\a\_temp/...)时输出行带 '\' 转义前缀, 且 Windows 二进制模式为 "hash *file";
           # 截断到首个空格, 再剥离可能的 '\' 前缀, 三平台统一得到纯哈希。
           # 写入 prefix 目录(缓存内容): 缓存命中时由校验步骤从该文件恢复输出
-          HASH="$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
-          HASH="${HASH%% *}"
-          HASH="${HASH#\\}"
+          HASH="$(bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" hash "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
           echo "$HASH" > "$RUNNER_TEMP/openssl-linux-x64/tarball.sha256"
 
       - name: 校验产物齐备
@@ -1071,16 +1034,8 @@ jobs:
         run: |
           set -euo pipefail
           PREFIX="$RUNNER_TEMP/openssl-linux-x64"
-          for f in "$PREFIX/include/openssl/ssl.h" "$PREFIX/lib/libssl.a" "$PREFIX/lib/libcrypto.a"; do
-            [[ -f "$f" ]] || { echo "::error::缺少产物: $f"; exit 1; }
-          done
-          HASH="$(cat "$PREFIX/tarball.sha256" 2>/dev/null || true)"
-          if [[ ! "$HASH" =~ ^[0-9a-f]{64}$ ]]; then
-            echo "::error::tarball.sha256 缺失或非法: '$HASH'（编译/缓存异常, 可删除对应缓存后重试）"
-            exit 1
-          fi
+          HASH="$(bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" verify "$PREFIX" unix)"
           echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
-          echo "产库产物齐备: ${PREFIX}（tarball SHA256: ${HASH}）"
 
       - name: 上传产库产物
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -1123,33 +1078,7 @@ jobs:
           INPUT_VER: ${{ github.event.inputs.openssl-version }}
         run: |
           set -euo pipefail
-          OSSL_VER=""
-          if [[ -n "$INPUT_VER" ]]; then
-            OSSL_VER="$INPUT_VER"
-          else
-            # 留空自动取 3.5 LTS 系列最新 patch(注7): 与 OpensslVendorPR 校验同源。
-            # 版本策略: 3.5 为 LTS 支持至 2030-04, 4.0 非 LTS 不采纳(维护成本最低);
-            # 防御式解析(#F1): gh CLI 解析 JSON(跨平台行为一致, 避开 macOS BSD grep/sed 与 bash 3.2
-            # 的管道差异——此前 curl|grep|sed 在 macOS 失败路径下致 set -u 报 unbound variable);
-            # 变量先初始化 + 3 次重试 + 失败给出明确错误
-            for attempt in 1 2 3; do
-              LATEST_TAG="$(gh api "repos/openssl/openssl/releases?per_page=100" \
-                --jq '[.[] | select(.tag_name | test("^openssl-3\\.5\\.[0-9]+$")) | .tag_name | ltrimstr("openssl-")] | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null || true)"
-              OSSL_VER="${LATEST_TAG#openssl-}"
-              [[ -n "$OSSL_VER" && "$OSSL_VER" != "null" ]] && break
-              echo "::warning::获取 OpenSSL 3.5 LTS 最新版本失败(第 ${attempt} 次), 10 秒后重试"
-              sleep 10
-            done
-            if [[ -z "$OSSL_VER" || "$OSSL_VER" == "null" ]]; then
-              echo "::error::无法获取 OpenSSL 3.5 LTS 系列最新版本（连续 3 次失败, 请检查网络或稍后重试）"
-              exit 1
-            fi
-            echo "未指定 openssl-version, 自动取 3.5 LTS 系列最新: $OSSL_VER"
-          fi
-          if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::openssl-version 格式非法: ${OSSL_VER}（应为 X.Y.Z, 不带 v/openssl- 前缀）"
-            exit 1
-          fi
+          OSSL_VER="$(bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" resolve "$INPUT_VER")"
           echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
           echo "ossl_ver=$OSSL_VER" >> "$GITHUB_OUTPUT"
 
@@ -1166,27 +1095,12 @@ jobs:
         if: steps.cache-ossl.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
+          bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" fetch "$OSSL_VER" "$RUNNER_TEMP"
           cd "$RUNNER_TEMP"
-          rm -rf openssl-src "openssl-$OSSL_VER.tar.gz" "openssl-$OSSL_VER.tar.gz.sha256"
-          curl --fail --location --retry 3 --retry-delay 5 \
-            --output "openssl-$OSSL_VER.tar.gz" \
-            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
-          curl --fail --location --retry 3 --retry-delay 5 \
-            --output "openssl-$OSSL_VER.tar.gz.sha256" \
-            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
-          sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
-          # openssl.org 官方哈希独立比对(#184): GitHub release 的 tarball 与 .sha256 旁证同源,
-          # 平台被攻破可同时篡改; 再与 openssl.org 公示 SHA256 交叉核对(常备映射表硬编码,
-          # 未收录版本回退在线抓取 openssl.org), 无独立旁证即失败退出(fail-closed)。
-          bash "$GITHUB_WORKSPACE/tools/ci/verify-openssl-tarball.sh" "$OSSL_VER" "openssl-$OSSL_VER.tar.gz"
-          mkdir -p openssl-src
-          tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
           # tarball_sha256 记录(#F2): GNU coreutils 在文件名含反斜杠(Windows 全路径
           # D:\a\_temp/...)时输出行带 '\' 转义前缀, 且 Windows 二进制模式为 "hash *file";
           # 截断到首个空格, 再剥离可能的 '\' 前缀, 三平台统一得到纯哈希
-          HASH="$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
-          HASH="${HASH%% *}"
-          HASH="${HASH#\\}"
+          HASH="$(bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" hash "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
           echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
 
       - name: 配置 OpenSSL（VC-WIN64A）
@@ -1230,22 +1144,8 @@ jobs:
         run: |
           set -euo pipefail
           PREFIX="$RUNNER_TEMP/openssl-windows-x64"
-          for f in "$PREFIX/include/openssl/ssl.h" "$PREFIX/lib/libssl.lib" "$PREFIX/lib/libcrypto.lib"; do
-            [[ -f "$f" ]] || { echo "::error::缺少产物: $f"; exit 1; }
-          done
-          # tarball_sha256: 编译路径由 src 步骤输出, 写入 prefix(缓存内容)供下次命中复用;
-          # 缓存命中时直接读文件
-          HASH_FILE="$PREFIX/tarball.sha256"
-          if [[ -n "$SRC_HASH" ]]; then
-            echo "$SRC_HASH" > "$HASH_FILE"
-          fi
-          HASH="$(cat "$HASH_FILE" 2>/dev/null || true)"
-          if [[ ! "$HASH" =~ ^[0-9a-f]{64}$ ]]; then
-            echo "::error::tarball.sha256 缺失或非法: '$HASH'（编译/缓存异常, 可删除对应缓存后重试）"
-            exit 1
-          fi
+          HASH="$(bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" verify "$PREFIX" windows "${SRC_HASH:-}")"
           echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
-          echo "产库产物齐备: ${PREFIX}（tarball SHA256: ${HASH}）"
 
       - name: 上传产库产物
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -1287,33 +1187,7 @@ jobs:
           INPUT_VER: ${{ github.event.inputs.openssl-version }}
         run: |
           set -euo pipefail
-          OSSL_VER=""
-          if [[ -n "$INPUT_VER" ]]; then
-            OSSL_VER="$INPUT_VER"
-          else
-            # 留空自动取 3.5 LTS 系列最新 patch(注7): 与 OpensslVendorPR 校验同源。
-            # 版本策略: 3.5 为 LTS 支持至 2030-04, 4.0 非 LTS 不采纳(维护成本最低);
-            # 防御式解析(#F1): gh CLI 解析 JSON(跨平台行为一致, 避开 macOS BSD grep/sed 与 bash 3.2
-            # 的管道差异——此前 curl|grep|sed 在 macOS 失败路径下致 set -u 报 unbound variable);
-            # 变量先初始化 + 3 次重试 + 失败给出明确错误
-            for attempt in 1 2 3; do
-              LATEST_TAG="$(gh api "repos/openssl/openssl/releases?per_page=100" \
-                --jq '[.[] | select(.tag_name | test("^openssl-3\\.5\\.[0-9]+$")) | .tag_name | ltrimstr("openssl-")] | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null || true)"
-              OSSL_VER="${LATEST_TAG#openssl-}"
-              [[ -n "$OSSL_VER" && "$OSSL_VER" != "null" ]] && break
-              echo "::warning::获取 OpenSSL 3.5 LTS 最新版本失败(第 ${attempt} 次), 10 秒后重试"
-              sleep 10
-            done
-            if [[ -z "$OSSL_VER" || "$OSSL_VER" == "null" ]]; then
-              echo "::error::无法获取 OpenSSL 3.5 LTS 系列最新版本（连续 3 次失败, 请检查网络或稍后重试）"
-              exit 1
-            fi
-            echo "未指定 openssl-version, 自动取 3.5 LTS 系列最新: $OSSL_VER"
-          fi
-          if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::openssl-version 格式非法: ${OSSL_VER}（应为 X.Y.Z, 不带 v/openssl- 前缀）"
-            exit 1
-          fi
+          OSSL_VER="$(bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" resolve "$INPUT_VER")"
           echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
           echo "ossl_ver=$OSSL_VER" >> "$GITHUB_OUTPUT"
 
@@ -1331,21 +1205,8 @@ jobs:
           set -euo pipefail
           TARGET=darwin64-arm64-cc
           export MACOSX_DEPLOYMENT_TARGET=11.0
+          bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" fetch "$OSSL_VER" "$RUNNER_TEMP"
           cd "$RUNNER_TEMP"
-          rm -rf openssl-src "openssl-$OSSL_VER.tar.gz" "openssl-$OSSL_VER.tar.gz.sha256"
-          curl --fail --location --retry 3 --retry-delay 5 \
-            --output "openssl-$OSSL_VER.tar.gz" \
-            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
-          curl --fail --location --retry 3 --retry-delay 5 \
-            --output "openssl-$OSSL_VER.tar.gz.sha256" \
-            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
-          sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
-          # openssl.org 官方哈希独立比对(#184): GitHub release 的 tarball 与 .sha256 旁证同源,
-          # 平台被攻破可同时篡改; 再与 openssl.org 公示 SHA256 交叉核对(常备映射表硬编码,
-          # 未收录版本回退在线抓取 openssl.org), 无独立旁证即失败退出(fail-closed)。
-          bash "$GITHUB_WORKSPACE/tools/ci/verify-openssl-tarball.sh" "$OSSL_VER" "openssl-$OSSL_VER.tar.gz"
-          mkdir -p openssl-src
-          tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
           cd openssl-src
           ./Configure "$TARGET" no-shared no-tests no-apps no-zlib \
             --prefix="$RUNNER_TEMP/openssl-macos-arm64"
@@ -1355,9 +1216,7 @@ jobs:
           # D:\a\_temp/...)时输出行带 '\' 转义前缀, 且 Windows 二进制模式为 "hash *file";
           # 截断到首个空格, 再剥离可能的 '\' 前缀, 三平台统一得到纯哈希。
           # 写入 prefix 目录(缓存内容): 缓存命中时由校验步骤从该文件恢复输出
-          HASH="$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
-          HASH="${HASH%% *}"
-          HASH="${HASH#\\}"
+          HASH="$(bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" hash "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
           echo "$HASH" > "$RUNNER_TEMP/openssl-macos-arm64/tarball.sha256"
 
       - name: 校验产物齐备
@@ -1365,16 +1224,8 @@ jobs:
         run: |
           set -euo pipefail
           PREFIX="$RUNNER_TEMP/openssl-macos-arm64"
-          for f in "$PREFIX/include/openssl/ssl.h" "$PREFIX/lib/libssl.a" "$PREFIX/lib/libcrypto.a"; do
-            [[ -f "$f" ]] || { echo "::error::缺少产物: $f"; exit 1; }
-          done
-          HASH="$(cat "$PREFIX/tarball.sha256" 2>/dev/null || true)"
-          if [[ ! "$HASH" =~ ^[0-9a-f]{64}$ ]]; then
-            echo "::error::tarball.sha256 缺失或非法: '$HASH'（编译/缓存异常, 可删除对应缓存后重试）"
-            exit 1
-          fi
+          HASH="$(bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" verify "$PREFIX" unix)"
           echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
-          echo "产库产物齐备: ${PREFIX}（tarball SHA256: ${HASH}）"
 
       - name: 上传产库产物
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -1416,33 +1267,7 @@ jobs:
           INPUT_VER: ${{ github.event.inputs.openssl-version }}
         run: |
           set -euo pipefail
-          OSSL_VER=""
-          if [[ -n "$INPUT_VER" ]]; then
-            OSSL_VER="$INPUT_VER"
-          else
-            # 留空自动取 3.5 LTS 系列最新 patch(注7): 与 OpensslVendorPR 校验同源。
-            # 版本策略: 3.5 为 LTS 支持至 2030-04, 4.0 非 LTS 不采纳(维护成本最低);
-            # 防御式解析(#F1): gh CLI 解析 JSON(跨平台行为一致, 避开 macOS BSD grep/sed 与 bash 3.2
-            # 的管道差异——此前 curl|grep|sed 在 macOS 失败路径下致 set -u 报 unbound variable);
-            # 变量先初始化 + 3 次重试 + 失败给出明确错误
-            for attempt in 1 2 3; do
-              LATEST_TAG="$(gh api "repos/openssl/openssl/releases?per_page=100" \
-                --jq '[.[] | select(.tag_name | test("^openssl-3\\.5\\.[0-9]+$")) | .tag_name | ltrimstr("openssl-")] | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null || true)"
-              OSSL_VER="${LATEST_TAG#openssl-}"
-              [[ -n "$OSSL_VER" && "$OSSL_VER" != "null" ]] && break
-              echo "::warning::获取 OpenSSL 3.5 LTS 最新版本失败(第 ${attempt} 次), 10 秒后重试"
-              sleep 10
-            done
-            if [[ -z "$OSSL_VER" || "$OSSL_VER" == "null" ]]; then
-              echo "::error::无法获取 OpenSSL 3.5 LTS 系列最新版本（连续 3 次失败, 请检查网络或稍后重试）"
-              exit 1
-            fi
-            echo "未指定 openssl-version, 自动取 3.5 LTS 系列最新: $OSSL_VER"
-          fi
-          if ! printf '%s' "$OSSL_VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::openssl-version 格式非法: ${OSSL_VER}（应为 X.Y.Z, 不带 v/openssl- 前缀）"
-            exit 1
-          fi
+          OSSL_VER="$(bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" resolve "$INPUT_VER")"
           echo "OSSL_VER=$OSSL_VER" >> "$GITHUB_ENV"
           echo "ossl_ver=$OSSL_VER" >> "$GITHUB_OUTPUT"
 
@@ -1460,21 +1285,8 @@ jobs:
           set -euo pipefail
           TARGET=darwin64-x86_64-cc
           export MACOSX_DEPLOYMENT_TARGET=11.0
+          bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" fetch "$OSSL_VER" "$RUNNER_TEMP"
           cd "$RUNNER_TEMP"
-          rm -rf openssl-src "openssl-$OSSL_VER.tar.gz" "openssl-$OSSL_VER.tar.gz.sha256"
-          curl --fail --location --retry 3 --retry-delay 5 \
-            --output "openssl-$OSSL_VER.tar.gz" \
-            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
-          curl --fail --location --retry 3 --retry-delay 5 \
-            --output "openssl-$OSSL_VER.tar.gz.sha256" \
-            "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz.sha256"
-          sha256sum -c "openssl-$OSSL_VER.tar.gz.sha256"
-          # openssl.org 官方哈希独立比对(#184): GitHub release 的 tarball 与 .sha256 旁证同源,
-          # 平台被攻破可同时篡改; 再与 openssl.org 公示 SHA256 交叉核对(常备映射表硬编码,
-          # 未收录版本回退在线抓取 openssl.org), 无独立旁证即失败退出(fail-closed)。
-          bash "$GITHUB_WORKSPACE/tools/ci/verify-openssl-tarball.sh" "$OSSL_VER" "openssl-$OSSL_VER.tar.gz"
-          mkdir -p openssl-src
-          tar -xzf "openssl-$OSSL_VER.tar.gz" -C openssl-src --strip-components=1
           cd openssl-src
           ./Configure "$TARGET" no-shared no-tests no-apps no-zlib \
             --prefix="$RUNNER_TEMP/openssl-macos-x64"
@@ -1484,9 +1296,7 @@ jobs:
           # D:\a\_temp/...)时输出行带 '\' 转义前缀, 且 Windows 二进制模式为 "hash *file";
           # 截断到首个空格, 再剥离可能的 '\' 前缀, 三平台统一得到纯哈希。
           # 写入 prefix 目录(缓存内容): 缓存命中时由校验步骤从该文件恢复输出
-          HASH="$(sha256sum "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
-          HASH="${HASH%% *}"
-          HASH="${HASH#\\}"
+          HASH="$(bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" hash "$RUNNER_TEMP/openssl-$OSSL_VER.tar.gz")"
           echo "$HASH" > "$RUNNER_TEMP/openssl-macos-x64/tarball.sha256"
 
       - name: 校验产物齐备
@@ -1494,16 +1304,8 @@ jobs:
         run: |
           set -euo pipefail
           PREFIX="$RUNNER_TEMP/openssl-macos-x64"
-          for f in "$PREFIX/include/openssl/ssl.h" "$PREFIX/lib/libssl.a" "$PREFIX/lib/libcrypto.a"; do
-            [[ -f "$f" ]] || { echo "::error::缺少产物: $f"; exit 1; }
-          done
-          HASH="$(cat "$PREFIX/tarball.sha256" 2>/dev/null || true)"
-          if [[ ! "$HASH" =~ ^[0-9a-f]{64}$ ]]; then
-            echo "::error::tarball.sha256 缺失或非法: '$HASH'（编译/缓存异常, 可删除对应缓存后重试）"
-            exit 1
-          fi
+          HASH="$(bash "$GITHUB_WORKSPACE/tools/ci/vendor-openssl-common.sh" verify "$PREFIX" unix)"
           echo "tarball_sha256=$HASH" >> "$GITHUB_OUTPUT"
-          echo "产库产物齐备: ${PREFIX}（tarball SHA256: ${HASH}）"
 
       - name: 上传产库产物
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

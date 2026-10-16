@@ -17,7 +17,8 @@ REPO_FULL="${GITHUB_REPOSITORY:-Tupig/TuPigGHD2Chinese}"
 : "${GH_TOKEN:?缺少 GH_TOKEN 环境变量（CI 中为 GITHUB_TOKEN，本地运行需手动提供）}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_DIR="${SCRIPT_DIR}/../../docs/wiki"
+SRC_DIR="${WIKI_SOURCE_DIR:-${SCRIPT_DIR}/../../docs/wiki}"
+WIKI_REMOTE_URL="${WIKI_REMOTE_URL:-https://github.com/${REPO_FULL}.wiki.git}"
 
 if [ ! -d "$SRC_DIR" ]; then
   echo "错误: 未找到文档源目录 $SRC_DIR" >&2
@@ -44,8 +45,8 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 B64_CRED="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')"
 GIT_AUTH_HEADER="Authorization: Basic ${B64_CRED}"
 
-echo "克隆 Wiki 仓库 ${REPO_FULL}.wiki.git ..."
-git clone --quiet "https://github.com/${REPO_FULL}.wiki.git" "$WORK_DIR/wiki"
+echo "克隆 Wiki 仓库 ${WIKI_REMOTE_URL} ..."
+git clone --quiet "$WIKI_REMOTE_URL" "$WORK_DIR/wiki"
 cd "$WORK_DIR/wiki"
 
 # 镜像语义: 清空 Wiki 工作区（保留 .git）后用文档源覆盖
@@ -66,10 +67,15 @@ git commit --quiet -m "docs: 同步 docs/wiki → GitHub Wiki（源提交 ${SRC_
 
 # 推送; 远端瞬时前进（Wiki 被并发编辑）时 rebase 一次重试,
 # 仍失败则报错退出——工作流下次触发会基于最新 HEAD 自动恢复
-if ! git -c "http.extraHeader=${GIT_AUTH_HEADER}" push --quiet; then
+if [[ "$WIKI_REMOTE_URL" == https://* ]]; then
+  PUSH_CMD=(git -c "http.extraHeader=${GIT_AUTH_HEADER}" push --quiet)
+else
+  PUSH_CMD=(git push --quiet)
+fi
+if ! "${PUSH_CMD[@]}"; then
   echo "推送被拒（远端有新提交），rebase 后重试 ..."
   git pull --rebase --quiet
-  git -c "http.extraHeader=${GIT_AUTH_HEADER}" push --quiet
+  "${PUSH_CMD[@]}"
 fi
 
 echo "同步完成:"
