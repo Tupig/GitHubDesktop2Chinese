@@ -249,6 +249,14 @@ target_include_directories(utils_test SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third
 target_link_libraries(utils_test PRIVATE GTest::gtest_main)
 add_test(NAME utils_test COMMAND utils_test)
 
+# ── 映射纯规则测试(#267): $ 转义 / ReDoS 静态启发式 / 第三参数占位符回填（依赖第三方 spdlog 头） ──
+add_executable(l10n_rules_test tests/l10n_rules_test.cpp)
+set_property(TARGET l10n_rules_test PROPERTY CXX_STANDARD 20)
+target_include_directories(l10n_rules_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(l10n_rules_test SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third_party/include)
+target_link_libraries(l10n_rules_test PRIVATE GTest::gtest_main)
+add_test(NAME l10n_rules_test COMMAND l10n_rules_test)
+
 # ── 自更新残留清理与替换前置检查测试(#182/#183): 依赖 http.hpp(OpenSSL/httplib 头) ──
 # include/链接配置与主程序一致; 完整替换+重启路径涉及真实进程操作, 不在单测范围
 add_executable(selfupdate_test tests/selfupdate_test.cpp)

@@ -644,10 +644,11 @@ jobs:
         run: |
           cmake -B build-cov -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_FLAGS=--coverage -DCMAKE_EXE_LINKER_FLAGS=--coverage
-          cmake --build build-cov --target version_test replace_engine_test utils_test
+          cmake --build build-cov --target version_test replace_engine_test utils_test l10n_rules_test
           ./build-cov/version_test
           ./build-cov/replace_engine_test
           ./build-cov/utils_test
+          ./build-cov/l10n_rules_test
           # 仅度量本仓被这三个单测目标编译到的头(src/utils、src/version)。
           # 注意: gcovr 的 --filter/--exclude 按相对 --root 的路径匹配, 且是子串匹配,
           # 故不能用 '.*/src/.*'(会连带匹配 vendored googletest 的 src/); 用目录子串最稳。
