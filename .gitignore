@@ -31,6 +31,9 @@ id_ed25519*
 # Python 缓存（tools/ci/ 校验脚本运行产物）
 __pycache__/
 
+# Node 依赖（Vitest 等测试依赖本地安装，不提交；锁文件 package-lock.json 提交）
+node_modules/
+
 # 本地交接文档（禁止推送 GitHub：仅存于本地分支 local/handoff 与工作区副本）
 docs/HANDOFF.md
 

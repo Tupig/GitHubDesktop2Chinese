@@ -72,7 +72,8 @@
    > `--nopause` 为程序级参数，必须写在 `dev` 子命令之前；输出会逐个报告匹配失败 / 正则非法的条目。
 4. 也可用自动维护工具离线检测与提取候选：`cd tools/auto-maintain && npm run all`，详见[工具说明](../tools/auto-maintain/README.md)（参数与报告格式另见 [wiki 自动维护工具](wiki/自动维护工具.md)）。
 5. 加载器（`src/`）改动的冒烟回归：运行 [`tools/ci/smoke-test.ps1`](../tools/ci/smoke-test.ps1)，自动探测构建产物并依次执行帮助、非法参数、临时目录汉化、回滚四组用例，全部 PASS 即通过。Windows PowerShell 5.1 与 pwsh 7 均可运行（#136：脚本内部已对 native 调用局部降级 `$ErrorActionPreference`，规避 5.1 下 stderr 重定向触发 `NativeCommandError` 中止的问题）。
-6. **C++ 单元测试**（改 `src/` 或 `tests/` 后必跑）：构建后运行 `ctest --preset x64-release`（运行 `version_test` / `replace_engine_test`，等价 `ctest -C Release --output-on-failure`）。preset 已内置多配置生成器必需的 `-C Release`——不用 preset 直接运行 `ctest` 时，`cmake -B build` 在 Windows 默认生成的 VS 多配置目录必须补 `-C Release`，否则测试以 `Not Run` 假失败（#169）。
+6. **C++ 单元测试**（改 `src/` 或 `tests/` 后必跑）：构建后运行 `ctest --preset x64-release`（运行 `version_test` / `replace_engine_test` / `selfupdate_test`，用 GoogleTest 断言、CTest 聚合；等价 `ctest -C Release --output-on-failure`）。preset 已内置多配置生成器必需的 `-C Release`——不用 preset 直接运行 `ctest` 时，`cmake -B build` 在 Windows 默认生成的 VS 多配置目录必须补 `-C Release`，否则测试以 `Not Run` 假失败（#169）。
+7. **工具链单元测试**（改 `tools/` 下校验器或自动维护工具后必跑）：Python 校验器测试 —— 先 `python -m pip install -r tools/ci/requirements-dev.txt`，再 `python -m pytest`（pytest 收集 `tools/ci/` 全部 `*-test.py`）；Node 工具测试 —— `cd tools/auto-maintain && npm ci && npm test`（Vitest）。
 
 ## 发布说明（docs/ReleaseBody.md）
 
@@ -210,7 +211,8 @@ Thanks for contributing translations to GitHubDesktop2Chinese! Before adding or 
    > `--nopause` is a program-level flag and must come **before** the `dev` subcommand; the output reports each entry whose pattern fails to match or whose regex is invalid.
 4. You can also use the auto-maintain tool for offline checking and candidate extraction: `cd tools/auto-maintain && npm run all` — see the [tool README](../tools/auto-maintain/README.md) (parameters and report format are also covered in the [wiki auto-maintain tool](wiki/自动维护工具.md) page).
 5. Smoke regression for loader (`src/`) changes: run [`tools/ci/smoke-test.ps1`](../tools/ci/smoke-test.ps1); it auto-detects the build output and runs four test groups in turn — help, invalid-argument rejection, localization in a temp directory, and rollback. All groups PASS means the change passes. Works under both Windows PowerShell 5.1 and pwsh 7 (#136: native calls are wrapped with a locally downgraded `$ErrorActionPreference`, avoiding the 5.1 `NativeCommandError` abort on stderr redirection).
-6. **C++ unit tests** (mandatory after touching `src/` or `tests/`): after building, run `ctest --preset x64-release` (runs `version_test` / `replace_engine_test`; equivalent to `ctest -C Release --output-on-failure`). The preset bakes in the `-C Release` that multi-config generators require — when invoking `ctest` directly without a preset, the VS multi-config directory that `cmake -B build` creates by default on Windows must add `-C Release`, otherwise the tests fake-fail with `Not Run` (#169).
+6. **C++ unit tests** (mandatory after touching `src/` or `tests/`): after building, run `ctest --preset x64-release` (runs `version_test` / `replace_engine_test` / `selfupdate_test`, written with GoogleTest and aggregated by CTest; equivalent to `ctest -C Release --output-on-failure`). The preset bakes in the `-C Release` that multi-config generators require — when invoking `ctest` directly without a preset, the VS multi-config directory that `cmake -B build` creates by default on Windows must add `-C Release`, otherwise the tests fake-fail with `Not Run` (#169).
+7. **Toolchain unit tests** (mandatory after touching validators or the auto-maintain tool under `tools/`): Python validator tests — first `python -m pip install -r tools/ci/requirements-dev.txt`, then `python -m pytest` (pytest collects every `*-test.py` under `tools/ci/`); Node tool tests — `cd tools/auto-maintain && npm ci && npm test` (Vitest).
 
 ## Release Notes (docs/ReleaseBody.md)
 

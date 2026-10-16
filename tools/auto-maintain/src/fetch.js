@@ -19,7 +19,7 @@ const DOWNLOAD_TIMEOUT_MS = 900_000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ── 纯逻辑(#174 抽出, tools/ci/tools-self-test.mjs 单测覆盖) ──
+// ── 纯逻辑(#174 抽出, test/tools-self-test.test.mjs(Vitest) 单测覆盖) ──
 
 /** 构造 GitHub API 最新 release 查询 URL */
 export function buildLatestReleaseUrl() {

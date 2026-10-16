@@ -1,7 +1,7 @@
 // 自动维护报告 Issue 的创建/更新逻辑(由工作流 github-script 步骤 require 调用)
 // 入参: { github, context, core } —— 与 actions/github-script 内置对象一致
 
-// #137: 从报告正文提取失效数(纯函数, tools-self-test 回归覆盖):
+// #137: 从报告正文提取失效数(纯函数, tools/auto-maintain/test/tools-self-test.test.mjs 回归覆盖):
 // 1) 优先解析 report.js renderMarkdown 输出的结构化 meta 行(<!-- stats: total=.. ok=.. failed=.. -->),
 //    与中文展示文案解耦, 文案微调不影响解析;
 // 2) 后备兼容旧报告/手动报告的中文统计行;
@@ -109,5 +109,5 @@ module.exports = async ({ github, context, core }) => {
   }
 };
 
-// #137: 纯函数单独导出供 tools-self-test 跨文件契约回归
+// #137: 纯函数单独导出供 tools/auto-maintain/test/tools-self-test.test.mjs 跨文件契约回归
 module.exports.extractFailedCount = extractFailedCount;

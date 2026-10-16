@@ -1,9 +1,10 @@
-// Version 解析与比较的表驱动单元测试(#123)
-// 无外部测试框架: 断言失败打印用例与期望/实际, 全部通过打印统计并返回 0
-// 运行: 直接执行 version_test, 或 ctest --output-on-failure
+// Version 解析与比较的单元测试(#123)
+// 测试框架: GoogleTest(随仓库 vendored 在 third_party/googletest)
+// 运行: ctest --output-on-failure  或直接执行 version_test
 #include "version/Version.hpp"
 
-#include <cstdio>
+#include <gtest/gtest.h>
+
 #include <string>
 
 using versionparse::Version;
@@ -11,17 +12,6 @@ using versionparse::Version;
 using Status = versionparse::Version::Status;
 
 namespace {
-
-int g_total = 0;
-int g_failed = 0;
-
-void Expect(bool cond, const std::string& what) {
-    ++g_total;
-    if (!cond) {
-        ++g_failed;
-        std::printf("  [FAIL] %s\n", what.c_str());
-    }
-}
 
 std::string StatusName(Status s) {
     switch (s) {
@@ -40,22 +30,6 @@ struct ParseCase {
     int betaversion;
     Status status;
 };
-
-void RunParseCase(const ParseCase& c) {
-    Version v(c.input);
-    const std::string label = std::string("Parse(\"") + c.input + "\")";
-    Expect(bool(v) == c.valid,
-           label + " 有效性: 期望 " + (c.valid ? "true" : "false") +
-           " 实际 " + (bool(v) ? "true" : "false"));
-    if (!c.valid) {
-        return;
-    }
-    Expect(v.major == c.major, label + " major: 期望 " + std::to_string(c.major) + " 实际 " + std::to_string(v.major));
-    Expect(v.minor == c.minor, label + " minor: 期望 " + std::to_string(c.minor) + " 实际 " + std::to_string(v.minor));
-    Expect(v.revision == c.revision, label + " revision: 期望 " + std::to_string(c.revision) + " 实际 " + std::to_string(v.revision));
-    Expect(v.betaversion == c.betaversion, label + " betaversion: 期望 " + std::to_string(c.betaversion) + " 实际 " + std::to_string(v.betaversion));
-    Expect(v.status == c.status, label + " status: 期望 " + StatusName(c.status) + " 实际 " + StatusName(v.status));
-}
 
 // 表驱动用例(文件级聚合数组)
 const ParseCase kCases[] = {
@@ -96,25 +70,30 @@ const ParseCase kCases[] = {
 
 } // namespace
 
-int main() {
+TEST(VersionParse, TableDriven) {
     for (const auto& c : kCases) {
-        RunParseCase(c);
+        SCOPED_TRACE(std::string("Parse(\"") + c.input + "\")");
+        Version v(c.input);
+        EXPECT_EQ(bool(v), c.valid);
+        if (!c.valid) {
+            continue;
+        }
+        EXPECT_EQ(v.major, c.major);
+        EXPECT_EQ(v.minor, c.minor);
+        EXPECT_EQ(v.revision, c.revision);
+        EXPECT_EQ(v.betaversion, c.betaversion);
+        EXPECT_EQ(StatusName(v.status), StatusName(c.status));
     }
+}
 
-    // 比较运算符: 正式版与测试版序、数值比较、相等语义
-    Expect(Version("1.13.1") > Version("1.13.1-beta.1"), "1.13.1 > 1.13.1-beta.1 (正式版大于同号测试版)");
-    Expect(Version("1.2") < Version("1.10"), "1.2 < 1.10 (数值比较非字典序)");
-    Expect(Version("1.2.3-beta.2") > Version("1.2.3-beta.1"), "1.2.3-beta.2 > 1.2.3-beta.1");
-    Expect(Version("1.2.3-beta.1") > Version("1.2.3-alpha.9"), "1.2.3-beta.1 > 1.2.3-alpha.9 (Beta > Dev)");
-    Expect(Version("1.2.3") == Version("1.2.3"), "1.2.3 == 1.2.3");
-    Expect(Version("1.2.3-beta.1") == Version("1.2.3-beta.1"), "1.2.3-beta.1 == 1.2.3-beta.1");
-    Expect(!(Version("1.2.3-beta.1") == Version("1.2.3")), "1.2.3-beta.1 != 1.2.3");
-    Expect(Version("1.2") <= Version("1.2"), "1.2 <= 1.2");
-
-    if (g_failed == 0) {
-        std::printf("Version 表驱动测试全部通过: %d 项断言\n", g_total);
-        return 0;
-    }
-    std::printf("Version 表驱动测试失败 %d / %d 项断言\n", g_failed, g_total);
-    return 1;
+// 比较运算符: 正式版与测试版序、数值比较、相等语义
+TEST(VersionCompare, OrderingAndEquality) {
+    EXPECT_GT(Version("1.13.1"), Version("1.13.1-beta.1"));
+    EXPECT_LT(Version("1.2"), Version("1.10"));
+    EXPECT_GT(Version("1.2.3-beta.2"), Version("1.2.3-beta.1"));
+    EXPECT_GT(Version("1.2.3-beta.1"), Version("1.2.3-alpha.9"));
+    EXPECT_TRUE(Version("1.2.3") == Version("1.2.3"));
+    EXPECT_TRUE(Version("1.2.3-beta.1") == Version("1.2.3-beta.1"));
+    EXPECT_NE(Version("1.2.3-beta.1"), Version("1.2.3"));
+    EXPECT_LE(Version("1.2"), Version("1.2"));
 }

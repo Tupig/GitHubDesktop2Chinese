@@ -350,6 +350,7 @@ class EndToEndTest(unittest.TestCase):
             "out/bad.md": "[坏](missing.md)\n",
             "build/bad.md": "[坏](missing.md)\n",
             "node_modules/bad.md": "[坏](missing.md)\n",
+            "third_party/googletest/docs/README.md": "[坏](../../docs)\n",
             "good.md": "# 好\n",
         }
         module, exit_code, _ = self.run_md_check(files)
