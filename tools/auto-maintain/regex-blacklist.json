@@ -12,8 +12,8 @@
     { "regex": "\\(\\?#", "why": "注释分组 (?#...)" }
   ],
   "redos_heuristic": {
-    "comment": "ReDoS 启发式（#128 CI 侧命中即阻断；check-invalid.js 侧保持报告语义）：嵌套量词在长文本上可能灾难性回溯；check-invalid.js 与 check-localization.py 共用（#119 单一事实来源）",
-    "regex": "\\(.*[+*].*\\)\\s*[+*{]",
+    "comment": "ReDoS 启发式（#128/#271 CI 侧命中即阻断；check-invalid.js 侧保持报告语义）：组内含量词(+/*)、区间量词({n,})或交替分支(|)，且组结束(可含嵌套括号)后紧跟量词(+/*/{) → 长文本上可能灾难性回溯。为旧规则 `\\(.*[+*].*\\).*` 的严格超集（旧规则命中集不变，新增 {n,}/| 形态）。check-invalid.js 与 check-localization.py 共用（#119 单一事实来源）；src/utils/l10n_rules.hpp 以同一规则文本镜像（由 check-localization.py 校验一致）。保守语义：宁可漏汉化不可假死",
+    "regex": "\\(.*(?:[+*]|\\{[0-9]+,\\}|\\|).*\\)\\s*[+*{]",
     "why": "疑似灾难性回溯(嵌套量词)"
   }
 }

@@ -37,8 +37,31 @@ TEST(NestedQuantifier, WhitespaceBetweenGroupAndQuantifierStillMatches) {
 }
 
 TEST(NestedQuantifier, NestedGroupTreatedAsSuspicious) {
-    // #240: 嵌套组保守拒绝（原实现遇 '(' 跳过, 放行 ((a)*)* 类形态）
+    // #240/#271: 嵌套组保守拒绝（原实现遇 '(' 跳过, 放行 ((a)*)* 类形态）
     EXPECT_TRUE(utils::LooksLikeNestedQuantifier("((a)*)*"));
+    EXPECT_TRUE(utils::LooksLikeNestedQuantifier("((a+))+"));
+    EXPECT_TRUE(utils::LooksLikeNestedQuantifier("(a(b+))+"));
+    EXPECT_TRUE(utils::LooksLikeNestedQuantifier("(?:(a+))+"));
+    EXPECT_TRUE(utils::LooksLikeNestedQuantifier("((\\w+))+"));
+}
+
+TEST(NestedQuantifier, IntervalQuantifierInsideGroupAlsoSuspicious) {
+    // #271: 组内区间量词 {n,} + 组后量词 —— 修复前 C++ 与 CI 双双漏检（现实灾难性回溯）
+    EXPECT_TRUE(utils::LooksLikeNestedQuantifier("(a{10,})+"));
+    EXPECT_TRUE(utils::LooksLikeNestedQuantifier("(ab{1,})*"));
+}
+
+TEST(NestedQuantifier, AlternationInsideGroupAlsoSuspicious) {
+    // #271: 组内交替 + 组后量词（(a|a)+ 类）—— 保守一律拒绝
+    EXPECT_TRUE(utils::LooksLikeNestedQuantifier("(a|a)+"));
+    EXPECT_TRUE(utils::LooksLikeNestedQuantifier("(foo|bar)*"));
+}
+
+TEST(NestedQuantifier, RuleTextIsMirroredFromSingleSourceOfTruth) {
+    // 规则文本与 tools/auto-maintain/regex-blacklist.json 的 redos_heuristic.regex 逐字一致，
+    // 该一致性由 tools/ci/check-localization.py 强制校验（#271）；此处仅锁常量非空且可编译。
+    EXPECT_NE(std::string(utils::kRedosHeuristicRegex).size(), 0u);
+    EXPECT_TRUE(utils::LooksLikeNestedQuantifier("(a+)+")); // 常量可被实际使用
 }
 
 TEST(NestedQuantifier, EscapedFormsAlsoMatch) {
@@ -71,6 +94,12 @@ TEST(PatternSafetyRejection, CatastrophicBacktrackingRejected) {
     const auto rejected = utils::PatternSafetyRejection("(a+)+x");
     ASSERT_TRUE(rejected.has_value());
     EXPECT_NE(rejected->find("回溯"), std::string::npos);
+}
+
+TEST(PatternSafetyRejection, IntervalAndAlternationFormsAlsoRejected) {
+    // #271: 修复前 (a{10,})+ / (a|a)+ 两侧皆漏检（CI 放行 + 运行期不拦）
+    EXPECT_TRUE(utils::PatternSafetyRejection("(a{10,})+").has_value());
+    EXPECT_TRUE(utils::PatternSafetyRejection("(a|a)+").has_value());
 }
 
 TEST(PatternSafetyRejection, LengthCheckedBeforeHeuristic) {

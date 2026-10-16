@@ -127,10 +127,22 @@ def get_anchors(path):
     return anchor_cache[key]
 
 
-md_files = sorted(
-    p for p in ROOT.rglob("*.md")
-    if not (PRUNE_DIRS & set(p.relative_to(ROOT).parts[:-1]))
-)
+def iter_markdown_files(root: Path) -> list[Path]:
+    """遍历 root 下 .md 文件, **在遍历中剪枝** PRUNE_DIRS。
+
+    #271: 原先用 ROOT.rglob("*.md") 再对结果过滤, 会先遍历全部目录(含 out/.git/
+    node_modules/third_party, 实测 6877 文件)才剪枝 —— 本地实测 1313ms vs 剪枝 25ms。
+    """
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in PRUNE_DIRS]
+        for name in filenames:
+            if name.endswith(".md"):
+                found.append(Path(dirpath) / name)
+    return sorted(found)
+
+
+md_files = iter_markdown_files(ROOT)
 
 for md in md_files:
     stats["files"] += 1

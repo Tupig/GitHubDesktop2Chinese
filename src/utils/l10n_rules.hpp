@@ -34,43 +34,20 @@ enum PlaceholderFillResult {
     kPlaceholderUnsafe = 3,      // 第三参数命中 ReDoS 防护 → 调用方跳过该条(#128)
 };
 
-// ReDoS 嵌套量词静态启发式(#128): 与 CI regex-blacklist.json 的
-// \([^()]*[+*][^()]*\)\s*[+*{] 语义对齐 —— 无嵌套括号的组内含 +/* 字符
-// 且组结束后紧跟量词字符(+ * {)即疑似灾难性回溯(保守: 转义量词同样命中, 与 CI 侧一致)
+// ReDoS 启发式(#128/#240/#271): 规则文本与 tools/auto-maintain/regex-blacklist.json 的
+// redos_heuristic.regex **逐字一致**（由 tools/ci/check-localization.py 校验一致性），
+// 与 CI（check-localization.py）及维护工具（check-invalid.js）共用同一语义。
+// 覆盖形态：组内含量词(+/*)、区间量词({n,})或交替分支(|)，且组结束（可含嵌套括号）后紧跟量词(+/*/{)。
+// 该规则为旧 `\(.*[+*].*\)\s*[+*{]` 的**严格超集**：旧命中集不变，新增 {n,} 与 | 形态。
+// 保守语义：宁可漏汉化不可假死。
+// 历史教训(#271)：此前为手写逐字符扫描器，与 CI 口径分歧导致 ((a+))+ / (a(b+))+ / (?:(a+))+
+// 等在运行期漏检（CI 会拦），而 (a{10,})+ / (a|a)+ 两侧皆漏；改为同一规则文本后消除该分歧。
+inline constexpr const char kRedosHeuristicRegex[] =
+    R"(\(.*(?:[+*]|\{[0-9]+,\}|\|).*\)\s*[+*{])";
+
 inline bool LooksLikeNestedQuantifier(const std::string& pat) {
-    const size_t n = pat.size();
-    for(size_t i = 0; i < n; i++) {
-        if(pat[i] != '(') {
-            continue;
-        }
-        size_t j = i + 1;
-        bool group_has_quantifier = false;
-        while(j < n && pat[j] != ')') {
-            if(pat[j] == '+' || pat[j] == '*') {
-                group_has_quantifier = true;
-            }
-            if(pat[j] == '(') {
-                // 嵌套组也视为疑似(#240): 原实现遇 '(' 即跳过, 放行了 ((a)*)* 类可致
-                // std::regex 灾难性回溯的形态; 保守拒绝(宁可漏汉化不可假死)
-                group_has_quantifier = true;
-            }
-            j++;
-        }
-        // 未闭合 / 组内无量词与嵌套括号: 不构成启发式形态
-        if(j >= n || pat[j] != ')' || !group_has_quantifier) {
-            continue;
-        }
-        size_t k = j + 1; // \s*
-        while(k < n && (pat[k] == ' ' || pat[k] == '\t' || pat[k] == '\n' ||
-                        pat[k] == '\r' || pat[k] == '\f' || pat[k] == '\v')) {
-            k++;
-        }
-        if(k < n && (pat[k] == '+' || pat[k] == '*' || pat[k] == '{')) {
-            return true;
-        }
-        i = j;
-    }
-    return false;
+    static const std::regex kRe(kRedosHeuristicRegex, std::regex::optimize);
+    return std::regex_search(pat, kRe);
 }
 
 // ReDoS 防护(#128): 映射来自远程下载或本地 -j, 无哈希/签名校验(仅 TLS),

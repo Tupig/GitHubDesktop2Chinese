@@ -47,26 +47,18 @@ BASE_DATA = {
     "select": [],
 }
 
-# 黑名单夹具：与 tools/auto-maintain/regex-blacklist.json 同构的独立副本，
-# 避免测试随真实规则文件演进而漂移
-BLACKLIST_DATA = {
-    "rules": [
-        {"regex": "\\(\\?<=", "why": "后行断言 (?<=)"},
-        {"regex": "\\(\\?<!", "why": "负后行断言 (?<!)"},
-        {"regex": "\\(\\?<[A-Za-z_]", "why": "命名分组 (?<name>)"},
-        {"regex": "\\(\\?P[<a-zA-Z]", "why": "Python 命名分组 (?P<name>)"},
-        {"regex": "\\\\p\\{", "why": "Unicode 属性转义 \\p{...}"},
-        {"regex": "\\(\\?[a-zA-Z]+[):]", "why": "内联 flag (?i:...)"},
-    ],
-    "redos_heuristic": {"regex": "\\([^()]*[+*][^()]*\\)\\s*[+*{]"},
-}
+# 黑名单夹具：**直接加载真实规则文件**（tools/auto-maintain/regex-blacklist.json）作为
+# 单一事实来源（#271）。此前为「同构独立副本 + 注释称避免漂移」，实际已漂移到与生产
+# 不同的规则集/启发式（掩盖了 C++ 与 CI 的口径分歧）。需要特定规则的用例请显式传 blacklist=。
+BLACKLIST_PATH = SCRIPT_PATH.parents[1] / "auto-maintain" / "regex-blacklist.json"
+BLACKLIST_DATA = json.loads(BLACKLIST_PATH.read_text(encoding="utf-8"))
 
 _module_counter = 0
 
 
 def run_validator(data: dict | None = None, *, json_text: str | None = None,
                   blacklist: dict | None = None, omit_json: bool = False,
-                  omit_blacklist: bool = False) -> tuple:
+                  omit_blacklist: bool = False, extra_files: dict | None = None) -> tuple:
     """构造临时目录夹具并加载执行**真实**校验器脚本，返回 (module, exit_code, output)。
 
     exit_code 为 0 表示模块正常执行完毕；sys.exit(N) 被捕获为 N。
@@ -86,6 +78,10 @@ def run_validator(data: dict | None = None, *, json_text: str | None = None,
         (root / "tools" / "auto-maintain" / "regex-blacklist.json").write_text(
             json.dumps(blacklist if blacklist is not None else BLACKLIST_DATA,
                        ensure_ascii=False), encoding="utf-8")
+    for rel, text in (extra_files or {}).items():
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
     spec = importlib.util.spec_from_file_location(
         f"check_localization_fixture_{_module_counter}",
         SCRIPT_PATH)
@@ -398,6 +394,31 @@ class CheckLocalizationTest(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertIn("❌ 1 个错误", output)
         self.assertIn("- main[0] 非法正则", output)
+
+    # -- ReDoS 规则跨语言一致性（#271） --
+    def test_redos_rule_mirror_match_passes(self) -> None:
+        # 头文件镜像与 regex-blacklist.json 逐字一致 -> 无一致性错误
+        rule = BLACKLIST_DATA["redos_heuristic"]["regex"]
+        header = 'inline constexpr const char kRedosHeuristicRegex[] =\n    R"(' + rule + ')";\n'
+        module, exit_code, _ = self.run_validator(
+            extra_files={"src/utils/l10n_rules.hpp": header})
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(module.errors, [])
+
+    def test_redos_rule_mirror_mismatch_rejected(self) -> None:
+        # 头文件镜像被单独改动（CI 与 C++ 口径分歧）-> 必须报错阻断
+        header = 'inline constexpr const char kRedosHeuristicRegex[] =\n    R"(\\(.*[+*].*\\)\\s*[+*{])";\n'
+        module, exit_code, output = self.run_validator(
+            extra_files={"src/utils/l10n_rules.hpp": header})
+        self.assertEqual(exit_code, 1)
+        self.assertIn("ReDoS 规则跨语言不一致", output)
+
+    def test_redos_rule_mirror_missing_constant_rejected(self) -> None:
+        # 头文件存在但常量被改名/删除 -> 一致性校验失败（防「改名绕过校验」）
+        module, exit_code, output = self.run_validator(
+            extra_files={"src/utils/l10n_rules.hpp": "// no constant here\n"})
+        self.assertEqual(exit_code, 1)
+        self.assertIn("无法在", output)
 
 
 if __name__ == "__main__":
