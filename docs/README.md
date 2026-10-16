@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `CONTRIBUTING.md` | 汉化贡献指南（规则 / 本地验证 / 发布说明约定） | GitHub 社区文件识别位置（根 / `.github/` / `docs/` 三选一），勿移动 |
 | `ReleaseBody.md` | Release 说明模板（CI 按全角版本标记提取变更行） | 发布链路唯一真值来源（workflow `grep/awk` 直接引用），勿移动 |
-| `wiki/` | GitHub Wiki 发布源（13 页：安装 / 使用 / 原理 / 贡献 / CI-CD 等） | 与主文档分层：主文档面向仓库读者，wiki 面向产品用户 |
+| `wiki/` | GitHub Wiki 发布源（12 个内容页 + 2 个布局文件：安装 / 使用 / 原理 / 贡献 / CI-CD 等） | 与主文档分层：主文档面向仓库读者，wiki 面向产品用户 |
 | `README.md`（本文件） | 文档索引与归类说明 | — |
 
 ## 与其他文档的关系
@@ -26,7 +26,7 @@
 
 | 路径 | 原因 |
 | --- | --- |
-| `json/localization.json` | 已发布旧版程序内置其远程 URL（`raw.githubusercontent.com/.../main/json/localization.json`），移动即破坏历史版本 |
+| `json/localization.json` | 已发布程序内置其远程 URL（旧版为 `raw.githubusercontent.com/.../GitHubDesktop2Chinese/...`，新版为 `.../TuPigGHD2Chinese/...`），移动即破坏历史版本 |
 | `.github/workflows/` | GitHub Actions 仅识别该目录 |
 | `docs/ReleaseBody.md` | CI 发布链路 `grep/awk` 真值来源 |
 | `docs/CONTRIBUTING.md` | GitHub 社区文件识别位置 |
@@ -35,8 +35,8 @@
 
 ## 脚本位置
 
-- `tools/auto-maintain/` — 数据维护工具（本地与 CI 共用；含共享规则 `regex-blacklist.json`）
-- `tools/ci/` — CI 脚本（数据质量校验 / 工具自检 / Markdown 链接检查 / 冒烟测试 / 维护报告）
+- `tools/auto-maintain/` — 数据维护工具（本地与 CI 共用；含共享规则 `regex-blacklist.json`；单测由 Vitest 运行）
+- `tools/ci/` — CI 脚本（数据质量校验 / 工具自检 / Markdown 链接检查 / 冒烟测试 / 维护报告；校验器单测由 pytest 运行，覆盖率门禁配置见 `.coveragerc` 与 `tools/auto-maintain/vitest.config.mjs`）
 
 ---
 
@@ -50,7 +50,7 @@ This directory holds the repository's documentation. Each file's role and placem
 | --- | --- | --- |
 | `CONTRIBUTING.md` | Localization contribution guide (rules / local verification / release-notes conventions) | A GitHub community-file location (one of root / `.github/` / `docs/`) — do not move |
 | `ReleaseBody.md` | Release-notes template (CI extracts change lines by full-width version markers) | The single source of truth for the release pipeline (referenced directly by the workflow's `grep/awk`) — do not move |
-| `wiki/` | GitHub Wiki publishing source (13 pages: install / usage / internals / contribution / CI-CD, etc.) | Layered apart from the main docs: main docs serve repository readers, the wiki serves product users |
+| `wiki/` | GitHub Wiki publishing source (12 content pages + 2 layout files: install / usage / internals / contribution / CI-CD, etc.) | Layered apart from the main docs: main docs serve repository readers, the wiki serves product users |
 | `README.md` (this file) | Documentation index and placement notes | — |
 
 ## Relationship to Other Documentation
@@ -68,7 +68,7 @@ This directory holds the repository's documentation. Each file's role and placem
 
 | Path | Reason |
 | --- | --- |
-| `json/localization.json` | Released older builds embed its remote URL (`raw.githubusercontent.com/.../main/json/localization.json`); moving it breaks historical versions |
+| `json/localization.json` | Released builds embed its remote URL (older builds: `raw.githubusercontent.com/.../GitHubDesktop2Chinese/...`; new builds: `.../TuPigGHD2Chinese/...`) — moving it breaks historical versions |
 | `.github/workflows/` | GitHub Actions only recognizes this directory |
 | `docs/ReleaseBody.md` | Source of truth for the CI release pipeline's `grep/awk` |
 | `docs/CONTRIBUTING.md` | GitHub community-file location |
