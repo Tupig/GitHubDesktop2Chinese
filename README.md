@@ -17,6 +17,7 @@
 
 - [🥮 这是什么](#-这是什么)
 - [🎯 怎么使用它](#-怎么使用它)
+- [🔄 从旧版本升级（项目更名说明）](#-从旧版本升级项目更名说明)
 - [⚙️ 命令行参数](#-命令行参数)
 - [🏗 怎么编译源代码](#-怎么编译源代码)
 - [👕 怎么贡献汉化](#-怎么贡献汉化)
@@ -51,6 +52,16 @@
 > - 发布产物附带构建溯源证明（SLSA provenance），可用 `gh attestation verify <下载的文件> --repo Tupig/TuPigGHD2Chinese` 校验来源；Windows 产物的代码签名流程已内置（SignPath 集成），凭据配置后自动启用，当前产物未签名。
 > - 汉化映射以 **Windows 版** GitHub Desktop 文案为准，其他平台文案基本一致，个别条目可能不匹配。
 > - GitHub Desktop 每次版本更新后，都需要重新运行一次本程序才能完成汉化。
+
+## 🔄 从旧版本升级（项目更名说明）
+
+> [!IMPORTANT]
+> 自本版本起项目更名为 **TuPigGHD2Chinese**（原 `GitHubDesktop2Chinese`）：仓库地址、程序文件名与发布资产名一并变更为 **`TuPigGHD2Chinese.*`**。
+
+- **旧版本无法自动升级**：程序自更新按资产名精确匹配，旧版查找的是 `GitHubDesktop2Chinese.exe`，而新版发布的是 `TuPigGHD2Chinese.exe`，因此二者对不上。
+- **升级方式**：前往 [Releases](https://github.com/Tupig/TuPigGHD2Chinese/releases) 手动下载最新版 `TuPigGHD2Chinese.exe`，替换旧程序后重新运行一次汉化即可（`localization.json` 可沿用，程序也会自动获取最新映射）。
+- **旧版本仍可用**：旧版通过 GitHub 对旧仓库名的**重定向**获取远程映射；若旧仓库名日后被他人占用，旧版将无法联网获取映射 —— 届时请升级到新版本。
+- 本次仅为**文件名与品牌更名**，汉化效果与功能不变。
 
 ## ⚙️ 命令行参数
 
@@ -167,7 +178,7 @@ cmake --build build --config Release
 | --- | --- | --- |
 | 构建 | push `main` / PR（目标 main）/ tag `v*` / 定时 / 手动 auto、build、release | 构建矩阵 + 产物功能测试：Windows x64、macOS x64 / arm64（单架构包）、Linux x64 |
 | JSON 质量校验 | PR（目标 main）/ push `main` / tag `v*` / 定时 / 手动 auto、security、release | 正则合法性、结构完整性、占位符检查、std::regex 不兼容语法黑名单、译文问句全角风格 |
-| 工具自检 | PR（目标 main）/ push `main` / tag `v*` / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + 单元测试 + Markdown 链接检查 |
+| 工具自检 + 覆盖率门禁 | PR（目标 main）/ push `main` / tag `v*` / 定时 / 手动 auto、security、maintain、release | 自动维护工具语法检查 + Vitest 单元测试 + Markdown 链接检查 + 编码检查 + 单工作流规范校验 + pytest 校验器测试；覆盖率门禁：Python `pytest-cov` ≥90%、Node Vitest 阈值、C++ `gcov`+`gcovr` ≥80% |
 | CodeQL 扫描 | PR（目标 main）/ push `main` / 手动 auto、security、release | C/C++ 安全扫描 |
 | 失效检测 + 候选提取 | push `main` / 定时（每日）/ 手动 auto、maintain、release | 检测失效映射、提取未翻译候选，自动创建/关闭 Issue |
 | Release 发布 | push `main`（有变更时）/ tag `v*` / 定时（有变更时）/ 手动 auto（仅 main, 有变更）、release（仅 main） | 自动升级版本号，发布多平台产物 + localization.json |
@@ -335,6 +346,7 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 
 - [🥮 What is this](#-what-is-this)
 - [🎯 How to use it](#-how-to-use-it)
+- [🔄 Upgrading from older versions (project rename)](#-upgrading-from-older-versions-project-rename)
 - [⚙️ Command-line arguments](#-command-line-arguments)
 - [🏗 Building from source](#-building-from-source)
 - [👕 How to contribute translations](#-how-to-contribute-translations)
@@ -367,6 +379,16 @@ A program that automatically replaces the UI text of [GitHub Desktop](https://de
 > - Release artifacts carry build provenance attestations (SLSA provenance); verify their origin with `gh attestation verify <downloaded file> --repo Tupig/TuPigGHD2Chinese`. The code-signing flow for the Windows binary is built in (SignPath integration) and activates automatically once credentials are configured; artifacts are currently unsigned.
 > - Translation mappings are based on the **Windows** build of GitHub Desktop; texts on other platforms are mostly identical, but a few entries may not match.
 > - After each GitHub Desktop update, run this program once again to re-apply the localization.
+
+## 🔄 Upgrading from older versions (project rename)
+
+> [!IMPORTANT]
+> Starting with this version the project is renamed to **TuPigGHD2Chinese** (formerly `GitHubDesktop2Chinese`): the repository URL, the executable name and the release asset names all change to **`TuPigGHD2Chinese.*`**.
+
+- **Older versions cannot self-update**: the built-in updater matches asset names exactly — older builds look for `GitHubDesktop2Chinese.exe` while new releases ship `TuPigGHD2Chinese.exe`, so they never match.
+- **How to upgrade**: download the latest `TuPigGHD2Chinese.exe` manually from [Releases](https://github.com/Tupig/TuPigGHD2Chinese/releases), replace the old program and run it once again to re-apply the localization (`localization.json` can be kept; the program also fetches the latest mapping automatically).
+- **Older versions still work**: they fetch the remote mapping via GitHub's **redirect** of the old repository name; if that old name is ever taken by someone else, older builds can no longer fetch mappings — upgrade to the new version at that point.
+- This is a **file-name / branding rename only** — the localization result and functionality are unchanged.
 
 ## ⚙️ Command-line arguments
 
@@ -483,7 +505,7 @@ This repository uses a single unified workflow, [`tupigghd2chinese.yml`](.github
 | --- | --- | --- |
 | Build | push to `main` / PR (targeting main) / tag `v*` / scheduled / manual auto, build, release | Build matrix + artifact functional tests: Windows x64, macOS x64 / arm64 (per-architecture packages), Linux x64 |
 | JSON quality checks | PR (targeting main) / push `main` / tag `v*` / scheduled / manual auto, security, release | Regex validity, structural integrity, placeholder checks, blacklist of syntax unsupported by std::regex, full-width question-mark style in translations |
-| Tool self-checks | PR (targeting main) / push `main` / tag `v*` / scheduled / manual auto, security, maintain, release | Auto-maintain tool syntax check + unit tests + Markdown link check |
+| Tool self-checks + coverage gates | PR (targeting main) / push `main` / tag `v*` / scheduled / manual auto, security, maintain, release | Auto-maintain tool syntax check + Vitest unit tests + Markdown link check + encoding check + single-workflow spec validation + pytest validator tests; coverage gates: Python `pytest-cov` ≥90%, Node Vitest thresholds, C++ `gcov`+`gcovr` ≥80% |
 | CodeQL scan | PR (targeting main) / push `main` / manual auto, security, release | C/C++ security scanning |
 | Invalid-entry detection + candidate extraction | push `main` / scheduled (daily) / manual auto, maintain, release | Detect broken mappings, extract untranslated candidates, auto-create/close issues |
 | Release | push `main` (when changed) / tag `v*` / scheduled (when changed) / manual auto (main only, when changed), release (main only) | Auto-bump the version number and publish multi-platform artifacts + localization.json |
