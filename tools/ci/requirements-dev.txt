@@ -2,6 +2,6 @@
 # 安装: python -m pip install -r tools/ci/requirements-dev.txt
 # 运行: python -m pytest
 # 覆盖率门禁阈值在 .coveragerc 的 fail_under（不在命令行，避免删参即静默关闭）
-pytest==9.0.2
+pytest==9.0.3
 pytest-cov==7.0.0
 gcovr==8.6
