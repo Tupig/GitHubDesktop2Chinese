@@ -122,7 +122,7 @@
 #     arm64 在 macos-15(M1) 原生构建(产物功能测试可原生执行),
 #     静态 OpenSSL + strip/LTO 裁剪体积; OpenSSL 静态库由产库四连任务产库(见 5/6/7/8),
 #     sccache 编译缓存跨 run 复用(缓存至 GitHub Actions Cache)
-#   - 第三方 actions 全部按 commit SHA 固定（版本升级手动执行；本仓未配置 .github/dependabot.yml，vendored 依赖版本记录于 third_party/README.md，升级与漏洞跟进为人工流程）
+#   - 第三方 actions 全部按 commit SHA 固定（版本升级手动执行；本仓未配置 .github/dependabot.yml —— Dependabot 安全告警（alerts/security updates）可用，但依赖版本自动更新 PR 未启用；vendored 依赖版本记录于 third_party/README.md，其升级为人工流程）
 #   - 数据质量校验/工具自检/维护报告等大型脚本外置于 tools/ci（YAML 仅保留调用）
 #   - 发布产物生成构建溯源证明（SLSA provenance attestation），可用 gh attestation verify 校验来源
 
