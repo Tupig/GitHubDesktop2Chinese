@@ -2,7 +2,7 @@
 
 **简体中文** | [English](#ci--cd-english)
 
-仓库只有**一个工作流** [`.github/workflows/ghdesktop2chinese.yml`](../../.github/workflows/ghdesktop2chinese.yml)（构建 / 检查 / 维护 / Wiki 同步 / OpenSSL 产库 / 发布）。大型脚本全部外置于 `tools/ci/`（数据质量校验 / 编码检查 / 工具自检 / Markdown 链接检查 / 单工作流规范校验 / 冒烟测试 / 维护报告 / Wiki 同步），YAML 内只保留编排逻辑。Wiki 同步见[下文](#wiki-自动同步)。
+仓库只有**一个工作流** [`.github/workflows/tupigghd2chinese.yml`](../../.github/workflows/tupigghd2chinese.yml)（构建 / 检查 / 维护 / Wiki 同步 / OpenSSL 产库 / 发布）。大型脚本全部外置于 `tools/ci/`（数据质量校验 / 编码检查 / 工具自检 / Markdown 链接检查 / 单工作流规范校验 / 冒烟测试 / 维护报告 / Wiki 同步），YAML 内只保留编排逻辑。Wiki 同步见[下文](#wiki-自动同步)。
 
 ## 触发方式
 
@@ -62,9 +62,9 @@ Job 依赖关系：`Build` / `JsonCheck` ← `Version`；`CodeqlScan` ← `Versi
 
 **发布内容**：
 
-- 多平台产物：`GitHubDesktop2Chinese.exe`（Windows x64）、`GitHubDesktop2Chinese-macos-x64`、`GitHubDesktop2Chinese-macos-arm64`、`GitHubDesktop2Chinese-linux-x64`；
+- 多平台产物：`TuPigGHD2Chinese.exe`（Windows x64）、`TuPigGHD2Chinese-macos-x64`、`TuPigGHD2Chinese-macos-arm64`、`TuPigGHD2Chinese-linux-x64`；
 - `localization.json`（用户可单独下载映射）；
-- 每个产物的**构建溯源证明**（SLSA provenance），可用 `gh attestation verify <文件> --repo Tupig/GitHubDesktop2Chinese` 校验；
+- 每个产物的**构建溯源证明**（SLSA provenance），可用 `gh attestation verify <文件> --repo Tupig/TuPigGHD2Chinese` 校验；
 - Windows 产物的代码签名：配置 SignPath 凭据后自动签名（当前休眠——Foundation 申请未获批，见[代码签名](#代码签名signpath)）；
 - Release 说明：优先从 [`docs/ReleaseBody.md`](../ReleaseBody.md) 提取**行尾含全角版本标记**（如 `（v0.0.2）`）的变更行拼接（变更行中英成对标注时一并纳入）；当前版本未预置条目时，发布流程**自动提取上一发布版本以来的提交标题**生成变更条目，写入 `docs/ReleaseBody.md` 的 Changelog 段后纳入说明（Release 页会标注「自动提取」）。两者皆未命中才显示「未找到变更记录」提示，均**不阻断**发布。最后附静态的「### 程序说明」段落。
 
@@ -93,12 +93,12 @@ Job 依赖关系：`Build` / `JsonCheck` ← `Version`；`CodeqlScan` ← `Versi
 
 ## 代码签名（SignPath）
 
-Windows 产物（`GitHubDesktop2Chinese.exe`）的发布前代码签名流程已内置，当前处于**休眠**状态（2026-10 更新）。
+Windows 产物（`TuPigGHD2Chinese.exe`）的发布前代码签名流程已内置，当前处于**休眠**状态（2026-10 更新）。
 
 **现状**：SignPath Foundation 申请未获批准——该计划要求项目具备一定的公开可见度信号（社区采用度、独立引用、外部讨论等），本项目暂未达标；凭据未配置，签名步骤自动跳过，**当前发布产物未签名**，发布不受影响。产物仍带 SLSA 构建溯源证明（不依赖签名），Release 说明中的 SignPath 声明仅在签名实际发生时输出。
 
 - **启用条件**：仓库 Secrets `SIGNPATH_API_TOKEN` 与 Variables `SIGNPATH_ORGANIZATION_ID` 同时配置才签名；任一缺失自动跳过，产物保持未签名，发布流程不受影响；
-- **可覆盖项**：Variables `SIGNPATH_PROJECT_SLUG`（默认 `GitHubDesktop2Chinese`）、`SIGNPATH_SIGNING_POLICY_SLUG`（默认 `release-signing`）；
+- **可覆盖项**：Variables `SIGNPATH_PROJECT_SLUG`（默认 `TuPigGHD2Chinese`）、`SIGNPATH_SIGNING_POLICY_SLUG`（默认 `release-signing`）；
 - **流程**（release 任务内）：下载构建产物 → 单独上传待签名 exe（SignPath 要求签名对象先作为 GitHub artifact 存在）→ 提交签名请求并等待完成 → 签名产物替换原 exe → 对签名产物**重新生成构建溯源证明**（签名会改变文件内容，未签名版本的证明摘要不再匹配）；
 - **后续启用路径**（维护者，二选一）：社区可见度提升后**重新申请** [SignPath Foundation](https://signpath.org/apply)（可再次审核），或转[付费订阅](https://docs.signpath.io/change-subscription)；获批后按下述一次性配置接入即可，无需改动代码；
 - **SignPath 侧一次性配置**（维护者）：创建项目（slug 与仓库名一致；Artifact Configuration 引用 [`.signpath/artifact-configuration.xml`](../../.signpath/artifact-configuration.xml)；Trusted Build System 关联 GitHub.com 本仓库）→ 创建 `release-signing` 签名策略 → 生成 API Token 与组织 ID 分别存入仓库 Secrets / Variables。
@@ -158,7 +158,7 @@ python tools/ci/check-encoding.py --exclude docs/legacy/                  # 临�
 
 **常见问题**：
 
-- **为什么强制 UTF-8 无 BOM？** JSON 带 BOM 违反 RFC 8259；`.sh` 带 BOM 破坏 shebang；GBK 内容会导致 Linux CI 乱码（详见 [#85 审计](https://github.com/Tupig/GitHubDesktop2Chinese/issues/85)）。
+- **为什么强制 UTF-8 无 BOM？** JSON 带 BOM 违反 RFC 8259；`.sh` 带 BOM 破坏 shebang；GBK 内容会导致 Linux CI 乱码（详见 [#85 审计](https://github.com/Tupig/TuPigGHD2Chinese/issues/85)）。
 - **违规了怎么修？** 用编辑器或 `iconv -f GBK -t UTF-8 <文件>` 转为 UTF-8 无 BOM 后重新提交；不要靠加白名单绕过。
 - **为什么 `smoke-test.ps1` 可以带 BOM？** 不带 BOM 时 Windows PowerShell 5.1 会把脚本按 ANSI 解析导致中文乱码；它是仓库唯一例外。
 - **配置文件写错了会怎样？** JSON 语法错误 / 键类型不对 → `::error` + 退出码 2 直接失败；未知键 → `::warning` 提示后忽略。
@@ -176,7 +176,7 @@ python tools/ci/check-encoding.py --exclude docs/legacy/                  # 临�
 
 [简体中文](#ci--cd) | **English**
 
-The repository has a **single workflow**: [`.github/workflows/ghdesktop2chinese.yml`](../../.github/workflows/ghdesktop2chinese.yml) (build / checks / maintenance / Wiki sync / OpenSSL vendoring / release). Large scripts live outside the YAML in `tools/ci/` (data quality validation / encoding check / tool self-tests / Markdown link checks / single-workflow spec validation / smoke tests / maintenance reports / Wiki sync); the YAML only holds the orchestration. Wiki sync is covered [below](#automatic-wiki-sync).
+The repository has a **single workflow**: [`.github/workflows/tupigghd2chinese.yml`](../../.github/workflows/tupigghd2chinese.yml) (build / checks / maintenance / Wiki sync / OpenSSL vendoring / release). Large scripts live outside the YAML in `tools/ci/` (data quality validation / encoding check / tool self-tests / Markdown link checks / single-workflow spec validation / smoke tests / maintenance reports / Wiki sync); the YAML only holds the orchestration. Wiki sync is covered [below](#automatic-wiki-sync).
 
 ## Triggers
 
@@ -236,9 +236,9 @@ Job dependencies: `Build` / `JsonCheck` ← `Version`; `CodeqlScan` ← `Version
 
 **Release contents**:
 
-- Multi-platform artifacts: `GitHubDesktop2Chinese.exe` (Windows x64), `GitHubDesktop2Chinese-macos-x64`, `GitHubDesktop2Chinese-macos-arm64`, `GitHubDesktop2Chinese-linux-x64`;
+- Multi-platform artifacts: `TuPigGHD2Chinese.exe` (Windows x64), `TuPigGHD2Chinese-macos-x64`, `TuPigGHD2Chinese-macos-arm64`, `TuPigGHD2Chinese-linux-x64`;
 - `localization.json` (users can download the mapping separately);
-- A **build provenance attestation** (SLSA provenance) for every artifact, verifiable with `gh attestation verify <file> --repo Tupig/GitHubDesktop2Chinese`;
+- A **build provenance attestation** (SLSA provenance) for every artifact, verifiable with `gh attestation verify <file> --repo Tupig/TuPigGHD2Chinese`;
 - Code signing for the Windows artifact: signed automatically once SignPath credentials are configured (currently dormant — the Foundation application was not approved; see [Code Signing](#代码签名signpath));
 - Release notes: change lines extracted from [`docs/ReleaseBody.md`](../ReleaseBody.md) whose **line ends carry the full-width version marker** (e.g. `（v0.0.2）`) are joined (paired Chinese/English changelog lines are included together); when no entry is pre-written for the current version, the release flow **auto-extracts commit subjects since the previous release**, writes them into the `docs/ReleaseBody.md` changelog section and includes them (marked "auto-extracted" on the release page). Only when both miss does the "no changelog found" notice appear — neither case **blocks** the release. The static "### 程序说明" section is appended last.
 
@@ -267,12 +267,12 @@ After documentation pages (`docs/wiki/`) merge into `main`, the wiki-sync block 
 
 ## Code Signing (SignPath)
 
-The pre-release code-signing flow for the Windows artifact (`GitHubDesktop2Chinese.exe`) is built in and currently **dormant** (updated 2026-10).
+The pre-release code-signing flow for the Windows artifact (`TuPigGHD2Chinese.exe`) is built in and currently **dormant** (updated 2026-10).
 
 **Current status**: the SignPath Foundation application was not approved — the program requires a certain level of public visibility signals (community adoption, independent references, external discussions, etc.), which this project does not yet meet; credentials are not configured, the signing steps skip automatically, and **release artifacts are currently unsigned**, with no impact on releases. Artifacts still carry the SLSA build provenance attestation (which does not depend on signing), and the SignPath statement in the Release notes is emitted only when signing actually happens.
 
 - **Enablement**: signing happens only when both the repository Secret `SIGNPATH_API_TOKEN` and Variable `SIGNPATH_ORGANIZATION_ID` are configured; if either is missing it is skipped automatically, the artifact stays unsigned, and the release is unaffected;
-- **Overridable settings**: Variables `SIGNPATH_PROJECT_SLUG` (default `GitHubDesktop2Chinese`) and `SIGNPATH_SIGNING_POLICY_SLUG` (default `release-signing`);
+- **Overridable settings**: Variables `SIGNPATH_PROJECT_SLUG` (default `TuPigGHD2Chinese`) and `SIGNPATH_SIGNING_POLICY_SLUG` (default `release-signing`);
 - **Flow** (inside the release job): download build artifacts → upload the exe to be signed separately (SignPath requires the signing subject to exist as a GitHub artifact first) → submit the signing request and wait for completion → replace the original exe with the signed one → **regenerate the build provenance attestation** for the signed artifact (signing changes the file content, so the unsigned version's attestation digest no longer matches);
 - **Paths to enable it later** (maintainers, either one): **reapply** to [SignPath Foundation](https://signpath.org/apply) once community visibility grows (applications are welcome again), or switch to a [paid subscription](https://docs.signpath.io/change-subscription); once approved, complete the one-time setup below — no code changes needed;
 - **One-time SignPath-side setup** (maintainers): create a project (slug matching the repository name; Artifact Configuration referencing [`.signpath/artifact-configuration.xml`](../../.signpath/artifact-configuration.xml); Trusted Build System linked to this repository on GitHub.com) → create the `release-signing` signing policy → generate an API Token and organization ID and store them in repository Secrets / Variables respectively.
@@ -332,7 +332,7 @@ python tools/ci/check-encoding.py --exclude docs/legacy/                  # ad-h
 
 **FAQ**:
 
-- **Why enforce UTF-8 without BOM?** A BOM in JSON violates RFC 8259; a BOM in `.sh` breaks the shebang; GBK content garbles the Linux CI (see the [#85 audit](https://github.com/Tupig/GitHubDesktop2Chinese/issues/85)).
+- **Why enforce UTF-8 without BOM?** A BOM in JSON violates RFC 8259; a BOM in `.sh` breaks the shebang; GBK content garbles the Linux CI (see the [#85 audit](https://github.com/Tupig/TuPigGHD2Chinese/issues/85)).
 - **How do I fix a violation?** Convert the file to UTF-8 without BOM (editor or `iconv -f GBK -t UTF-8 <file>`) and re-commit; do not work around it by allow-listing.
 - **Why may `smoke-test.ps1` carry a BOM?** Without one, Windows PowerShell 5.1 parses the script as ANSI and garbles the Chinese text; it is the repository's only exception.
 - **What if the config file is wrong?** JSON syntax errors / wrong key types → `::error` + exit code 2 (hard failure); unknown keys → `::warning` and ignored.

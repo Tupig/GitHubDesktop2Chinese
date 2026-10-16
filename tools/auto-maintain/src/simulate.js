@@ -6,7 +6,7 @@
  * 条目永不生效（例：renderer#883 "Add model" 先替换后，其后复合正则
  * "\"Edit model\":\"Add model\"" 匹配不到；独立测试时后者能匹配 → 失效检测报绿）。
  *
- * 本模块按 C++ 应用侧语义（GitHubDesktop2Chinese.cpp 的 ProcessJsFile /
+ * 本模块按 C++ 应用侧语义（TuPigGHD2Chinese.cpp 的 ProcessJsFile /
  * ApplySelectForFile / FillPlaceholders）对目标 js 文本依序应用
  * main / renderer / select(enable=true) 全部映射，逐条统计实际替换次数：
  *   - 本条替换次数 0，且该正则对原始（未替换）文本独立匹配 > 0 → 隐性失效（warning 级，

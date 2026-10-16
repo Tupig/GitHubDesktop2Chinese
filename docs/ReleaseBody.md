@@ -39,6 +39,10 @@
   - Fix: the localized About-menu plugin link now points to this repository (#126)（v0.0.3）
 - 关键缺陷修复: 版本解析与退出码关键缺陷(A1/A2/D1)修复, 新增 C++ 单元测试基础设施 version_test (#127)（v0.0.4）
   - Critical fixes: key version-parsing and exit-code defects (A1/A2/D1) fixed; C++ unit-test infrastructure (version_test) added (#127)（v0.0.4）
+- 项目品牌化（更名说明）: 项目与仓库更名为 TuPigGHD2Chinese, 发布资产名由 GitHubDesktop2Chinese.* 改为 TuPigGHD2Chinese.*; ⚠️ 自更新按资产名精确匹配, 旧版本无法自动升级到本版本, 请手动下载新版; 旧版本远程取映射依赖 GitHub 对旧仓库名的重定向兜底（旧名被占用则失效）（v0.1.12）
+  - Rebranding (rename notice): the project and repository are renamed to TuPigGHD2Chinese, and release asset names change from GitHubDesktop2Chinese.* to TuPigGHD2Chinese.*; ⚠️ self-update matches asset names exactly, so older versions cannot auto-update to this build — please download the new build manually; older versions rely on GitHub's redirect of the old repository name for remote mappings (which stops working if the old name is taken)（v0.1.12）
+- 测试框架现代化: C++ 单元测试迁移至 GoogleTest（随仓 vendored, 构建期不下载）, Python 校验器测试迁移至 pytest, Node 工具测试迁移至 Vitest; CI 质量门覆盖全部校验器测试（v0.1.12）
+  - Test-framework modernization: C++ unit tests moved to GoogleTest (vendored in-repo; nothing downloaded at build time), Python validator tests moved to pytest, and Node tool tests moved to Vitest; the CI quality gate now runs every validator test（v0.1.12）
 
 <!--
 #### 修复BUG:
@@ -53,11 +57,11 @@
 ### 程序说明 / Program Notes  
 1. 可以仅下载二进制程序,双击运行后自动汉化  
    You can simply download the binary and double-click to run it — the UI is localized automatically.
-2. 如果运行提示出错,可重试或下载[此JSON文件](https://github.com/Tupig/GitHubDesktop2Chinese/blob/main/json/localization.json)后放在同目录后运行二进制程序  
-   If the program reports an error, retry, or download [this JSON file](https://github.com/Tupig/GitHubDesktop2Chinese/blob/main/json/localization.json), put it in the same directory as the binary and run again.
+2. 如果运行提示出错,可重试或下载[此JSON文件](https://github.com/Tupig/TuPigGHD2Chinese/blob/main/json/localization.json)后放在同目录后运行二进制程序  
+   If the program reports an error, retry, or download [this JSON file](https://github.com/Tupig/TuPigGHD2Chinese/blob/main/json/localization.json), put it in the same directory as the binary and run again.
 3. **若使用GitHub 仓库作为json文件源，请升级加载器到最新版本**  
    **If you use the GitHub repository as the JSON file source, please upgrade the loader to the latest version.**
-4. `GitHubDesktop2Chinese.exe` 为 64 位 Windows 程序，不再提供 32 位版本；Release 页同时提供 macOS 分架构二进制（`macos-x64` / `macos-arm64`）与 Linux x64 版本  
-   `GitHubDesktop2Chinese.exe` is a 64-bit Windows program; 32-bit builds are no longer provided. The Release page also ships per-architecture macOS binaries (`macos-x64` / `macos-arm64`) and a Linux x64 build.
-5. 如果汉化后主程序无法打开，请更新加载器后执行参数 `GitHubDesktop2Chinese.exe dev --translationfrombak`
-   If GitHub Desktop fails to open after localization, update the loader and run it with `GitHubDesktop2Chinese.exe dev --translationfrombak`.
+4. `TuPigGHD2Chinese.exe` 为 64 位 Windows 程序，不再提供 32 位版本；Release 页同时提供 macOS 分架构二进制（`macos-x64` / `macos-arm64`）与 Linux x64 版本  
+   `TuPigGHD2Chinese.exe` is a 64-bit Windows program; 32-bit builds are no longer provided. The Release page also ships per-architecture macOS binaries (`macos-x64` / `macos-arm64`) and a Linux x64 build.
+5. 如果汉化后主程序无法打开，请更新加载器后执行参数 `TuPigGHD2Chinese.exe dev --translationfrombak`
+   If GitHub Desktop fails to open after localization, update the loader and run it with `TuPigGHD2Chinese.exe dev --translationfrombak`.

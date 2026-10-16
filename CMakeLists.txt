@@ -1,4 +1,4 @@
-# CMakeList.txt: GitHubDesktop2Chinese 的 CMake 项目，在此处包括源代码并定义
+# CMakeList.txt: TuPigGHD2Chinese 的 CMake 项目，在此处包括源代码并定义
 # 项目特定的逻辑。
 #
 cmake_minimum_required (VERSION 3.30)
@@ -13,7 +13,7 @@ if (POLICY CMP0141)
   endif()
 endif()
 
-project ("GitHubDesktop2Chinese")
+project ("TuPigGHD2Chinese")
 
 # ── #134: 裸 cmake 无 preset 时兜底 Release（否则得到无优化无 NDEBUG 的裸构建）──
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -51,7 +51,7 @@ endif()
 # 指针宽度由 project() 完成编译器探测后判定，对 VS(-A x64/-A Win32) 与
 # Ninja 预设(external 策略下 CMAKE_GENERATOR_PLATFORM 为空)两条路径均生效
 if (NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "GitHubDesktop2Chinese 仅支持 64 位架构（x64/arm64）构建，请通过 -A x64 或对应预设进行配置")
+    message(FATAL_ERROR "TuPigGHD2Chinese 仅支持 64 位架构（x64/arm64）构建，请通过 -A x64 或对应预设进行配置")
 endif()
 message(STATUS "目标架构: ${CMAKE_SYSTEM_PROCESSOR} (64 位)")
 
@@ -88,7 +88,7 @@ if(WIN32)
 
 elseif(APPLE)
     # ── macOS: OpenSSL 3.5.9 LTS 静态库（随仓库提交于 third_party/openssl-macos-{x64,arm64}）──
-    # 库由主工作流 ghdesktop2chinese.yml 的 vendor 任务从官方源码构建（tag openssl-3.5.9，
+    # 库由主工作流 tupigghd2chinese.yml 的 vendor 任务从官方源码构建（tag openssl-3.5.9，
     # darwin64-{x86_64,arm64}-cc no-shared no-tests no-apps no-zlib，MACOSX_DEPLOYMENT_TARGET=11.0），
     # 构建与更新步骤见 third_party/README.md；CMake 按 CMAKE_OSX_ARCHITECTURES（回退
     # CMAKE_SYSTEM_PROCESSOR）自动选架构目录，构建期零下载零编译。
@@ -125,7 +125,7 @@ elseif(APPLE)
     find_package(Threads REQUIRED)
 else()
     # ── Linux: OpenSSL 3.5.9 LTS 静态库（随仓库提交于 third_party/openssl-linux-x64）──
-    # 库由主工作流 ghdesktop2chinese.yml 的 vendor 任务从官方源码构建（tag openssl-3.5.9，
+    # 库由主工作流 tupigghd2chinese.yml 的 vendor 任务从官方源码构建（tag openssl-3.5.9，
     # linux-x86_64 -fPIC no-shared no-tests no-apps no-zlib --libdir=lib），构建与更新
     # 步骤见 third_party/README.md；CMake 仅做存在性校验，构建期零下载零编译。
     # 本地自建库可通过 -DGHD2C_OPENSSL_ROOT=<目录> 覆盖查找与链接路径。
@@ -150,27 +150,27 @@ else()
 endif()
 
 # 将源代码添加到此项目的可执行文件。
-add_executable (GitHubDesktop2Chinese "src/GitHubDesktop2Chinese.cpp")
+add_executable (TuPigGHD2Chinese "src/TuPigGHD2Chinese.cpp")
 
 # ── #134: include 全部 target 级（原 include_directories 目录级会污染后续 target）──
 # 私有源码目录
-target_include_directories(GitHubDesktop2Chinese PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(TuPigGHD2Chinese PRIVATE ${PROJECT_SOURCE_DIR}/src)
 # SYSTEM：第三方头（spdlog/fmt/CLI11/openssl）告警不归本仓管控；
 # MSVC 按 /external:I + /external:W0、GCC/Clang 按 -isystem 抑制（#92/#134）
-target_include_directories(GitHubDesktop2Chinese SYSTEM PRIVATE
+target_include_directories(TuPigGHD2Chinese SYSTEM PRIVATE
     ${PROJECT_SOURCE_DIR}/third_party/include
     "${GHD2C_OPENSSL_ROOT}/include")
 
 if(WIN32)
     # 链接OpenSSL静态库（third_party/openssl 仓库内 x64 静态库）
-    target_link_libraries(GitHubDesktop2Chinese PRIVATE
+    target_link_libraries(TuPigGHD2Chinese PRIVATE
         ${GHD2C_OPENSSL_ROOT}/lib/${OPENSSL_SSL_NAME}
         ${GHD2C_OPENSSL_ROOT}/lib/${OPENSSL_CRYPTO_NAME})
     if(MSVC)
         # 进程级 UTF-8 主动代码页清单: 缺少时窄字符路径按系统 ANSI 代码页解释,
         # 非中文系统上中文路径参数会解析失败(#138 起作为源文件交给 CMake 统一处理,
         # VS 生成器走 vcxproj 清单、Ninja 生成器自动配对 /MANIFESTINPUT 与 /MANIFEST:EMBED)
-        target_sources(GitHubDesktop2Chinese PRIVATE src/app.manifest)
+        target_sources(TuPigGHD2Chinese PRIVATE src/app.manifest)
     endif()
 elseif(APPLE)
     # 链接内置 OpenSSL 静态库（third_party/openssl-macos-*，配置段已按架构选定；
@@ -179,7 +179,7 @@ elseif(APPLE)
     # 从钥匙串读取系统根证书，需链接这两个系统框架）
     find_library(COREFOUNDATION_FW CoreFoundation REQUIRED)
     find_library(SECURITY_FW Security REQUIRED)
-    target_link_libraries(GitHubDesktop2Chinese PRIVATE
+    target_link_libraries(TuPigGHD2Chinese PRIVATE
         ${GHD2C_OPENSSL_ROOT}/lib/libssl.a
         ${GHD2C_OPENSSL_ROOT}/lib/libcrypto.a
         Threads::Threads
@@ -189,7 +189,7 @@ else()
     # 链接内置 OpenSSL 静态库（third_party/openssl-linux-x64，配置段已校验存在；
     # libssl 依赖 libcrypto，顺序不可颠倒；CMAKE_DL_LIBS 补齐 dlopen 动态加载
     # 依赖（glibc < 2.34 时 dlopen 在 libdl.so 中，≥ 2.34 已并入 libc）
-    target_link_libraries(GitHubDesktop2Chinese PRIVATE
+    target_link_libraries(TuPigGHD2Chinese PRIVATE
         ${GHD2C_OPENSSL_ROOT}/lib/libssl.a
         ${GHD2C_OPENSSL_ROOT}/lib/libcrypto.a
         Threads::Threads
@@ -200,10 +200,10 @@ endif()
 
 # #130: spdlog 宽字符文件名(Windows): 中文用户名的 %TEMP% 日志路径无损传给 _wfopen
 if(WIN32)
-    target_compile_definitions(GitHubDesktop2Chinese PRIVATE SPDLOG_WCHAR_FILENAMES)
+    target_compile_definitions(TuPigGHD2Chinese PRIVATE SPDLOG_WCHAR_FILENAMES)
 endif()
 
-set_property(TARGET GitHubDesktop2Chinese PROPERTY CXX_STANDARD 20)
+set_property(TARGET TuPigGHD2Chinese PROPERTY CXX_STANDARD 20)
 
 # ── 测试框架: GoogleTest(随仓库 vendored, 构建期不下载) ──
 # 仅构建 gtest/gtest_main(关闭 gmock 与安装规则); MSVC 强制共享 CRT 与主工程一致。

@@ -10,7 +10,7 @@
 
 ### Overview
 
-GitHubDesktop2Chinese is a local tool that translates the GitHub Desktop user interface into Chinese by applying regex-based text replacements to GitHub Desktop's application files on your machine.
+TuPigGHD2Chinese is a local tool that translates the GitHub Desktop user interface into Chinese by applying regex-based text replacements to GitHub Desktop's application files on your machine.
 
 **We do not collect, transmit, or share any personal data.**
 
@@ -37,7 +37,7 @@ These requests are subject to [GitHub's own privacy statement](https://docs.gith
 All files the tool creates or modifies stay on your machine:
 
 - translations applied to GitHub Desktop's `main.js` / `renderer.js`;
-- `.bak` backups of the original files (restorable at any time via `GitHubDesktop2Chinese.exe --rollback`).
+- `.bak` backups of the original files (restorable at any time via `TuPigGHD2Chinese.exe --rollback`).
 
 Deleting the executable removes the program entirely; no residues are left in the system (no registry entries beyond GitHub Desktop's own, no services, no background processes).
 
@@ -47,7 +47,7 @@ Any changes will be published in this repository.
 
 ### Contact
 
-Open an issue at <https://github.com/Tupig/GitHubDesktop2Chinese/issues>.
+Open an issue at <https://github.com/Tupig/TuPigGHD2Chinese/issues>.
 
 ---
 
@@ -57,7 +57,7 @@ Open an issue at <https://github.com/Tupig/GitHubDesktop2Chinese/issues>.
 
 ### 概述
 
-GitHubDesktop2Chinese 是一个本地工具，通过对 GitHub Desktop 的应用文件执行正则文本替换，将其界面翻译为中文。
+TuPigGHD2Chinese 是一个本地工具，通过对 GitHub Desktop 的应用文件执行正则文本替换，将其界面翻译为中文。
 
 **我们不收集、传输或共享任何个人数据。**
 
@@ -84,7 +84,7 @@ GitHubDesktop2Chinese 是一个本地工具，通过对 GitHub Desktop 的应用
 工具创建或修改的所有文件均保留在你的机器上：
 
 - 应用到 GitHub Desktop `main.js` / `renderer.js` 的汉化内容；
-- 原始文件的 `.bak` 备份（随时可通过 `GitHubDesktop2Chinese.exe --rollback` 还原）。
+- 原始文件的 `.bak` 备份（随时可通过 `TuPigGHD2Chinese.exe --rollback` 还原）。
 
 删除可执行文件即完全移除本程序；系统无残留（除 GitHub Desktop 自身的注册表项外不写注册表、无服务、无后台进程）。
 
@@ -94,4 +94,4 @@ GitHubDesktop2Chinese 是一个本地工具，通过对 GitHub Desktop 的应用
 
 ### 联系方式
 
-请在 <https://github.com/Tupig/GitHubDesktop2Chinese/issues> 提交 Issue。
+请在 <https://github.com/Tupig/TuPigGHD2Chinese/issues> 提交 Issue。

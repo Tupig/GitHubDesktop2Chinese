@@ -1,4 +1,4 @@
-# GitHubDesktop2Chinese 统一 CI/CD 工作流
+# TuPigGHD2Chinese 统一 CI/CD 工作流
 # 一个工作流完成：自动构建、质量与安全检查、失效检测/候选提取、Release 发布。
 #
 # ── 触发矩阵（自动 + 手动；与各 job 的 if 条件逐项对应）──────
@@ -87,18 +87,23 @@
 #             Release 需要的产物永远存在; 无差异跳过只发生在 changed=false 时
 #
 # ── 构建产物约定 ─────────────────────────────────────────────
-#   编译输出  Windows: build/Release/GitHubDesktop2Chinese.exe（MSVC 多配置生成器）
-#             macOS: build/GitHubDesktop2Chinese（单架构二进制: x64 或 arm64, 静态链接 OpenSSL）
-#             Linux: build/GitHubDesktop2Chinese（单配置生成器）
-#   Artifact  GitHubDesktop2Chinese-<平台>-<版本号|SHA>
+#   编译输出  Windows: build/Release/TuPigGHD2Chinese.exe（MSVC 多配置生成器）
+#             macOS: build/TuPigGHD2Chinese（单架构二进制: x64 或 arm64, 静态链接 OpenSSL）
+#             Linux: build/TuPigGHD2Chinese（单配置生成器）
+#   Artifact  TuPigGHD2Chinese-<平台>-<版本号|SHA>
 #   产库产物  openssl-linux-x64 / openssl-windows-x64 / openssl-macos-arm64 / openssl-macos-x64
 #             （产库四连任务产出, 仅 include/+lib/, 保留 7 天; 由 OpensslVendorPR 自动下载组装
 #              third_party/ 并开入库 PR, 不再人工下载提交）
-#   发布资产  GitHubDesktop2Chinese.exe        — Windows x64（保留历史文件名，向后兼容）
-#             GitHubDesktop2Chinese-macos-x64   — macOS Intel（x64）
-#             GitHubDesktop2Chinese-macos-arm64 — macOS Apple Silicon（M 系列）
-#             GitHubDesktop2Chinese-linux-x64  — Linux x86_64
+#   发布资产  TuPigGHD2Chinese.exe        — Windows x64
+#             TuPigGHD2Chinese-macos-x64   — macOS Intel（x64）
+#             TuPigGHD2Chinese-macos-arm64 — macOS Apple Silicon（M 系列）
+#             TuPigGHD2Chinese-linux-x64  — Linux x86_64
 #             localization.json                — 汉化映射（最新）
+#
+#   ⚠️ 破坏性变更（品牌化重命名 GitHubDesktop2Chinese → TuPigGHD2Chinese）:
+#       自本版本起发布资产名改为 TuPigGHD2Chinese.*; 自更新按资产名精确匹配,
+#       旧版本（GitHubDesktop2Chinese.exe）无法自动升级到新品牌版本, 需手动下载新版;
+#       旧版本远程取映射依赖 GitHub 对旧仓库名的重定向兜底（旧名释放后被占用则失效）。
 #
 # ── 版本号规则 ───────────────────────────────────────────────
 #   tag 触发     取 tag 版本（v0.0.1 → 0.0.1）
@@ -120,7 +125,7 @@
 #   - 数据质量校验/工具自检/维护报告等大型脚本外置于 tools/ci（YAML 仅保留调用）
 #   - 发布产物生成构建溯源证明（SLSA provenance attestation），可用 gh attestation verify 校验来源
 
-name: GitHubDesktop2Chinese
+name: TuPigGHD2Chinese
 
 # 触发配置（执行矩阵见文件头注释；各 job 的 if 条件与矩阵逐项对应）
 on:
@@ -174,7 +179,7 @@ on:
         type: string
 
 concurrency:
-  group: ghdesktop2chinese-${{ github.ref }}
+  group: tupigghd2chinese-${{ github.ref }}
   # PR 场景取消陈旧构建(同 PR 连续 push 只保留最新); main/tag/定时发布不取消
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -186,8 +191,8 @@ permissions:
 # 全局变量：构建类型 / 可执行文件名 / 产物名前缀
 env:
   BUILD_TYPE: Release
-  EXE_NAME: GitHubDesktop2Chinese.exe
-  ARTIFACT_PREFIX: GitHubDesktop2Chinese
+  EXE_NAME: TuPigGHD2Chinese.exe
+  ARTIFACT_PREFIX: TuPigGHD2Chinese
 
 jobs:
   # ═════════════════════════════════════════════════
@@ -252,7 +257,7 @@ jobs:
             # 查询 main 分支最近一次成功 run 的 head SHA(本次 run 未结束, 不会匹配到自己;
             # tag run 的 head_branch 为 tag 名, 不会混入; API 失败则保持构建, fail-open)
             BUILD_BASE_SHA="$(gh api \
-              "repos/${GITHUB_REPOSITORY}/actions/workflows/ghdesktop2chinese.yml/runs?branch=main&status=success&per_page=1" \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/tupigghd2chinese.yml/runs?branch=main&status=success&per_page=1" \
               --jq '.workflow_runs[0].head_sha' 2>/dev/null || true)"
             if [[ -n "$BUILD_BASE_SHA" && "$BUILD_BASE_SHA" != "null" ]]; then
               BUILD_DIFF="$(git diff --name-only "${BUILD_BASE_SHA}..HEAD" -- "${PATHSPEC[@]}" | wc -l | tr -d ' ')"
@@ -332,22 +337,22 @@ jobs:
             # display 仅用于 Actions 页面任务显示名; name 为产物/目录引用的技术标识, 勿改
             display: Windows_x64
             os: windows-2025
-            artifact: GitHubDesktop2Chinese.exe
+            artifact: TuPigGHD2Chinese.exe
           - name: macos-x64
             display: macOS_x64
             os: macos-15-intel
             arch: x64
-            artifact: GitHubDesktop2Chinese-macos-x64
+            artifact: TuPigGHD2Chinese-macos-x64
           - name: macos-arm64
             display: macOS_arm64
             # 原生 ARM(M1) runner: 产物功能测试可原生执行(此前 Intel 交叉编译无法运行测试)
             os: macos-15
             arch: arm64
-            artifact: GitHubDesktop2Chinese-macos-arm64
+            artifact: TuPigGHD2Chinese-macos-arm64
           - name: linux-x64
             display: Linux_x64
             os: ubuntu-24.04
-            artifact: GitHubDesktop2Chinese-linux-x64
+            artifact: TuPigGHD2Chinese-linux-x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     # 最小权限：读代码 + 为产物溯源证明申请 OIDC 签名（attestations）
@@ -463,7 +468,7 @@ jobs:
             pwsh -NoProfile -ExecutionPolicy Bypass -File tools/ci/smoke-test.ps1 -Binary "build/Release/${EXE_NAME}" -Force
             exit 0
           fi
-          BIN="build/GitHubDesktop2Chinese"
+          BIN="build/TuPigGHD2Chinese"
 
           [[ -f "$BIN" ]] || { echo "::error::未找到构建产物 $BIN"; exit 1; }
 
@@ -506,7 +511,7 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             cp "build/Release/${EXE_NAME}" "dist/${{ matrix.artifact }}"
           else
-            cp build/GitHubDesktop2Chinese "dist/${{ matrix.artifact }}"
+            cp build/TuPigGHD2Chinese "dist/${{ matrix.artifact }}"
             chmod +x "dist/${{ matrix.artifact }}"
           fi
           ls -l dist/
@@ -1595,7 +1600,7 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             BIN="build/Release/${EXE_NAME}"
           else
-            BIN="build/GitHubDesktop2Chinese"
+            BIN="build/TuPigGHD2Chinese"
           fi
           [[ -f "$BIN" ]] || { echo "::error::未找到构建产物 $BIN"; exit 1; }
 
@@ -1925,7 +1930,7 @@ jobs:
           name: unsigned-windows-${{ needs.Version.outputs.version || github.sha }}
           if-no-files-found: error
           retention-days: 1
-          path: release/GitHubDesktop2Chinese.exe
+          path: release/TuPigGHD2Chinese.exe
 
       - name: SignPath 代码签名（Windows exe）
         if: steps.signpath_gate.outputs.enabled == 'true'
@@ -1933,7 +1938,7 @@ jobs:
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ env.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'GitHubDesktop2Chinese' }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'TuPigGHD2Chinese' }}
           signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
           github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
           wait-for-completion: true
@@ -1943,15 +1948,15 @@ jobs:
         if: steps.signpath_gate.outputs.enabled == 'true'
         run: |
           set -euo pipefail
-          test -f signed/GitHubDesktop2Chinese.exe
-          cp signed/GitHubDesktop2Chinese.exe release/GitHubDesktop2Chinese.exe
-          echo "已用 SignPath 签名产物替换 release/GitHubDesktop2Chinese.exe"
+          test -f signed/TuPigGHD2Chinese.exe
+          cp signed/TuPigGHD2Chinese.exe release/TuPigGHD2Chinese.exe
+          echo "已用 SignPath 签名产物替换 release/TuPigGHD2Chinese.exe"
 
       - name: 为签名产物重新生成构建溯源证明
         if: steps.signpath_gate.outputs.enabled == 'true'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: release/GitHubDesktop2Chinese.exe
+          subject-path: release/TuPigGHD2Chinese.exe
 
       - name: 生成 Release 说明
         shell: bash
@@ -1961,16 +1966,16 @@ jobs:
           set -euo pipefail
           VER="$RELEASE_VERSION"
           {
-            echo "# GitHubDesktop2Chinese v$VER"
+            echo "# TuPigGHD2Chinese v$VER"
             echo ""
             echo "自动构建产物："
-            echo "- \`GitHubDesktop2Chinese.exe\` — Windows x64（64 位 Windows）"
-            echo "- \`GitHubDesktop2Chinese-macos-x64\` — macOS Intel（x64）"
-            echo "- \`GitHubDesktop2Chinese-macos-arm64\` — macOS Apple Silicon（M 系列）"
-            echo "- \`GitHubDesktop2Chinese-linux-x64\` — Linux x86_64"
+            echo "- \`TuPigGHD2Chinese.exe\` — Windows x64（64 位 Windows）"
+            echo "- \`TuPigGHD2Chinese-macos-x64\` — macOS Intel（x64）"
+            echo "- \`TuPigGHD2Chinese-macos-arm64\` — macOS Apple Silicon（M 系列）"
+            echo "- \`TuPigGHD2Chinese-linux-x64\` — Linux x86_64"
             echo "- \`localization.json\` — 汉化映射（最新）"
             echo ""
-            echo "> 产物附带构建溯源证明，可校验来源：\`gh attestation verify <下载的文件> --repo Tupig/GitHubDesktop2Chinese\`"
+            echo "> 产物附带构建溯源证明，可校验来源：\`gh attestation verify <下载的文件> --repo Tupig/TuPigGHD2Chinese\`"
             if [[ -n "${SIGNPATH_API_TOKEN:-}" && -n "${SIGNPATH_ORGANIZATION_ID:-}" ]]; then
               echo "> Windows 产物使用 [SignPath Foundation](https://signpath.org) 免费开源代码签名证书签名"
             fi
@@ -2053,7 +2058,7 @@ jobs:
         run: |
           set -euo pipefail
           VER="v$RELEASE_VERSION"
-          TITLE="GitHubDesktop2Chinese v$RELEASE_VERSION"
+          TITLE="TuPigGHD2Chinese v$RELEASE_VERSION"
           retry() {
             local max=$1
             shift

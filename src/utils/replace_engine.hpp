@@ -1,6 +1,6 @@
 #pragma once
 // ── 替换引擎(#129): regex_replace 整串重建 O(P×N) → 单遍构建 + 字面量快路径 ──
-// 从 GitHubDesktop2Chinese.cpp 抽出以便单元测试; 语义契约:
+// 从 TuPigGHD2Chinese.cpp 抽出以便单元测试; 语义契约:
 //   ReplaceLiteralInPlace / ReplaceRegexInPlace 与
 //   std::regex_replace(s, pattern, fmt, format_default) 输出逐字节一致
 #include <regex>

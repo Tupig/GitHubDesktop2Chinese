@@ -2,7 +2,7 @@
 
 **简体中文** | [English](#third-party-dependencies-english)
 
-本目录存放 GitHubDesktop2Chinese 的全部第三方依赖，**全部随仓库提交**（含 Windows / macOS / Linux 版 OpenSSL 静态库），克隆后无需联网下载依赖即可构建。
+本目录存放 TuPigGHD2Chinese 的全部第三方依赖，**全部随仓库提交**（含 Windows / macOS / Linux 版 OpenSSL 静态库），克隆后无需联网下载依赖即可构建。
 
 依赖来源政策：仅使用上游官方 GitHub 仓库 / 官方 Release 资产，不引入外部镜像或非官方预编译产物（CI 使用的 GitHub Actions 仅限 `actions/*` 与 `github/*` 官方维护的 Action，外加 Release 代码签名专用、SignPath 官方维护的 `signpath/github-action-submit-signing-request`）。
 
@@ -85,7 +85,7 @@ nmake install_sw
 
 ## macOS OpenSSL 静态库生成步骤（维护者备选参考）
 
-macOS 双架构静态库由主工作流 [.github/workflows/ghdesktop2chinese.yml](../.github/workflows/ghdesktop2chinese.yml) 的 **产库 OpenSSL (macOS)** 任务统一产出（PR 打 `vendor-openssl` 标签或手动 `type=vendor` 触发，不参与日常 CI）：
+macOS 双架构静态库由主工作流 [.github/workflows/tupigghd2chinese.yml](../.github/workflows/tupigghd2chinese.yml) 的 **产库 OpenSSL (macOS)** 任务统一产出（PR 打 `vendor-openssl` 标签或手动 `type=vendor` 触发，不参与日常 CI）：
 
 1. 在 PR 上打 `vendor-openssl` 标签（labeled 事件触发），或在 GitHub Actions 页面手动运行主工作流并选择 `type=vendor`；`openssl-version` 输入留空自动取官方最新 Release。
 2. 运行完成后产物经**产库自动入库流程**（见上节）组装开 PR；手动备选：从 artifact（`openssl-macos-x64` / `openssl-macos-arm64`，保留 7 天）下载产物：
@@ -115,7 +115,7 @@ Linux x64 静态库由主工作流的 **产库 OpenSSL (linux x64)** 任务产�
 
 [简体中文](#third_party-三方依赖清单) | **English**
 
-This directory holds all third-party dependencies of GitHubDesktop2Chinese. **Everything is committed to the repository** (including the Windows, macOS and Linux OpenSSL static libraries), so a clone can be built without downloading any dependencies.
+This directory holds all third-party dependencies of TuPigGHD2Chinese. **Everything is committed to the repository** (including the Windows, macOS and Linux OpenSSL static libraries), so a clone can be built without downloading any dependencies.
 
 Dependency provenance policy: only upstream official GitHub repositories / official release assets are used; external mirrors and unofficial prebuilt artifacts are never introduced (the GitHub Actions used by CI are limited to the officially maintained `actions/*` and `github/*` Actions, plus `signpath/github-action-submit-signing-request`, maintained by SignPath and used solely for release code signing).
 
@@ -198,7 +198,7 @@ Build options and artifact conventions:
 
 ## macOS OpenSSL Static Library Generation Steps (maintainer fallback reference)
 
-Both macOS architectures are produced by the **产库 OpenSSL (macOS)** jobs of the main workflow [.github/workflows/ghdesktop2chinese.yml](../.github/workflows/ghdesktop2chinese.yml) (triggered by the `vendor-openssl` label on a PR or manual `type=vendor`, not part of day-to-day CI):
+Both macOS architectures are produced by the **产库 OpenSSL (macOS)** jobs of the main workflow [.github/workflows/tupigghd2chinese.yml](../.github/workflows/tupigghd2chinese.yml) (triggered by the `vendor-openssl` label on a PR or manual `type=vendor`, not part of day-to-day CI):
 
 1. Add the `vendor-openssl` label to a PR (labeled event), or run the main workflow manually from the GitHub Actions page with `type=vendor`; an empty `openssl-version` input resolves to the latest official Release.
 2. Once the run completes, the artifacts go through the **automatic vendor intake flow** (see above) to assemble the PR; manual fallback: download the two artifacts (`openssl-macos-x64` / `openssl-macos-arm64`, retained for 7 days):

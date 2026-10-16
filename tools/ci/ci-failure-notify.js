@@ -85,7 +85,7 @@ module.exports = async ({ github, context, core }) => {
       `- 修复后无需手动处理本 Issue：下次定时构建成功将自动关闭`,
       '',
       '---',
-      `_由 [GitHubDesktop2Chinese](https://github.com/${owner}/${repo}/actions/workflows/ghdesktop2chinese.yml) CI 失败通知任务自动生成_`,
+      `_由 [TuPigGHD2Chinese](https://github.com/${owner}/${repo}/actions/workflows/tupigghd2chinese.yml) CI 失败通知任务自动生成_`,
     ].join('\n');
 
     if (existing) {

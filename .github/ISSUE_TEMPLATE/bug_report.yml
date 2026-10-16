@@ -8,14 +8,14 @@ body:
       value: |
         感谢反馈！提交前请先：
 
-        1. 在 [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues?q=is%3Aissue) 搜索关键词，避免重复提交；
-        2. 用[最新版程序](https://github.com/Tupig/GitHubDesktop2Chinese/releases/latest)复现一次（旧版问题可能已修复）；
+        1. 在 [Issues](https://github.com/Tupig/TuPigGHD2Chinese/issues?q=is%3Aissue) 搜索关键词，避免重复提交；
+        2. 用[最新版程序](https://github.com/Tupig/TuPigGHD2Chinese/releases/latest)复现一次（旧版问题可能已修复）；
         3. 「汉化不生效」类问题请先联网运行一次程序（自动拉取最新映射），确认仍可复现。
 
         Thanks for reporting! Before submitting, please:
 
-        1. Search existing [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues?q=is%3Aissue) for duplicates;
-        2. Reproduce once with the [latest release](https://github.com/Tupig/GitHubDesktop2Chinese/releases/latest) — older bugs may already be fixed;
+        1. Search existing [Issues](https://github.com/Tupig/TuPigGHD2Chinese/issues?q=is%3Aissue) for duplicates;
+        2. Reproduce once with the [latest release](https://github.com/Tupig/TuPigGHD2Chinese/releases/latest) — older bugs may already be fixed;
         3. For "localization not taking effect" issues, run the program once online first (it fetches the latest mapping) and confirm the problem persists.
 
   - type: textarea

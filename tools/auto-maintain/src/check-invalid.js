@@ -37,7 +37,7 @@ export const WARN_REASON_REDOS_SUSPECT = 'redos-suspect';
 
 /**
  * 对单个映射项执行失效检测（与 C++ std::regex 语义对齐）。
- * 规则（对应 GitHubDesktop2Chinese.cpp 的 --invalidcheck）：
+ * 规则（对应 TuPigGHD2Chinese.cpp 的 --invalidcheck）：
  *  - item[0] 为查找正则，为空跳过
  *  - item[2]（可选）为第三个参数正则，需额外匹配
  * 返回 { ok, errors, warnings }，

@@ -6,9 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        感谢建议！提交前请在 [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues?q=is%3Aissue) 与 [Discussions](https://github.com/Tupig/GitHubDesktop2Chinese/discussions) 搜索是否已被提出；发散性想法更适合 [Discussions 的「创意」分类](https://github.com/Tupig/GitHubDesktop2Chinese/discussions)。
+        感谢建议！提交前请在 [Issues](https://github.com/Tupig/TuPigGHD2Chinese/issues?q=is%3Aissue) 与 [Discussions](https://github.com/Tupig/TuPigGHD2Chinese/discussions) 搜索是否已被提出；发散性想法更适合 [Discussions 的「创意」分类](https://github.com/Tupig/TuPigGHD2Chinese/discussions)。
 
-        Thanks for the suggestion! Before submitting, please search [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues?q=is%3Aissue) and [Discussions](https://github.com/Tupig/GitHubDesktop2Chinese/discussions) for prior proposals; open-ended ideas are a better fit for the [Discussions 创意 (Ideas) category](https://github.com/Tupig/GitHubDesktop2Chinese/discussions).
+        Thanks for the suggestion! Before submitting, please search [Issues](https://github.com/Tupig/TuPigGHD2Chinese/issues?q=is%3Aissue) and [Discussions](https://github.com/Tupig/TuPigGHD2Chinese/discussions) for prior proposals; open-ended ideas are a better fit for the [Discussions 创意 (Ideas) category](https://github.com/Tupig/TuPigGHD2Chinese/discussions).
 
   - type: textarea
     id: problem

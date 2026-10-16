@@ -1,12 +1,12 @@
-# GitHubDesktop2Chinese
+# TuPigGHD2Chinese
 
-[![CI](https://img.shields.io/github/actions/workflow/status/Tupig/GitHubDesktop2Chinese/ghdesktop2chinese.yml?branch=main&label=CI)](https://github.com/Tupig/GitHubDesktop2Chinese/actions/workflows/ghdesktop2chinese.yml)
-[![Release](https://img.shields.io/github/v/release/Tupig/GitHubDesktop2Chinese)](https://github.com/Tupig/GitHubDesktop2Chinese/releases)
-[![License](https://img.shields.io/github/license/Tupig/GitHubDesktop2Chinese)](LICENSE.txt)
+[![CI](https://img.shields.io/github/actions/workflow/status/Tupig/TuPigGHD2Chinese/tupigghd2chinese.yml?branch=main&label=CI)](https://github.com/Tupig/TuPigGHD2Chinese/actions/workflows/tupigghd2chinese.yml)
+[![Release](https://img.shields.io/github/v/release/Tupig/TuPigGHD2Chinese)](https://github.com/Tupig/TuPigGHD2Chinese/releases)
+[![License](https://img.shields.io/github/license/Tupig/TuPigGHD2Chinese)](LICENSE.txt)
 [![C++](https://img.shields.io/badge/C%2B%2B-20-blue?logo=cplusplus&logoColor=white)](#-怎么编译源代码)
 [![localization.json](https://img.shields.io/badge/localization.json-v3-green)](#-映射文件-localizationjson)
 
-**简体中文** | [English](#githubdesktop2chinese-english)
+**简体中文** | [English](#tupigghd2chinese-english)
 
 > 本仓库派生（fork）自 [cngege/GitHubDesktop2Chinese](https://github.com/cngege/GitHubDesktop2Chinese)，在此基础上继续维护与更新。原作者 [CNGEGE](https://github.com/cngege)，感谢其开创性工作。
 
@@ -42,13 +42,13 @@
 
 [🎀 视频教程（BiliBili）](https://www.bilibili.com/video/BV17HpSeHEaC/) · [📖 详细教程：安装与使用](docs/wiki/安装与使用.md)
 
-**方式一（推荐）**：前往 [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) 下载 `GitHubDesktop2Chinese.exe`，双击运行，程序自动联网获取最新 `localization.json` 完成汉化。
+**方式一（推荐）**：前往 [Releases](https://github.com/Tupig/TuPigGHD2Chinese/releases) 下载 `TuPigGHD2Chinese.exe`，双击运行，程序自动联网获取最新 `localization.json` 完成汉化。
 
-**方式二**：下载 `GitHubDesktop2Chinese.exe` 与 `localization.json`，放在同一文件夹后运行。
+**方式二**：下载 `TuPigGHD2Chinese.exe` 与 `localization.json`，放在同一文件夹后运行。
 
 > [!IMPORTANT]
-> - 本程序提供 **64 位 Windows / macOS（按架构分 x64 与 arm64 两个包）/ Linux（x64）** 多平台版本，从 [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) 页选择对应产物下载。
-> - 发布产物附带构建溯源证明（SLSA provenance），可用 `gh attestation verify <下载的文件> --repo Tupig/GitHubDesktop2Chinese` 校验来源；Windows 产物的代码签名流程已内置（SignPath 集成），凭据配置后自动启用，当前产物未签名。
+> - 本程序提供 **64 位 Windows / macOS（按架构分 x64 与 arm64 两个包）/ Linux（x64）** 多平台版本，从 [Releases](https://github.com/Tupig/TuPigGHD2Chinese/releases) 页选择对应产物下载。
+> - 发布产物附带构建溯源证明（SLSA provenance），可用 `gh attestation verify <下载的文件> --repo Tupig/TuPigGHD2Chinese` 校验来源；Windows 产物的代码签名流程已内置（SignPath 集成），凭据配置后自动启用，当前产物未签名。
 > - 汉化映射以 **Windows 版** GitHub Desktop 文案为准，其他平台文案基本一致，个别条目可能不匹配。
 > - GitHub Desktop 每次版本更新后，都需要重新运行一次本程序才能完成汉化。
 
@@ -56,7 +56,7 @@
 
 > 所有参数均为可选；不带参数双击运行即走默认流程（自动查找 GitHub Desktop 目录 + 联网获取最新映射）。
 >
-> **参数顺序**：`--nopause` 是程序级参数，必须写在子命令（如 `dev`）**之前**，例如 `GitHubDesktop2Chinese.exe --nopause dev --invalidcheck`。
+> **参数顺序**：`--nopause` 是程序级参数，必须写在子命令（如 `dev`）**之前**，例如 `TuPigGHD2Chinese.exe --nopause dev --invalidcheck`。
 
 ### 通用参数
 
@@ -86,26 +86,26 @@
 
 ```powershell
 # 常规汉化（自动查找目录 + 联网获取最新映射）
-GitHubDesktop2Chinese.exe
+TuPigGHD2Chinese.exe
 
 # 指定 GitHub Desktop 目录与本地映射文件
-GitHubDesktop2Chinese.exe -g "$env:LOCALAPPDATA\GitHubDesktop\app-<版本>\resources\app" -j .\localization.json
+TuPigGHD2Chinese.exe -g "$env:LOCALAPPDATA\GitHubDesktop\app-<版本>\resources\app" -j .\localization.json
 
 # 仅使用远程映射（忽略本地同名文件）
-GitHubDesktop2Chinese.exe -r
+TuPigGHD2Chinese.exe -r
 
 # 批量检测失效条目（免交互：--nopause 必须在 dev 之前）
-GitHubDesktop2Chinese.exe --nopause dev --invalidcheck
+TuPigGHD2Chinese.exe --nopause dev --invalidcheck
 
 # 汉化后主程序无法打开：从备份恢复
-GitHubDesktop2Chinese.exe dev --translationfrombak
+TuPigGHD2Chinese.exe dev --translationfrombak
 
 # 撤销汉化、还原汉化前状态
-GitHubDesktop2Chinese.exe --rollback
+TuPigGHD2Chinese.exe --rollback
 ```
 
 > [!TIP]
-> 查看内置帮助：`GitHubDesktop2Chinese.exe --help`。完整参数说明（含开发者菜单、退出码、错误检查模式详解）见 [📖 Wiki：命令行参数](docs/wiki/命令行参数.md)。
+> 查看内置帮助：`TuPigGHD2Chinese.exe --help`。完整参数说明（含开发者菜单、退出码、错误检查模式详解）见 [📖 Wiki：命令行参数](docs/wiki/命令行参数.md)。
 
 ## 🏗 怎么编译源代码
 
@@ -161,7 +161,7 @@ cmake --build build --config Release
 
 ## 🧪 CI / 自动维护
 
-本仓库使用统一工作流 [`ghdesktop2chinese.yml`](.github/workflows/ghdesktop2chinese.yml)（job 矩阵、发布规则与质量门明细见 [📖 Wiki：CI/CD](docs/wiki/CI-CD.md)）：
+本仓库使用统一工作流 [`tupigghd2chinese.yml`](.github/workflows/tupigghd2chinese.yml)（job 矩阵、发布规则与质量门明细见 [📖 Wiki：CI/CD](docs/wiki/CI-CD.md)）：
 
 | 功能 | 触发方式 | 说明 |
 | --- | --- | --- |
@@ -197,8 +197,8 @@ npm run all        # 失效检测 + 未翻译候选提取, 报告写入系统临
 ```text
 .
 ├── src/                          # C++ 主程序源码
-│   ├── GitHubDesktop2Chinese.cpp # 程序入口与汉化主流程
-│   ├── GitHubDesktop2Chinese.h
+│   ├── TuPigGHD2Chinese.cpp # 程序入口与汉化主流程
+│   ├── TuPigGHD2Chinese.h
 │   ├── utils/                    # 通用工具（伞形入口 + 按职责拆分的子头）
 │   │   ├── utils.hpp             # 伞形汇总头（对外唯一入口）
 │   │   ├── encoding.hpp          # 编码转换（宽窄字符串 / 路径构造）
@@ -254,17 +254,17 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 ## 🧭 常见问题
 
 > [!TIP]
-> **找不到 openssl 的 DLL**：请更新到 [最新版本](https://github.com/Tupig/GitHubDesktop2Chinese/releases)。
+> **找不到 openssl 的 DLL**：请更新到 [最新版本](https://github.com/Tupig/TuPigGHD2Chinese/releases)。
 >
-> **提示「文件要求加载器版本至少为…」/ 版本不满足**：远程映射仅适配最新版加载器，请到 [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) 升级加载器；也可在提示时输入 `f` 强制替换（不建议，可能出现条目不匹配）。
+> **提示「文件要求加载器版本至少为…」/ 版本不满足**：远程映射仅适配最新版加载器，请到 [Releases](https://github.com/Tupig/TuPigGHD2Chinese/releases) 升级加载器；也可在提示时输入 `f` 强制替换（不建议，可能出现条目不匹配）。
 >
 > **程序不运行 / 一闪而过 / 缺失 `MSVCP140_ATOMIC_WAIT.dll`**：安装 [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/zh-cn/cpp/windows/latest-supported-vc-redist?view=msvc-170) 的 **x64** 版本（`vc_redist.x64.exe`）。
 >
 > 安装最新 VC++ 运行库后仍无法运行时，请检查程序目录下是否残留 `MSVCP140.dll`、`VCRUNTIME140.dll` 等文件，如有请删除。
 >
-> **汉化后主程序无法打开**：更新加载器后执行 `GitHubDesktop2Chinese.exe dev --translationfrombak`。
+> **汉化后主程序无法打开**：更新加载器后执行 `TuPigGHD2Chinese.exe dev --translationfrombak`。
 >
-> **想撤销汉化、还原为汉化前状态**：执行 `GitHubDesktop2Chinese.exe --rollback`（从 `main.js.bak` / `renderer.js.bak` 还原）。
+> **想撤销汉化、还原为汉化前状态**：执行 `TuPigGHD2Chinese.exe --rollback`（从 `main.js.bak` / `renderer.js.bak` 还原）。
 >
 > **是否支持 macOS / Linux？**：提供 macOS 分架构二进制（Intel 下载 `macos-x64`、Apple Silicon 下载 `macos-arm64`）与 Linux x64 版本（Release 页下载）。汉化映射针对 **Windows 版** GitHub Desktop 的界面文案（含 `&` 访问键等 Windows 专属内容），其他平台个别条目可能不匹配。
 >
@@ -272,9 +272,9 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 >
 > 更多问题（代理不生效、`#{n}` 占位符、断点续传、`--invalidcheck` 等）见 [📖 Wiki：常见问题](docs/wiki/常见问题.md)。
 
-有任何建议欢迎提 [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues)。
+有任何建议欢迎提 [Issues](https://github.com/Tupig/TuPigGHD2Chinese/issues)。
 
-安全漏洞请按 [`SECURITY.md`](SECURITY.md) 私密报告；发布产物可用 `gh attestation verify <文件> --repo Tupig/GitHubDesktop2Chinese` 校验构建来源。
+安全漏洞请按 [`SECURITY.md`](SECURITY.md) 私密报告；发布产物可用 `gh attestation verify <文件> --repo Tupig/TuPigGHD2Chinese` 校验构建来源。
 
 ## 🎋 功能特性
 
@@ -307,11 +307,11 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 
 ## ⭐ 星标历史
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Tupig/GitHubDesktop2Chinese&type=Date)](https://star-history.com/#Tupig/GitHubDesktop2Chinese&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Tupig/TuPigGHD2Chinese&type=Date)](https://star-history.com/#Tupig/TuPigGHD2Chinese&Date)
 
 ## 🏘 感谢大家的群策群力
 
-![Contributors](https://contrib.rocks/image?repo=Tupig/GitHubDesktop2Chinese)
+![Contributors](https://contrib.rocks/image?repo=Tupig/TuPigGHD2Chinese)
 
 **上游项目**：[cngege/GitHubDesktop2Chinese](https://github.com/cngege/GitHubDesktop2Chinese)
 
@@ -322,9 +322,9 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 
 ---
 
-# GitHubDesktop2Chinese (English)
+# TuPigGHD2Chinese (English)
 
-[简体中文](#githubdesktop2chinese) | **English**
+[简体中文](#tupigghd2chinese) | **English**
 
 > This repository is a fork of [cngege/GitHubDesktop2Chinese](https://github.com/cngege/GitHubDesktop2Chinese), maintained and updated on top of the original work. All credit for the original idea and implementation goes to [CNGEGE](https://github.com/cngege).
 
@@ -358,13 +358,13 @@ A program that automatically replaces the UI text of [GitHub Desktop](https://de
 
 [🎀 Video tutorial (BiliBili, in Chinese)](https://www.bilibili.com/video/BV17HpSeHEaC/) · [📖 Full tutorial: Install & Usage](docs/wiki/安装与使用.md)
 
-**Option 1 (recommended)**: download `GitHubDesktop2Chinese.exe` from [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases), double-click to run it, and the program fetches the latest `localization.json` over the network and localizes GitHub Desktop.
+**Option 1 (recommended)**: download `TuPigGHD2Chinese.exe` from [Releases](https://github.com/Tupig/TuPigGHD2Chinese/releases), double-click to run it, and the program fetches the latest `localization.json` over the network and localizes GitHub Desktop.
 
-**Option 2**: download both `GitHubDesktop2Chinese.exe` and `localization.json`, put them in the same folder, and run the program.
+**Option 2**: download both `TuPigGHD2Chinese.exe` and `localization.json`, put them in the same folder, and run the program.
 
 > [!IMPORTANT]
-> - Prebuilt binaries are provided for **64-bit Windows / macOS (separate x64 and arm64 packages) / Linux (x64)**; pick the matching artifact from the [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) page.
-> - Release artifacts carry build provenance attestations (SLSA provenance); verify their origin with `gh attestation verify <downloaded file> --repo Tupig/GitHubDesktop2Chinese`. The code-signing flow for the Windows binary is built in (SignPath integration) and activates automatically once credentials are configured; artifacts are currently unsigned.
+> - Prebuilt binaries are provided for **64-bit Windows / macOS (separate x64 and arm64 packages) / Linux (x64)**; pick the matching artifact from the [Releases](https://github.com/Tupig/TuPigGHD2Chinese/releases) page.
+> - Release artifacts carry build provenance attestations (SLSA provenance); verify their origin with `gh attestation verify <downloaded file> --repo Tupig/TuPigGHD2Chinese`. The code-signing flow for the Windows binary is built in (SignPath integration) and activates automatically once credentials are configured; artifacts are currently unsigned.
 > - Translation mappings are based on the **Windows** build of GitHub Desktop; texts on other platforms are mostly identical, but a few entries may not match.
 > - After each GitHub Desktop update, run this program once again to re-apply the localization.
 
@@ -372,7 +372,7 @@ A program that automatically replaces the UI text of [GitHub Desktop](https://de
 
 > All arguments are optional; double-clicking without arguments runs the default flow (auto-locate the GitHub Desktop directory + fetch the latest mapping over the network).
 >
-> **Argument order**: `--nopause` is a program-level argument and must come **before** any subcommand (such as `dev`), e.g. `GitHubDesktop2Chinese.exe --nopause dev --invalidcheck`.
+> **Argument order**: `--nopause` is a program-level argument and must come **before** any subcommand (such as `dev`), e.g. `TuPigGHD2Chinese.exe --nopause dev --invalidcheck`.
 
 ### General arguments
 
@@ -402,26 +402,26 @@ A program that automatically replaces the UI text of [GitHub Desktop](https://de
 
 ```powershell
 # Regular localization (auto-locate directory + fetch latest mapping)
-GitHubDesktop2Chinese.exe
+TuPigGHD2Chinese.exe
 
 # Specify the GitHub Desktop directory and a local mapping file
-GitHubDesktop2Chinese.exe -g "$env:LOCALAPPDATA\GitHubDesktop\app-<version>\resources\app" -j .\localization.json
+TuPigGHD2Chinese.exe -g "$env:LOCALAPPDATA\GitHubDesktop\app-<version>\resources\app" -j .\localization.json
 
 # Use the remote mapping only (ignore the local file with the same name)
-GitHubDesktop2Chinese.exe -r
+TuPigGHD2Chinese.exe -r
 
 # Batch-check invalid entries (non-interactive: --nopause must come before dev)
-GitHubDesktop2Chinese.exe --nopause dev --invalidcheck
+TuPigGHD2Chinese.exe --nopause dev --invalidcheck
 
 # GitHub Desktop fails to open after localization: restore from backup
-GitHubDesktop2Chinese.exe dev --translationfrombak
+TuPigGHD2Chinese.exe dev --translationfrombak
 
 # Undo the localization and restore the original state
-GitHubDesktop2Chinese.exe --rollback
+TuPigGHD2Chinese.exe --rollback
 ```
 
 > [!TIP]
-> Built-in help: `GitHubDesktop2Chinese.exe --help`. For the full reference (developer menu, exit codes, error-check mode details) see [📖 Wiki: Command-line Arguments](docs/wiki/命令行参数.md).
+> Built-in help: `TuPigGHD2Chinese.exe --help`. For the full reference (developer menu, exit codes, error-check mode details) see [📖 Wiki: Command-line Arguments](docs/wiki/命令行参数.md).
 
 ## 🏗 Building from source
 
@@ -477,7 +477,7 @@ Structure of a `select` element:
 
 ## 🧪 CI / Auto-maintenance
 
-This repository uses a single unified workflow, [`ghdesktop2chinese.yml`](.github/workflows/ghdesktop2chinese.yml) (see [📖 Wiki: CI/CD](docs/wiki/CI-CD.md) for the job matrix, release rules, and quality gates):
+This repository uses a single unified workflow, [`tupigghd2chinese.yml`](.github/workflows/tupigghd2chinese.yml) (see [📖 Wiki: CI/CD](docs/wiki/CI-CD.md) for the job matrix, release rules, and quality gates):
 
 | Function | Triggers | Description |
 | --- | --- | --- |
@@ -513,8 +513,8 @@ Architecture overview: a C++ main program (`src/`, loader + localizer, producing
 ```text
 .
 ├── src/                          # C++ main program sources
-│   ├── GitHubDesktop2Chinese.cpp # Entry point and main localization flow
-│   ├── GitHubDesktop2Chinese.h
+│   ├── TuPigGHD2Chinese.cpp # Entry point and main localization flow
+│   ├── TuPigGHD2Chinese.h
 │   ├── utils/                    # Shared utilities (umbrella header + per-responsibility subheaders)
 │   │   ├── utils.hpp             # Umbrella header (the only public entry)
 │   │   ├── encoding.hpp          # Encoding conversion (wide/narrow strings, path building)
@@ -570,17 +570,17 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 ## 🧭 FAQ
 
 > [!TIP]
-> **Cannot find the OpenSSL DLLs**: please update to the [latest release](https://github.com/Tupig/GitHubDesktop2Chinese/releases).
+> **Cannot find the OpenSSL DLLs**: please update to the [latest release](https://github.com/Tupig/TuPigGHD2Chinese/releases).
 >
-> **"The mapping file requires loader version …" / version requirement not met**: the remote mapping targets only the latest loader; please upgrade the loader from [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases). You can also type `f` at the prompt to force the replacement (not recommended — some entries may not match).
+> **"The mapping file requires loader version …" / version requirement not met**: the remote mapping targets only the latest loader; please upgrade the loader from [Releases](https://github.com/Tupig/TuPigGHD2Chinese/releases). You can also type `f` at the prompt to force the replacement (not recommended — some entries may not match).
 >
 > **The program does not run / flashes and exits / `MSVCP140_ATOMIC_WAIT.dll` is missing**: install the **x64** build of the [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) (`vc_redist.x64.exe`).
 >
 > If it still fails after installing the latest VC++ runtime, check the program folder for leftover files such as `MSVCP140.dll` or `VCRUNTIME140.dll` and delete them.
 >
-> **GitHub Desktop fails to open after localization**: after updating the loader, run `GitHubDesktop2Chinese.exe dev --translationfrombak`.
+> **GitHub Desktop fails to open after localization**: after updating the loader, run `TuPigGHD2Chinese.exe dev --translationfrombak`.
 >
-> **Want to undo the localization**: run `GitHubDesktop2Chinese.exe --rollback` (restores from `main.js.bak` / `renderer.js.bak`).
+> **Want to undo the localization**: run `TuPigGHD2Chinese.exe --rollback` (restores from `main.js.bak` / `renderer.js.bak`).
 >
 > **Is macOS / Linux supported?**: per-architecture macOS binaries are provided (Intel: download `macos-x64`; Apple Silicon: `macos-arm64`) along with a Linux x64 build (from the Release page). The mappings target the **Windows** build of GitHub Desktop's UI texts (including Windows-specific content such as `&` access keys); a few entries may not match on other platforms.
 >
@@ -588,9 +588,9 @@ set GITHUB_DESKTOP_PREVIEW_FEATURES=1
 >
 > More topics (proxy not taking effect, `#{n}` placeholders, resumable downloads, `--invalidcheck`, etc.) in [📖 Wiki: FAQ](docs/wiki/常见问题.md).
 
-Suggestions are welcome in [Issues](https://github.com/Tupig/GitHubDesktop2Chinese/issues).
+Suggestions are welcome in [Issues](https://github.com/Tupig/TuPigGHD2Chinese/issues).
 
-Please report security vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md); build provenance of released artifacts can be verified with `gh attestation verify <file> --repo Tupig/GitHubDesktop2Chinese`.
+Please report security vulnerabilities privately as described in [`SECURITY.md`](SECURITY.md); build provenance of released artifacts can be verified with `gh attestation verify <file> --repo Tupig/TuPigGHD2Chinese`.
 
 ## 🎋 Features
 
@@ -630,7 +630,7 @@ also available in the repository root.
 
 ## 🏘 Credits
 
-![Contributors](https://contrib.rocks/image?repo=Tupig/GitHubDesktop2Chinese)
+![Contributors](https://contrib.rocks/image?repo=Tupig/TuPigGHD2Chinese)
 
 **Upstream project**: [cngege/GitHubDesktop2Chinese](https://github.com/cngege/GitHubDesktop2Chinese)
 
