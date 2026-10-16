@@ -1,7 +1,17 @@
-# CI / 本地开发用的 Python 测试依赖（校验器测试 + 覆盖率门禁）
-# 安装: python -m pip install -r tools/ci/requirements-dev.txt
-# 运行: python -m pytest
-# 覆盖率门禁阈值在 .coveragerc 的 fail_under（不在命令行，避免删参即静默关闭）
-pytest==9.0.2
+# Python test dependencies for CI / local development (validator tests + coverage gate).
+#
+# NOTE: keep this file ASCII-only. pip reads requirement files with the *locale* encoding,
+# so non-ASCII comments break `pip install -r` on zh-CN Windows (cp936) -- see #277.
+# Chinese explanations live in docs/CONTRIBUTING.md.
+#
+# Install: python -m pip install -r tools/ci/requirements-dev.txt
+# Run:     python -m pytest
+# The coverage threshold lives in .coveragerc (fail_under), not on the command line.
+#
+# pytest 9.0.3: fixes Dependabot alert #1 (<9.0.3 vulnerable tmpdir handling on UNIX).
+# PyYAML: required by tools/ci/check-workflow.py -- previously satisfied only by the
+#         runner's preinstalled copy, which made CI pass without declaring the dependency.
+pytest==9.0.3
 pytest-cov==7.0.0
 gcovr==8.6
+PyYAML==6.0.3
