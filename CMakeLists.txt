@@ -257,6 +257,13 @@ target_include_directories(l10n_rules_test SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/
 target_link_libraries(l10n_rules_test PRIVATE GTest::gtest_main)
 add_test(NAME l10n_rules_test COMMAND l10n_rules_test)
 
+# ── 备份策略判定测试(#276): 何时新建 .bak / 何时拒绝以当前内容冒充原始备份 ──
+add_executable(backup_policy_test tests/backup_policy_test.cpp)
+set_property(TARGET backup_policy_test PROPERTY CXX_STANDARD 20)
+target_include_directories(backup_policy_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(backup_policy_test PRIVATE GTest::gtest_main)
+add_test(NAME backup_policy_test COMMAND backup_policy_test)
+
 # ── 自更新残留清理与替换前置检查测试(#182/#183): 依赖 http.hpp(OpenSSL/httplib 头) ──
 # include/链接配置与主程序一致; 完整替换+重启路径涉及真实进程操作, 不在单测范围
 add_executable(selfupdate_test tests/selfupdate_test.cpp)

@@ -46,6 +46,7 @@
 #include "utils/utils.hpp"
 #include "utils/replace_engine.hpp" // 替换引擎(#129): 单遍构建 + 字面量快路径
 #include "utils/l10n_rules.hpp"     // 映射纯规则(#267): $ 转义 / ReDoS 启发式 / 占位符回填
+#include "utils/backup_policy.hpp"  // 备份策略判定(#276): 何时新建 .bak / 何时拒绝
 #include "version/Version.hpp"
 
 #ifdef _MSC_VER
@@ -1114,14 +1115,28 @@ static bool EnsureJsFilesAndBackups() {
         }
     }
 
-    // 仅在备份文件不存在时备份
+    // 仅在备份文件不存在时备份（#276: 三态判定，避免把「已汉化内容」误当原始文件备份）
     for(const char* name : { "main.js", "renderer.js" }) {
         const std::string bak_name = std::string(name) + ".bak";
+        const std::string origin_name = bak_name + ".origin"; // 曾建立过备份的标记
         // exists 用 error_code 重载(#130): 备份善后路径不可再抛; 检查失败按不存在处理, 由后续拷贝的失败提示兜底
         std::error_code bak_exists_ec;
-        if(fs::exists(Base / bak_name, bak_exists_ec)) {
-            continue;
+        const bool bak_exists = fs::exists(Base / bak_name, bak_exists_ec);
+        std::error_code origin_exists_ec;
+        const bool origin_exists = fs::exists(Base / origin_name, origin_exists_ec);
+
+        switch(utils::DecideBackup(bak_exists, origin_exists)) {
+            case utils::BackupDecision::kSkipBecauseBackupExists:
+                continue;
+            case utils::BackupDecision::kRefuseOriginalLost:
+                // 备份曾存在但已丢失, 且目标此后可能已被本工具改写 —— 拒绝以当前内容冒充原始备份
+                spdlog::warn("备份 {} 已丢失且其内容已不可知, 不再以当前 {} 重建备份(以免把汉化内容当原始文件); "
+                             "本次汉化继续, 但 --rollback 将不可用", bak_name, name);
+                continue;
+            case utils::BackupDecision::kCreateBackup:
+                break;
         }
+
         std::error_code ec;
         // 原子备份: 中断不产生半截备份文件(#166)
         utils::AtomicCopyFile(Base / name, Base / bak_name, ec);
@@ -1129,6 +1144,10 @@ static bool EnsureJsFilesAndBackups() {
             spdlog::error("创建备份 {} -> {} 失败: {}, 已中止以免后续无法还原", name, bak_name, ec.message());
             PAUSE
             return false;
+        }
+        // 记录来源标记(#276): 该目标已被本工具备份过, 此后其内容可能被改写
+        if(!utils::WriteFile((Base / origin_name).string(), "1\n")) {
+            spdlog::warn("写入备份来源标记 {} 失败(不影响本次汉化)", origin_name);
         }
         spdlog::info("已新建备份 {} -> {}", name, bak_name);
     }

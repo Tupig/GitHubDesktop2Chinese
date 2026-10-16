@@ -27,3 +27,13 @@
 *.icns  binary
 *.zip   binary
 *.gz    binary
+*.pdf   binary
+*.tar   binary
+*.7z    binary
+*.o     binary
+*.obj   binary
+*.bin   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
