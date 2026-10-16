@@ -26,7 +26,7 @@ if(MSVC)
     add_compile_options(/utf-8)
     # #134: 标准一致性模式（两阶段名字查找等诊断开启，模板重库误用更易暴露）
     add_compile_options(/permissive-)
-    # #134: fmt 9.1(spdlog 1.11 bundled) 在 _SECURE_SCL=1 时启用 stdext::checked_array_iterator，
+    # #134: fmt 9.1(spdlog 1.13.0 bundled) 在 _SECURE_SCL=1 时启用 stdext::checked_array_iterator，
     # 而 VS2026 STL 已将其移除、yvals.h 在 Debug 下默认 _SECURE_SCL=1 → Debug 必然编译失败。
     # 预定义 0 让 fmt 走裸指针分支(= fmt 10+ 行为)；_ITERATOR_DEBUG_LEVEL 由
     # _HAS_ITERATOR_DEBUGGING 推导不受影响，Debug 迭代器校验完整保留
@@ -41,7 +41,7 @@ if(MSVC)
 else()
     # #134: GCC/Clang 高告警级别（third_party SYSTEM 头按 -isystem 抑制）
     add_compile_options(-Wall -Wextra)
-    # #134: fmt 9.1(spdlog 1.11 bundled) 继承 C++17 弃用的 std::iterator，
+    # #134: fmt 9.1(spdlog 1.13.0 bundled) 继承 C++17 弃用的 std::iterator，
     # clang 在用户 TU 实例化点仍会报 deprecated（-isystem 不挡实例化诊断）。
     # 降级为普通警告（非 error）保持 CI 可过；升级 spdlog 后移除
     add_compile_options(-Wno-error=deprecated-declarations)

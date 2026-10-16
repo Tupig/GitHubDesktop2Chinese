@@ -1,6 +1,6 @@
 # third_party 三方依赖清单
 
-**简体中文** | [English](#third-party-dependencies-english)
+**简体中文**   [English](#third-party-dependencies-english)
 
 本目录存放 TuPigGHD2Chinese 的全部第三方依赖，**全部随仓库提交**（含 Windows / macOS / Linux 版 OpenSSL 静态库），克隆后无需联网下载依赖即可构建。
 
@@ -27,16 +27,17 @@ third_party/
 
 ## 版本清单
 
-| 组件 | 版本 | 上游（官方 GitHub） | 许可证 | 仓库内位置 |
-| --- | --- | --- | --- | --- |
-| CLI11 | 2.4.1 | [CLIUtils/CLI11](https://github.com/CLIUtils/CLI11) | BSD-3-Clause | `include/CLI/` |
-| cpp-httplib | 0.15.3 | [yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) | MIT | `include/http/` |
-| nlohmann/json | 3.11.3 | [nlohmann/json](https://github.com/nlohmann/json) | MIT | `include/nlohmann/` |
-| spdlog | 1.13.0 | [gabime/spdlog](https://github.com/gabime/spdlog) | MIT | `include/spdlog/` |
-| WinReg | 2024-02-22 快照（上游无版本号） | [GiovanniDicanio/WinReg](https://github.com/GiovanniDicanio/WinReg) | MIT | `include/WinReg/` |
-| OpenSSL（Windows 静态库） | 3.5.9 LTS（2026-09-29 发布） | [openssl/openssl](https://github.com/openssl/openssl)（tag `openssl-3.5.9`） | Apache-2.0 | `openssl/{include,lib}` |
-| OpenSSL（macOS 静态库 x64/arm64） | 3.5.9 LTS（2026-09-29 发布） | [openssl/openssl](https://github.com/openssl/openssl)（tag `openssl-3.5.9`） | Apache-2.0 | `openssl-macos-x64/`、`openssl-macos-arm64/` |
-| OpenSSL（Linux 静态库 x64） | 3.5.9 LTS（2026-09-29 发布） | [openssl/openssl](https://github.com/openssl/openssl)（tag `openssl-3.5.9`） | Apache-2.0 | `openssl-linux-x64/` |
+  组件   版本   上游（官方 GitHub）   许可证   仓库内位置  
+  ---   ---   ---   ---   ---  
+  CLI11   2.4.1   [CLIUtils/CLI11](https://github.com/CLIUtils/CLI11)   BSD-3-Clause   `include/CLI/`  
+  cpp-httplib   0.61.0   [yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib)   MIT   `include/http/`  
+  googletest   1.18.0   [google/googletest](https://github.com/google/googletest)   BSD-3-Clause   `googletest/`（**测试专用**：仅构建/运行 C++ 单测，不链接进发布产物；为裁剪副本，不含 `googlemock/`，故 CMake 显式 `BUILD_GMOCK=OFF`）
+  nlohmann/json   3.11.3   [nlohmann/json](https://github.com/nlohmann/json)   MIT   `include/nlohmann/`  
+  spdlog   1.13.0   [gabime/spdlog](https://github.com/gabime/spdlog)   MIT   `include/spdlog/`  
+  WinReg   2024-02-22 快照（上游无版本号）   [GiovanniDicanio/WinReg](https://github.com/GiovanniDicanio/WinReg)   MIT   `include/WinReg/`  
+  OpenSSL（Windows 静态库）   3.5.9 LTS（2026-09-29 发布）   [openssl/openssl](https://github.com/openssl/openssl)（tag `openssl-3.5.9`）   Apache-2.0   `openssl/{include,lib}`  
+  OpenSSL（macOS 静态库 x64/arm64）   3.5.9 LTS（2026-09-29 发布）   [openssl/openssl](https://github.com/openssl/openssl)（tag `openssl-3.5.9`）   Apache-2.0   `openssl-macos-x64/`、`openssl-macos-arm64/`  
+  OpenSSL（Linux 静态库 x64）   3.5.9 LTS（2026-09-29 发布）   [openssl/openssl](https://github.com/openssl/openssl)（tag `openssl-3.5.9`）   Apache-2.0   `openssl-linux-x64/`  
 
 > 版本以各头文件内版本宏为准（如 `CPPHTTPLIB_VERSION`、`NLOHMANN_JSON_VERSION_*`、`SPDLOG_VER_*`、`OPENSSL_VERSION_TEXT`）；WinReg 无版本宏，以其头部注释的更新日期标识。
 
@@ -113,7 +114,7 @@ Linux x64 静态库由主工作流的 **产库 OpenSSL (linux x64)** 任务产�
 
 # Third-Party Dependencies (English)
 
-[简体中文](#third_party-三方依赖清单) | **English**
+[简体中文](#third_party-三方依赖清单)   **English**
 
 This directory holds all third-party dependencies of TuPigGHD2Chinese. **Everything is committed to the repository** (including the Windows, macOS and Linux OpenSSL static libraries), so a clone can be built without downloading any dependencies.
 
@@ -140,16 +141,17 @@ third_party/
 
 ## Version Manifest
 
-| Component | Version | Upstream (official GitHub) | License | In-repo location |
-| --- | --- | --- | --- | --- |
-| CLI11 | 2.4.1 | [CLIUtils/CLI11](https://github.com/CLIUtils/CLI11) | BSD-3-Clause | `include/CLI/` |
-| cpp-httplib | 0.15.3 | [yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) | MIT | `include/http/` |
-| nlohmann/json | 3.11.3 | [nlohmann/json](https://github.com/nlohmann/json) | MIT | `include/nlohmann/` |
-| spdlog | 1.13.0 | [gabime/spdlog](https://github.com/gabime/spdlog) | MIT | `include/spdlog/` |
-| WinReg | 2024-02-22 snapshot (upstream has no version number) | [GiovanniDicanio/WinReg](https://github.com/GiovanniDicanio/WinReg) | MIT | `include/WinReg/` |
-| OpenSSL (Windows static libraries) | 3.5.9 LTS (released 2026-09-29) | [openssl/openssl](https://github.com/openssl/openssl) (tag `openssl-3.5.9`) | Apache-2.0 | `openssl/{include,lib}` |
-| OpenSSL (macOS static libraries x64/arm64) | 3.5.9 LTS (released 2026-09-29) | [openssl/openssl](https://github.com/openssl/openssl) (tag `openssl-3.5.9`) | Apache-2.0 | `openssl-macos-x64/`, `openssl-macos-arm64/` |
-| OpenSSL (Linux static libraries x64) | 3.5.9 LTS (released 2026-09-29) | [openssl/openssl](https://github.com/openssl/openssl) (tag `openssl-3.5.9`) | Apache-2.0 | `openssl-linux-x64/` |
+  Component   Version   Upstream (official GitHub)   License   In-repo location  
+  ---   ---   ---   ---   ---  
+  CLI11   2.4.1   [CLIUtils/CLI11](https://github.com/CLIUtils/CLI11)   BSD-3-Clause   `include/CLI/`  
+  cpp-httplib   0.61.0   [yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib)   MIT   `include/http/`  
+  googletest   1.18.0   [google/googletest](https://github.com/google/googletest)   BSD-3-Clause   `googletest/` (**test-only**: used to build/run the C++ unit tests only, never linked into release artifacts; a trimmed copy without `googlemock/`, hence CMake sets `BUILD_GMOCK=OFF` explicitly)
+  nlohmann/json   3.11.3   [nlohmann/json](https://github.com/nlohmann/json)   MIT   `include/nlohmann/`  
+  spdlog   1.13.0   [gabime/spdlog](https://github.com/gabime/spdlog)   MIT   `include/spdlog/`  
+  WinReg   2024-02-22 snapshot (upstream has no version number)   [GiovanniDicanio/WinReg](https://github.com/GiovanniDicanio/WinReg)   MIT   `include/WinReg/`  
+  OpenSSL (Windows static libraries)   3.5.9 LTS (released 2026-09-29)   [openssl/openssl](https://github.com/openssl/openssl) (tag `openssl-3.5.9`)   Apache-2.0   `openssl/{include,lib}`  
+  OpenSSL (macOS static libraries x64/arm64)   3.5.9 LTS (released 2026-09-29)   [openssl/openssl](https://github.com/openssl/openssl) (tag `openssl-3.5.9`)   Apache-2.0   `openssl-macos-x64/`, `openssl-macos-arm64/`  
+  OpenSSL (Linux static libraries x64)   3.5.9 LTS (released 2026-09-29)   [openssl/openssl](https://github.com/openssl/openssl) (tag `openssl-3.5.9`)   Apache-2.0   `openssl-linux-x64/`  
 
 > Versions are authoritative per the version macros inside each header (e.g. `CPPHTTPLIB_VERSION`, `NLOHMANN_JSON_VERSION_*`, `SPDLOG_VER_*`, `OPENSSL_VERSION_TEXT`); WinReg has no version macro and is identified by the update date in its header comment.
 

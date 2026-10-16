@@ -1,11 +1,13 @@
-# 覆盖率配置（#263）: 仅度量 CI 质检校验器本体，排除其测试模块
-# 运行: python -m pytest --cov --cov-report=term-missing --cov-fail-under=90
+# 覆盖率配置（#263/#274）: 仅度量 CI 质检校验器本体，排除其测试模块
+# 阈值落在本配置（fail_under），yml 只调用 `--cov` —— 避免「删掉命令行参数即静默关闭门禁」的单点。
+# 运行: python -m pytest --cov --cov-report=term-missing
 [run]
 source = tools/ci
 omit =
     tools/ci/*-test.py
 
 [report]
+fail_under = 90
 exclude_also =
     pragma: no cover
     if __name__ == .__main__.:

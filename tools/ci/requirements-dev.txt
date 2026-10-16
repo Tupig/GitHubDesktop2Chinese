@@ -1,6 +1,7 @@
 # CI / 本地开发用的 Python 测试依赖（校验器测试 + 覆盖率门禁）
 # 安装: python -m pip install -r tools/ci/requirements-dev.txt
 # 运行: python -m pytest
-# 覆盖率门禁: python -m pytest --cov --cov-report=term-missing --cov-fail-under=90
+# 覆盖率门禁阈值在 .coveragerc 的 fail_under（不在命令行，避免删参即静默关闭）
 pytest==9.0.2
 pytest-cov==7.0.0
+gcovr==8.6

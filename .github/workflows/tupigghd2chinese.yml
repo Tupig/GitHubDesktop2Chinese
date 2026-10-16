@@ -122,7 +122,7 @@
 #     arm64 在 macos-15(M1) 原生构建(产物功能测试可原生执行),
 #     静态 OpenSSL + strip/LTO 裁剪体积; OpenSSL 静态库由产库四连任务产库(见 5/6/7/8),
 #     sccache 编译缓存跨 run 复用(缓存至 GitHub Actions Cache)
-#   - 第三方 actions 全部按 commit SHA 固定（版本升级手动执行；漏洞告警由 Dependabot 提示）
+#   - 第三方 actions 全部按 commit SHA 固定（版本升级手动执行；本仓未配置 .github/dependabot.yml，vendored 依赖版本记录于 third_party/README.md，升级与漏洞跟进为人工流程）
 #   - 数据质量校验/工具自检/维护报告等大型脚本外置于 tools/ci（YAML 仅保留调用）
 #   - 发布产物生成构建溯源证明（SLSA provenance attestation），可用 gh attestation verify 校验来源
 
@@ -438,7 +438,7 @@ jobs:
 
       # ── #167: 单测真实执行(此前仅被构建从不运行) ──
       # 四平台均为原生 runner(含 macos-15 原生 ARM), 无交叉编译, 测试可原生执行;
-      # --no-tests=error: CTest 已注册 3 个测试(version/replace_engine/selfupdate),
+      # --no-tests=error: CTest 已注册 5 个测试(version/replace_engine/utils/l10n_rules/selfupdate),
       # 0 项被发现视为 CTest 接入回归; version_test 断言数已增至 129(#239)
       - name: 运行单元测试 (ctest)
         shell: bash
@@ -574,7 +574,7 @@ jobs:
   #    合并原 json-quality / encoding-check / tools-test 三任务:
   #    三者依赖一致(均 ← version), 触发条件近同, 合并减少排队开销;
   #    另含 Markdown 链接检查与单工作流规范校验(W0-W6)及校验器单测;
-  #    另含覆盖率门禁(#263): Python pytest-cov(≥90%) / Node Vitest v8 阈值 / C++ gcov+gcovr(≥65%);
+  #    另含覆盖率门禁(#263): Python pytest-cov(≥90%) / Node Vitest v8 阈值 / C++ gcov+gcovr(≥80%);
   #    任一检查失败即本任务失败, 维持原质量门语义;
   #    注意: name 即分支保护必需 check, 改名须同步
   #    branches/main/protection required_status_checks(#156)
@@ -633,12 +633,12 @@ jobs:
         run: python -m pip install -r tools/ci/requirements-dev.txt
 
       - name: 校验器单元测试（pytest + 覆盖率门禁）
-        run: python -m pytest --cov --cov-report=term-missing --cov-fail-under=90
+        run: python -m pytest --cov --cov-report=term-missing
 
-      # 覆盖率门禁(#263): Python 见上(pytest-cov)；Node 见 npm test(Vitest v8 阈值在 vitest.config.mjs)；
+      # 覆盖率门禁(#263/#271): Python 见上(pytest-cov, 阈值在 .coveragerc)；Node 见 npm test(Vitest v8 阈值在 vitest.config.mjs)；
       # C++ 在此以 gcov 度量 —— 仅构建无 OpenSSL 依赖的单测目标(快), 阈值针对 src/ 下的头文件逻辑
-      - name: 安装 C++ 覆盖率报告工具（gcovr）
-        run: python -m pip install gcovr
+      - name: 安装 C++ 覆盖率报告工具（gcovr，版本钉扎见 requirements-dev.txt）
+        run: python -m pip install -r tools/ci/requirements-dev.txt
 
       - name: C++ 单测覆盖率（gcov + gcovr 行覆盖率门禁）
         run: |
@@ -649,7 +649,7 @@ jobs:
           ./build-cov/replace_engine_test
           ./build-cov/utils_test
           ./build-cov/l10n_rules_test
-          # 仅度量本仓被这三个单测目标编译到的头(src/utils、src/version)。
+          # 仅度量本仓被这四个单测目标编译到的头(src/utils、src/version)。
           # 注意: gcovr 的 --filter/--exclude 按相对 --root 的路径匹配, 且是子串匹配,
           # 故不能用 '.*/src/.*'(会连带匹配 vendored googletest 的 src/); 用目录子串最稳。
           gcovr --root . \
@@ -1851,10 +1851,10 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+    # 最小权限(#271 加固): SIGNPATH_API_TOKEN 只给需要它的步骤, 不下沉到 job 级 env ——
+    # 避免所有步骤(含生成说明/创建 Release)都能读到签名令牌
     env:
       RELEASE_VERSION: ${{ needs.Version.outputs.version }}
-      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-      SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -1959,6 +1959,8 @@ jobs:
       - name: SignPath 代码签名（Windows exe）
         if: steps.signpath_gate.outputs.enabled == 'true'
         uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        env:
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ env.SIGNPATH_ORGANIZATION_ID }}
@@ -2000,7 +2002,7 @@ jobs:
             echo "- \`localization.json\` — 汉化映射（最新）"
             echo ""
             echo "> 产物附带构建溯源证明，可校验来源：\`gh attestation verify <下载的文件> --repo Tupig/TuPigGHD2Chinese\`"
-            if [[ -n "${SIGNPATH_API_TOKEN:-}" && -n "${SIGNPATH_ORGANIZATION_ID:-}" ]]; then
+            if [[ "${{ steps.signpath_gate.outputs.enabled }}" == "true" ]]; then
               echo "> Windows 产物使用 [SignPath Foundation](https://signpath.org) 免费开源代码签名证书签名"
             fi
             echo ""
@@ -2108,7 +2110,7 @@ jobs:
           fi
 
   # ═════════════════════════════════════════════════
-  # 11. CI 失败通知 —— 定时构建失败不再静默堆积(#131)
+  # 12. CI 失败通知 —— 定时构建失败不再静默堆积(#131)
   # ═════════════════════════════════════════════════
   # 仅 schedule 触发(push/PR 失败在 Actions/PR 页即时可见, 无需 Issue 渠道):
   #   本次 run 有失败 job → 创建/更新单条 "[CI 失败]" Issue(标题带连续失败次数);

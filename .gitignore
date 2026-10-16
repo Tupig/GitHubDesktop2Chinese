@@ -12,6 +12,7 @@ _deps
 /.vs
 /out
 /build
+/build-cov
 /build32
 # 注意：third_party/ 下三方依赖（含 openssl 预编译静态库）随仓库提交；openssl 缺失时按 third_party/README.md 用上游源码重建，CMake 不再自动下载
 # 凭据与密钥类文件：防御性排除（本仓库不应包含任何凭据/私钥，避免未来误提交）
