@@ -241,6 +241,14 @@ target_include_directories(replace_engine_test PRIVATE ${PROJECT_SOURCE_DIR}/src
 target_link_libraries(replace_engine_test PRIVATE GTest::gtest_main)
 add_test(NAME replace_engine_test COMMAND replace_engine_test)
 
+# ── 工具头纯逻辑测试(#263): 编码转换 / 路径构造 / 原子文件写入（依赖第三方 spdlog 头） ──
+add_executable(utils_test tests/utils_test.cpp)
+set_property(TARGET utils_test PROPERTY CXX_STANDARD 20)
+target_include_directories(utils_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(utils_test SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third_party/include)
+target_link_libraries(utils_test PRIVATE GTest::gtest_main)
+add_test(NAME utils_test COMMAND utils_test)
+
 # ── 自更新残留清理与替换前置检查测试(#182/#183): 依赖 http.hpp(OpenSSL/httplib 头) ──
 # include/链接配置与主程序一致; 完整替换+重启路径涉及真实进程操作, 不在单测范围
 add_executable(selfupdate_test tests/selfupdate_test.cpp)

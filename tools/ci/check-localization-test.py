@@ -23,7 +23,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
-import shutil
+import os
 import sys
 import tempfile
 import unittest
@@ -31,6 +31,10 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 SCRIPT_PATH = Path(__file__).resolve().parent / "check-localization.py"
+
+# 校验器支持的仓库根覆盖环境变量（#263）：测试据此把夹具根设为扫描根，
+# 从而可直接加载真实脚本（不再复制副本），覆盖率可归因到本源文件。
+ROOT_ENV = "GHD2C_CHECK_ROOT"
 
 # 最小合法夹具（version/minversion + 四个映射数组 + 空 select）
 BASE_DATA = {
@@ -63,7 +67,7 @@ _module_counter = 0
 def run_validator(data: dict | None = None, *, json_text: str | None = None,
                   blacklist: dict | None = None, omit_json: bool = False,
                   omit_blacklist: bool = False) -> tuple:
-    """构造临时目录夹具并执行被测脚本副本，返回 (module, exit_code, output)。
+    """构造临时目录夹具并加载执行**真实**校验器脚本，返回 (module, exit_code, output)。
 
     exit_code 为 0 表示模块正常执行完毕；sys.exit(N) 被捕获为 N。
     """
@@ -74,7 +78,6 @@ def run_validator(data: dict | None = None, *, json_text: str | None = None,
     (root / "tools" / "ci").mkdir(parents=True)
     (root / "tools" / "auto-maintain").mkdir(parents=True)
     (root / "json").mkdir()
-    shutil.copyfile(SCRIPT_PATH, root / "tools" / "ci" / "check-localization.py")
     if not omit_json:
         text = json_text if json_text is not None else json.dumps(
             BASE_DATA if data is None else data, ensure_ascii=False)
@@ -85,18 +88,24 @@ def run_validator(data: dict | None = None, *, json_text: str | None = None,
                        ensure_ascii=False), encoding="utf-8")
     spec = importlib.util.spec_from_file_location(
         f"check_localization_fixture_{_module_counter}",
-        root / "tools" / "ci" / "check-localization.py")
+        SCRIPT_PATH)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"无法加载被测模块: {SCRIPT_PATH}")
     module = importlib.util.module_from_spec(spec)
     output = io.StringIO()
     exit_code = 0
+    prev_root = os.environ.get(ROOT_ENV)
+    os.environ[ROOT_ENV] = str(root)
     try:
         with redirect_stdout(output):
             spec.loader.exec_module(module)
     except SystemExit as exc:
         exit_code = exc.code
     finally:
+        if prev_root is None:
+            os.environ.pop(ROOT_ENV, None)
+        else:
+            os.environ[ROOT_ENV] = prev_root
         tmp.cleanup()
     return module, exit_code, output.getvalue()
 

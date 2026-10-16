@@ -1,0 +1,15 @@
+# 覆盖率配置（#263）: 仅度量 CI 质检校验器本体，排除其测试模块
+# 运行: python -m pytest --cov --cov-report=term-missing --cov-fail-under=90
+[run]
+source = tools/ci
+omit =
+    tools/ci/*-test.py
+
+[report]
+exclude_also =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError
+show_missing = True
+skip_covered = False
+precision = 1

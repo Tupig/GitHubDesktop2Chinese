@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
-import shutil
+import os
 import sys
 import tempfile
 import unittest
@@ -34,12 +34,16 @@ from pathlib import Path
 
 SCRIPT_PATH = Path(__file__).resolve().parent / "md-check.py"
 
+# 校验器支持的扫描根覆盖环境变量（#263）：测试据此把扫描根指向夹具目录，
+# 从而可直接加载真实脚本（不再复制副本），覆盖率可归因到本源文件。
+ROOT_ENV = "GHD2C_CHECK_ROOT"
+
 _module_counter = 0
 
 
 def load_md_check(md_files: dict | None = None,
                   raw_files: dict | None = None) -> tuple:
-    """拷贝被测脚本到临时根目录并执行，返回 (module, exit_code, output)。
+    """在临时根目录夹具上加载并执行**真实**校验器脚本，返回 (module, exit_code, output)。
 
     md_files: 相对路径 -> 文本内容（UTF-8 写入）
     raw_files: 相对路径 -> 原始字节（非 UTF-8 / BOM 用例）
@@ -49,8 +53,6 @@ def load_md_check(md_files: dict | None = None,
     _module_counter += 1
     tmp = tempfile.TemporaryDirectory()
     root = Path(tmp.name)
-    (root / "tools" / "ci").mkdir(parents=True)
-    shutil.copyfile(SCRIPT_PATH, root / "tools" / "ci" / "md-check.py")
     for rel, text in (md_files or {}).items():
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -61,18 +63,24 @@ def load_md_check(md_files: dict | None = None,
         target.write_bytes(blob)
     spec = importlib.util.spec_from_file_location(
         f"md_check_fixture_{_module_counter}",
-        root / "tools" / "ci" / "md-check.py")
+        SCRIPT_PATH)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"无法加载被测模块: {SCRIPT_PATH}")
     module = importlib.util.module_from_spec(spec)
     output = io.StringIO()
     exit_code = 0
+    prev_root = os.environ.get(ROOT_ENV)
+    os.environ[ROOT_ENV] = str(root)
     try:
         with redirect_stdout(output):
             spec.loader.exec_module(module)
     except SystemExit as exc:
         exit_code = exc.code
     finally:
+        if prev_root is None:
+            os.environ.pop(ROOT_ENV, None)
+        else:
+            os.environ[ROOT_ENV] = prev_root
         tmp.cleanup()
     return module, exit_code, output.getvalue()
 

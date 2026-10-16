@@ -11,10 +11,12 @@
     "check": "node src/index.js check",
     "extract": "node src/index.js extract",
     "all": "node src/index.js all --write-report",
-    "test": "vitest run",
+    "test": "vitest run --coverage",
+    "test:unit": "vitest run",
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^5.0.5",
     "vitest": "^5.0.5"
   }
 }
