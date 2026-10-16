@@ -262,6 +262,14 @@ namespace utils {
                 if(!rate_limit_reset.empty()) {
                     spdlog::warn("GitHub API 配额已耗尽, 将于 {} 重置(匿名限额 60 次/时)", rate_limit_reset);
                 }
+                else if((res->status == 403 || res->status == 429) && retry_after <= 0) {
+                    // 403/429 且无任何限流指示(#253): 非瞬时 —— 多为网络/代理/防火墙拦截
+                    // api.github.com 或次级限流, 重试必然同样结果, 与 oversized/budget 的
+                    // "确定性异常不重试"原则一致(#172); 避免无谓等待与误导性排查方向
+                    spdlog::warn("请求 {}{} 返回 {}, 且未提供限流信息(可能为网络/代理/防火墙拦截或次级限流), 不再重试",
+                                 url_host, params, res->status);
+                    break;
+                }
             }
         }
 
