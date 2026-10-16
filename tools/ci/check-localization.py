@@ -48,6 +48,25 @@ except (OSError, ValueError, KeyError, TypeError) as e:
     blacklist = []
     redos_heuristic = ""
 
+# ReDoS 规则跨语言一致性(#271): src/utils/l10n_rules.hpp 以常量镜像同一规则文本。
+# 此前 C++ 侧为手写扫描器, 与 CI 口径分歧导致运行期漏检 ((a+))+ / (a{10,})+ 等) ——
+# 此处强制两者逐字一致, 任一侧单独改动即使 CI 失败(防止再次静默漂移)。
+# 头文件不存在时跳过: 单测夹具以 GHD2C_CHECK_ROOT 指向无源码的临时根。
+L10N_RULES_HEADER = ROOT / "src" / "utils" / "l10n_rules.hpp"
+if L10N_RULES_HEADER.is_file():
+    try:
+        _hdr = L10N_RULES_HEADER.read_text(encoding="utf-8")
+        _m = re.search(r'kRedosHeuristicRegex\[\]\s*=\s*R"\((.*?)\)"', _hdr, re.DOTALL)
+        if _m is None:
+            errors.append(f"无法在 {L10N_RULES_HEADER} 中定位 kRedosHeuristicRegex 常量(跨语言一致性校验失败)")
+        elif _m.group(1) != redos_heuristic:
+            errors.append(
+                "ReDoS 规则跨语言不一致: src/utils/l10n_rules.hpp 的 kRedosHeuristicRegex "
+                f"{_m.group(1)!r} != regex-blacklist.json 的 redos_heuristic {redos_heuristic!r}"
+                "(两者必须逐字一致, 见 #271)")
+    except OSError as e:
+        errors.append(f"无法读取 {L10N_RULES_HEADER} 以校验 ReDoS 规则一致性: {e}")
+
 def check_pattern(label, pat, blacklist, redos_heuristic):
     """单个正则校验: 黑名单 + 可编译 + ReDoS 启发式 (#245: 供 item[0]/item[2]/select row[0]/row[2] 复用)"""
     for rx, why in blacklist:

@@ -635,7 +635,7 @@ static void LogRepoLastUpdated(const std::pair<std::string, int>& proxy) {
 }
 
 // 检查更新: 返回 true 表示已触发自更新, 调用方应立即以 0 退出等待替换; Dev 版跳过
-static bool CheckForUpdates(const std::pair<std::string, int>& proxy, const fs::path& self_path) {
+static bool CheckForUpdates(const std::pair<std::string, int>& proxy, const fs::path& self_path, bool& hard_failure) {
     if(FileVer.status != versionparse::Version::Dev) {
         if(offline_mode) {
             spdlog::info("--offline 已指定, 跳过检查更新");
@@ -690,7 +690,11 @@ static bool CheckForUpdates(const std::pair<std::string, int>& proxy, const fs::
                                 if(std::regex_match(downlink, matches, url_regex)) {
                                     auto result = utils::UpdateProgram(matches[1].str(), matches[2].str(), self_path, max_size, proxy, asset_digest);
                                     if(!result) {
-                                        spdlog::error("失败 更新过程出现异常");
+                                        // #271: 自更新失败(尤其入位与回滚双双失败时原 exe 可能只剩 .old)
+                                        // 必须中止主流程 —— 否则会在「程序文件已不可用」的状态下继续汉化并退出,
+                                        // 用户下次无法启动。由 RunMain 依 hard_failure 返回 1。
+                                        hard_failure = true;
+                                        spdlog::error("失败 更新过程出现异常, 已中止本次汉化以免在不稳定状态下继续");
                                     }
                                     else {
                                         // 立马退出 等待替换
@@ -1028,20 +1032,29 @@ static bool EnsureRestoredFromBackup(const fs::path& base, const char* name) {
 // 残留临时文件清理(#177): 进程被杀(非异常路径)时原子写/原子还原的 .writing*/.restoring* 临时文件残留,
 // 此前无启动清理机制导致垃圾累积(仅磁盘卫生, 不影响功能)
 static void CleanupStaleTempFiles() {
-    // 匹配本工具原子写约定的 ".writing."/" .restoring." 子串(fs_io.hpp/PerformRollback: 目标名+标记+随机后缀);
-    // .new(自动更新断点续传依赖同名残留续传, 见 http.hpp)/.bak(备份) 不含该子串, 天然不会被误删
+    // 与 fs_io 原子写范式对应: "<目标名>.writing.<8位小写十六进制>"（WriteFile/AtomicCopyFile 的临时名）。
+    // #271: 由「子串 .writing./.restoring. 即删」收敛为「精确后缀形态 + 本工具实际写入的目标名白名单」——
+    //   - 删除范围仅 main.js / renderer.js / *.bak / localization.json 的原子写残留；
+    //   - 移除 .restoring.（自 #242 起统一走 AtomicCopyFile 的 .writing, 该标记已无写入方, 属死代码）；
+    //   - 避免 -g/-j 误指到含同模式名字的用户目录时误删用户文件（如 notes.writing.txt 不再命中）。
+    //   - .new(自更新断点续传依赖)/.bak 不含 .writing 形态, 天然不受影响。
+    static const std::regex kWritingRe(
+        R"(^(?:main\.js|renderer\.js|main\.js\.bak|renderer\.js\.bak|localization\.json)\.writing\.[0-9a-f]{8}$)",
+        std::regex::optimize);
     std::vector<fs::path> stale;
     std::error_code ec;
     // 先收集后删除: 标准不保证 directory_iterator 遍历中删除条目安全(迭代器失效)
     for(fs::directory_iterator it(Base, ec), end; !ec && it != end; it.increment(ec)) {
+        std::error_code type_ec;
+        if(!it->is_regular_file(type_ec) || type_ec) {
+            continue; // 仅处理普通文件(目录/链接不删)
+        }
         const std::string name = it->path().filename().string();
         // #244: 追加覆盖历史命名的更新脚本残留 "<self>.update*.sh"(旧自更新链遗留)
         const bool is_legacy_update_script =
             name.find(".update") != std::string::npos &&
             name.size() >= 3 && name.compare(name.size() - 3, 3, ".sh") == 0;
-        if(name.find(".writing.") != std::string::npos ||
-            name.find(".restoring.") != std::string::npos ||
-            is_legacy_update_script) {
+        if(std::regex_match(name, kWritingRe) || is_legacy_update_script) {
             stale.push_back(it->path());
         }
     }
@@ -1387,11 +1400,10 @@ static int RunMain(int argc, char** argv, const fs::path& self_path)
                     if(LocalizationJSON.has_parent_path()) {
                         fs::create_directories(LocalizationJSON.parent_path(), ec);
                     }
-                    std::ofstream io(LocalizationJSON);
-                    io << std::setw(4) << localization << std::endl;
-                    const bool ok = io.good();
-                    io.close();
-                    if(!ok || !fs::exists(LocalizationJSON)) {
+                    // 复用原子写范式(#271): 临时名 + 落盘 + rename —— 进程被杀/磁盘满时
+                    // 不会留下半截 JSON（否则下次运行会因「文件已存在」跳过重建, 解析失败即中止）
+                    const std::string tmpl = localization.dump(4) + "\n";
+                    if(!utils::WriteFile(LocalizationJSON.string(), tmpl) || !fs::exists(LocalizationJSON)) {
                         // 权限不足/父目录不可写时不能谎报"已创建"(随后 CLI11 以 105 退出)
                         throw CLI::ValidationError("(-j,--json) 指定位置无法创建本地化文件(权限或路径问题)");
                     }
@@ -1527,8 +1539,14 @@ static int RunMain(int argc, char** argv, const fs::path& self_path)
     utils::CleanupSelfUpdateResidue(self_path);
 
     // 检查更新: 触发自更新后立即退出(新版本已入位, 由替换逻辑负责重启)
-    if(CheckForUpdates(proxy, self_path)) {
+    bool update_hard_failure = false;
+    if(CheckForUpdates(proxy, self_path, update_hard_failure)) {
         return 0;
+    }
+    if(update_hard_failure) {
+        // #271: 自更新失败(可能原 exe 已不可用) —— 中止汉化, 让用户先修复程序文件
+        spdlog::error("自更新失败, 已中止本次运行; 请重新下载最新版程序后再试");
+        return 1;
     }
 
     // ── 目录解析(前置于 json 加载): 回滚只需目录+备份, 不应被 json 损坏/断网阻断(F4) ──

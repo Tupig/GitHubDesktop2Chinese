@@ -573,6 +573,24 @@ namespace utils {
 #endif
     }
 
+    // 回滚兜底(#271): rename 失败(占用/权限)时改用复制恢复 —— 复制对句柄占用的容忍度更高,
+    // 尽量保证 <self> 存在, 避免出现「只剩 .old、程序无法启动」的不可恢复状态。
+    // 仅作为 rename 失败后的第二选择; 复制成功后保留 .old(不删除), 交由下次启动的残留清理处理。
+    inline auto RestoreSelfBestEffort(const fs::path& from, const fs::path& self_ref) -> bool {
+        std::error_code ec;
+        fs::rename(from, self_ref, ec);
+        if(!ec) {
+            return true;
+        }
+        std::error_code cp_ec;
+        fs::copy_file(from, self_ref, fs::copy_options::overwrite_existing, cp_ec);
+        if(cp_ec) {
+            return false;
+        }
+        std::error_code ex_ec;
+        return fs::exists(self_ref, ex_ec) && !ex_ec;
+    }
+
     // 进程内替换自身并重启新版本(#182/#183):
     // Windows: 重命名运行中 exe 为 .old → 移动 .new 立即入位 → CreateProcessW 重启。
     //          全程不经 cmd, 消除 cmd /c 上下文 %% 转义不折叠与路径含 % 展开破坏更新的缺陷(#182);
@@ -629,8 +647,10 @@ namespace utils {
             spdlog::error("更新文件落盘失败({}), 已回滚原程序, 请手动用 {} 覆盖 {}",
                 sync_ec.message(), tmp_file.string(), self_ref.string());
             std::error_code rb_ec;
-            fs::rename(old_file, self_ref, rb_ec);
-            if(rb_ec) {
+            if(RestoreSelfBestEffort(old_file, self_ref)) {
+                spdlog::error("更新文件落盘失败({}), 已回滚原程序, 请手动用 {} 覆盖 {}", sync_ec.message(), tmp_file.string(), self_ref.string());
+            }
+            else {
                 spdlog::error("回滚亦失败, 原程序已移至 {}, 请手动恢复", old_file.string());
             }
             return false;
@@ -654,12 +674,11 @@ namespace utils {
         if(ec) {
             // 回滚: 恢复原程序保持可运行; 回滚也失败时提示手动恢复位置
             std::error_code rb_ec;
-            fs::rename(old_file, self_ref, rb_ec);
-            if(rb_ec) {
-                spdlog::error("新版本入位失败({})且回滚失败, 原程序已移至 {}, 请手动恢复", ec.message(), old_file.string());
+            if(RestoreSelfBestEffort(old_file, self_ref)) {
+                spdlog::error("新版本入位失败({}), 已回滚原程序, 请手动用 {} 覆盖 {}", ec.message(), tmp_file.string(), self_ref.string());
             }
             else {
-                spdlog::error("新版本入位失败({}), 已回滚原程序, 请手动用 {} 覆盖 {}", ec.message(), tmp_file.string(), self_ref.string());
+                spdlog::error("新版本入位失败({})且回滚失败, 原程序已移至 {}, 请手动恢复", ec.message(), old_file.string());
             }
             return false;
         }
