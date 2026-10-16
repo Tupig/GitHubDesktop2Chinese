@@ -2,7 +2,7 @@
 
 **简体中文** | [English](#auto-maintain--localizationjson-maintenance-tool-english)
 
-自动维护 GitHubDesktop2Chinese 的 `json/localization.json`：
+自动维护 TuPigGHD2Chinese 的 `json/localization.json`：
 
 1. **失效检测** (`check`)：获取最新 GitHub Desktop（Windows 版），对现有映射逐条检测是否能匹配到 `main.js` / `renderer.js`，找出失效（匹配不到）的映射项。
 2. **依序模拟检测** (`simulate`)：按 C++ 加载器的应用顺序（main → renderer → select）依序应用全部映射并逐条统计实际替换次数，找出「单独可匹配、但被前面正则先改写」的隐性失效条目（#207）。
@@ -72,7 +72,7 @@ npm test
 
 ### 失效检测
 
-与 C++ 主程序的 `--invalidcheck` 逻辑对齐（`GitHubDesktop2Chinese.cpp`）：
+与 C++ 主程序的 `--invalidcheck` 逻辑对齐（`TuPigGHD2Chinese.cpp`）：
 
 - 对 `main`/`renderer`/`main_dev`/`renderer_dev` 每个数组的每一项：
   - `item[0]` 作为正则对对应 JS 文本执行 `test`
@@ -105,7 +105,7 @@ npm test
 
 ## CI 自动维护
 
-工作流位于 `../../.github/workflows/ghdesktop2chinese.yml`（仓库根目录）：
+工作流位于 `../../.github/workflows/tupigghd2chinese.yml`（仓库根目录）：
 
 - **触发**：push `main` + 每日定时（北京时间 10:00）+ 手动 `workflow_dispatch` 选择 `type=auto` 或 `type=maintain`
 - **流程**：查询最新版本 → 恢复缓存（安装包 + 提取结果）→ 跑 `check extract` → 生成报告 → 创建/更新 `auto-maintain` 标签的 Issue
@@ -138,7 +138,7 @@ tools/auto-maintain/
 
 [简体中文](#auto-maintain--localizationjson-自动维护工具) | **English**
 
-Automates maintenance of GitHubDesktop2Chinese's `json/localization.json`:
+Automates maintenance of TuPigGHD2Chinese's `json/localization.json`:
 
 1. **Invalid-entry check** (`check`): fetches the latest GitHub Desktop (Windows edition) and tests every existing mapping against `main.js` / `renderer.js` to find stale (no-longer-matching) entries.
 2. **Sequential simulation detection** (`simulate`): applies all mappings in the C++ loader's order (main → renderer → select), counting actual replacements per entry, to find entries that silently stop working **only when applied in order** because an earlier regex rewrites their target first (#207).
@@ -208,7 +208,7 @@ It contains `lib/net45/resources/app/{main.js,renderer.js}` — the Electron res
 
 ### Invalid-Entry Check
 
-Aligned with the C++ main program's `--invalidcheck` logic (`GitHubDesktop2Chinese.cpp`):
+Aligned with the C++ main program's `--invalidcheck` logic (`TuPigGHD2Chinese.cpp`):
 
 - For every item of each `main`/`renderer`/`main_dev`/`renderer_dev` array:
   - `item[0]` is treated as a regex and `test`ed against the corresponding JS text
@@ -241,7 +241,7 @@ Replays the C++ loader's full **in-order application** (`ProcessJsFile` + `Apply
 
 ## CI Automated Maintenance
 
-The workflow lives at `../../.github/workflows/ghdesktop2chinese.yml` (repository root):
+The workflow lives at `../../.github/workflows/tupigghd2chinese.yml` (repository root):
 
 - **Triggers**: push to `main` + daily schedule (10:00 Beijing time) + manual `workflow_dispatch` with `type=auto` or `type=maintain`
 - **Flow**: query the latest version → restore caches (installer + extraction results) → run `check extract` → generate the report → create/update the `auto-maintain` labeled issue

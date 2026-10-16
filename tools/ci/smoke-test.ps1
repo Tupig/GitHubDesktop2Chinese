@@ -1,6 +1,6 @@
 ﻿# 冒烟测试(构建产物快速功能验证)
 # 本地与 CI Build job Windows 产物功能测试共用同一用例源(#178, 消除两套平行维护漂移)
-# 用法: pwsh tools/ci/smoke-test.ps1 [-Binary <GitHubDesktop2Chinese.exe 路径>] [-Force]
+# 用法: pwsh tools/ci/smoke-test.ps1 [-Binary <TuPigGHD2Chinese.exe 路径>] [-Force]
 # 默认自动探测 out\build\*\Release\ 与 build\Release\ 下的产物, 取最新者
 # -Force: T3 完整汉化流程追加 --force(CI 构建版本 ci-<sha> 解析为 0.0.0 低于 minversion,
 #         --nopause 下默认中止; 本地默认版本为 Dev 状态跳过门禁, 无需此开关)
@@ -31,13 +31,13 @@ $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if (-not $Binary) {
     $candidates = @()
     foreach ($pattern in @(
-        "out\build\*\Release\GitHubDesktop2Chinese.exe",
-        "build\Release\GitHubDesktop2Chinese.exe")) {
+        "out\build\*\Release\TuPigGHD2Chinese.exe",
+        "build\Release\TuPigGHD2Chinese.exe")) {
         $candidates += Get-Item (Join-Path $repoRoot $pattern) -ErrorAction SilentlyContinue
     }
     if (-not $candidates) {
         # #136: Write-Error 在 EAP=Stop 下直接抛终止错误, 原 exit 1 不可达; throw 语义等价且明确
-        throw "未找到待测二进制: 请先构建, 或用 -Binary 指定 GitHubDesktop2Chinese.exe 路径"
+        throw "未找到待测二进制: 请先构建, 或用 -Binary 指定 TuPigGHD2Chinese.exe 路径"
     }
     $Binary = ($candidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 }

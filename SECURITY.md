@@ -16,7 +16,7 @@
 请**不要**通过公开 Issue 报告安全漏洞，使用 GitHub 私密漏洞报告（Private Vulnerability Reporting）：
 
 - 仓库页 **Security → Report a vulnerability**
-- 或直接访问：<https://github.com/Tupig/GitHubDesktop2Chinese/security/advisories/new>
+- 或直接访问：<https://github.com/Tupig/TuPigGHD2Chinese/security/advisories/new>
 
 报告建议包含：问题描述、复现步骤、影响范围（版本 / 平台）、可能的修复建议（可选）。
 
@@ -35,7 +35,7 @@
   - 发布产物附带构建溯源证明（SLSA provenance），可校验：
 
     ```bash
-    gh attestation verify <下载的文件> --repo Tupig/GitHubDesktop2Chinese
+    gh attestation verify <下载的文件> --repo Tupig/TuPigGHD2Chinese
     ```
 
   - Windows 发布产物支持 [SignPath](https://signpath.org) 自动代码签名；签名凭据未配置时自动跳过（产物不签名，发布不受阻——当前即此状态：SignPath Foundation 申请未获批，集成保持休眠）；启用签名后对签名产物重新生成构建溯源证明
@@ -65,7 +65,7 @@ Only the **latest release** (since `v0.0.1`) receives security fixes; earlier ve
 Please do **not** report security vulnerabilities through public issues. Use GitHub's Private Vulnerability Reporting instead:
 
 - Repository page: **Security → Report a vulnerability**
-- Or go directly to: <https://github.com/Tupig/GitHubDesktop2Chinese/security/advisories/new>
+- Or go directly to: <https://github.com/Tupig/TuPigGHD2Chinese/security/advisories/new>
 
 Reports should ideally include: a description of the issue, reproduction steps, the affected scope (version / platform), and, optionally, a suggested fix.
 
@@ -84,7 +84,7 @@ Reports should ideally include: a description of the issue, reproduction steps, 
   - Release artifacts carry build provenance attestations (SLSA provenance) that can be verified with:
 
     ```bash
-    gh attestation verify <downloaded file> --repo Tupig/GitHubDesktop2Chinese
+    gh attestation verify <downloaded file> --repo Tupig/TuPigGHD2Chinese
     ```
 
   - Windows release artifacts support automatic code signing via [SignPath](https://signpath.org); when signing credentials are not configured, signing is skipped automatically (artifacts stay unsigned and releases are never blocked — the current state: the SignPath Foundation application was not approved and the integration remains dormant); once signing is enabled, the build provenance attestation is regenerated for the signed artifact

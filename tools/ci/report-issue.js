@@ -42,7 +42,7 @@ module.exports = async ({ github, context, core }) => {
       report,
       '',
       '---',
-      `_由 [GitHubDesktop2Chinese](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/workflows/ghdesktop2chinese.yml) 自动生成_`,
+      `_由 [TuPigGHD2Chinese](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/workflows/tupigghd2chinese.yml) 自动生成_`,
     ].join('\n');
 
     // 正文超长防护: GitHub Issue body 上限 65536 字符, 超限会导致创建/更新失败(恰在最需要报告时丢失)

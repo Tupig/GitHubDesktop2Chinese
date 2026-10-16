@@ -1,5 +1,5 @@
 # 
-prefix=/Users/runner/work/GitHubDesktop2Chinese/GitHubDesktop2Chinese/openssl-macos-arm64
+prefix=/Users/runner/work/TuPigGHD2Chinese/TuPigGHD2Chinese/openssl-macos-arm64
 exec_prefix=${prefix}
 libdir=${exec_prefix}/lib
 includedir=${prefix}/include 

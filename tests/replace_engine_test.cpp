@@ -38,7 +38,7 @@ std::string GetEnvVar(const char* name) {
 }
 
 // 对单条 (pattern, replacement) 走主程序同等分派逻辑, 与 regex_replace 基准逐字节对比
-// 分派逻辑与 GitHubDesktop2Chinese.cpp 一致: 纯字面量且替换文本无 $ 走快路径, 否则单遍正则
+// 分派逻辑与 TuPigGHD2Chinese.cpp 一致: 纯字面量且替换文本无 $ 走快路径, 否则单遍正则
 void CompareEntry(const std::string& subject, const std::string& pattern, const std::string& replacement) {
     SCOPED_TRACE("pattern=" + pattern);
     std::regex re(pattern, std::regex::optimize);

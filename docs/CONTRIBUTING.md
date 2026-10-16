@@ -2,7 +2,7 @@
 
 **简体中文** | [English](#localization-contribution-guide-english)
 
-感谢参与 GitHubDesktop2Chinese 的汉化贡献！补充或修改翻译（`json/localization.json`）前，请先阅读以下注意事项。
+感谢参与 TuPigGHD2Chinese 的汉化贡献！补充或修改翻译（`json/localization.json`）前，请先阅读以下注意事项。
 
 > 程序使用**正则表达式**进行匹配替换，理解以下规则可以避免「匹配不到」或「替换后程序打不开」的问题。
 >
@@ -66,7 +66,7 @@
 3. **批量自检失效条目**（推荐提交前运行；需本机已安装 GitHub Desktop，或用 `-g` 指定 js 目录）：
 
    ```powershell
-   GitHubDesktop2Chinese.exe --nopause dev --invalidcheck --translationfrombak
+   TuPigGHD2Chinese.exe --nopause dev --invalidcheck --translationfrombak
    ```
 
    > `--nopause` 为程序级参数，必须写在 `dev` 子命令之前；输出会逐个报告匹配失败 / 正则非法的条目。
@@ -108,7 +108,7 @@ git branch -D <分支名>
 
 ## 依赖策略
 
-构建遵循**自包含**原则（审计与实施计划见 [#98](https://github.com/Tupig/GitHubDesktop2Chinese/issues/98)）：
+构建遵循**自包含**原则（审计与实施计划见 [#98](https://github.com/Tupig/TuPigGHD2Chinese/issues/98)）：
 
 - Windows / macOS / Linux 三平台并行编译打包，产物一致、可直接发布。
 - 所有依赖**内置仓库，或仅使用 GitHub 原生功能**（Actions、Releases、Packages、cache）；不引入外部第三方依赖服务。
@@ -141,7 +141,7 @@ git branch -D <分支名>
 
 [简体中文](#汉化贡献指南) | **English**
 
-Thanks for contributing translations to GitHubDesktop2Chinese! Before adding or modifying translations (`json/localization.json`), please read the notes below.
+Thanks for contributing translations to TuPigGHD2Chinese! Before adding or modifying translations (`json/localization.json`), please read the notes below.
 
 > The program matches and replaces text with **regular expressions**. Understanding the rules below helps you avoid "pattern does not match" failures or "GitHub Desktop won't open after replacement" breakage.
 >
@@ -205,7 +205,7 @@ Thanks for contributing translations to GitHubDesktop2Chinese! Before adding or 
 3. **Batch self-check for invalid entries** (recommended before submitting; requires GitHub Desktop installed locally, or pass its js directory via `-g`):
 
    ```powershell
-   GitHubDesktop2Chinese.exe --nopause dev --invalidcheck --translationfrombak
+   TuPigGHD2Chinese.exe --nopause dev --invalidcheck --translationfrombak
    ```
 
    > `--nopause` is a program-level flag and must come **before** the `dev` subcommand; the output reports each entry whose pattern fails to match or whose regex is invalid.
@@ -247,7 +247,7 @@ git branch -D <branch-name>
 
 ## Dependency Policy
 
-The build is **self-contained** (audit & implementation plan: [#98](https://github.com/Tupig/GitHubDesktop2Chinese/issues/98)):
+The build is **self-contained** (audit & implementation plan: [#98](https://github.com/Tupig/TuPigGHD2Chinese/issues/98)):
 
 - Windows / macOS / Linux are built in parallel with consistent, releasable artifacts.
 - All dependencies are **vendored in-repo or use GitHub-native features only** (Actions, Releases, Packages, cache); no external third-party services.

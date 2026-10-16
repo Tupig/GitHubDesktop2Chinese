@@ -1,10 +1,10 @@
-# GitHubDesktop2Chinese 文档中心
+# TuPigGHD2Chinese 文档中心
 
-**简体中文** | [English](#githubdesktop2chinese-documentation-hub-english)
+**简体中文** | [English](#tupigghd2chinese-documentation-hub-english)
 
 > 本页面是项目的 **Wiki 文档中心**首页，内容比 README 更详细、成体系。
 
-[GitHubDesktop2Chinese](https://github.com/Tupig/GitHubDesktop2Chinese) 是一个把 [GitHub Desktop](https://desktop.github.com/) 界面文本自动替换为中文的工具：**无需重打包、无需改安装器**，加载器直接对 GitHub Desktop 的 `main.js` / `renderer.js` 做「正则映射替换」，并全程保留 `.bak` 备份、可一键回滚。
+[TuPigGHD2Chinese](https://github.com/Tupig/TuPigGHD2Chinese) 是一个把 [GitHub Desktop](https://desktop.github.com/) 界面文本自动替换为中文的工具：**无需重打包、无需改安装器**，加载器直接对 GitHub Desktop 的 `main.js` / `renderer.js` 做「正则映射替换」，并全程保留 `.bak` 备份、可一键回滚。
 
 - 上游原作：[cngege/GitHubDesktop2Chinese](https://github.com/cngege/GitHubDesktop2Chinese)（感谢 CNGEGE 的开创性工作）
 - 视频教程：[BiliBili](https://www.bilibili.com/video/BV17HpSeHEaC/)
@@ -13,7 +13,7 @@
 
 ## 快速开始（30 秒版）
 
-1. 到 [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) 下载对应平台的 `GitHubDesktop2Chinese` 可执行文件（Windows x64 / macOS x64·arm64 / Linux x64）。
+1. 到 [Releases](https://github.com/Tupig/TuPigGHD2Chinese/releases) 下载对应平台的 `TuPigGHD2Chinese` 可执行文件（Windows x64 / macOS x64·arm64 / Linux x64）。
 2. 双击运行（macOS / Linux 在终端中运行），程序会：
    - 自动在注册表中定位 GitHub Desktop 安装目录（Windows）；
    - 自动联网拉取最新 `localization.json` 汉化映射；
@@ -76,21 +76,21 @@
 
 | 平台 | 产物 | 说明 |
 | --- | --- | --- |
-| Windows | `GitHubDesktop2Chinese.exe`（x64） | 自动探测注册表安装目录；界面文案以 Windows 版 GitHub Desktop 为基准 |
-| macOS | `GitHubDesktop2Chinese-macos-x64` / `GitHubDesktop2Chinese-macos-arm64` | 按机器架构选择单架构包；静态链接 OpenSSL，自包含；安装目录需手动输入或用 `-g` 指定 |
+| Windows | `TuPigGHD2Chinese.exe`（x64） | 自动探测注册表安装目录；界面文案以 Windows 版 GitHub Desktop 为基准 |
+| macOS | `TuPigGHD2Chinese-macos-x64` / `TuPigGHD2Chinese-macos-arm64` | 按机器架构选择单架构包；静态链接 OpenSSL，自包含；安装目录需手动输入或用 `-g` 指定 |
 | Linux | x64 可执行文件 | 依赖系统 OpenSSL（`libssl-dev`）；安装目录需手动输入或用 `-g` 指定 |
 
 > 仅支持 64 位构建与运行；32 位版本已停止提供（v1.2.6 起）。
 
 ---
 
-# GitHubDesktop2Chinese Documentation Hub (English)
+# TuPigGHD2Chinese Documentation Hub (English)
 
-[简体中文](#githubdesktop2chinese-文档中心) | **English**
+[简体中文](#tupigghd2chinese-文档中心) | **English**
 
 > This is the home page of the project's **Wiki documentation hub** — more detailed and better structured than the README.
 
-[GitHubDesktop2Chinese](https://github.com/Tupig/GitHubDesktop2Chinese) is a tool that automatically replaces the interface text of [GitHub Desktop](https://desktop.github.com/) with Chinese: **no repackaging, no installer modifications** — the loader performs "regex-based mapping replacement" directly against GitHub Desktop's `main.js` / `renderer.js`, always keeps `.bak` backups, and supports one-click rollback.
+[TuPigGHD2Chinese](https://github.com/Tupig/TuPigGHD2Chinese) is a tool that automatically replaces the interface text of [GitHub Desktop](https://desktop.github.com/) with Chinese: **no repackaging, no installer modifications** — the loader performs "regex-based mapping replacement" directly against GitHub Desktop's `main.js` / `renderer.js`, always keeps `.bak` backups, and supports one-click rollback.
 
 - Original upstream project: [cngege/GitHubDesktop2Chinese](https://github.com/cngege/GitHubDesktop2Chinese) (many thanks to CNGEGE for the pioneering work)
 - Video tutorial: [BiliBili](https://www.bilibili.com/video/BV17HpSeHEaC/)
@@ -99,7 +99,7 @@
 
 ## Quick Start (30-second version)
 
-1. Download the `GitHubDesktop2Chinese` executable for your platform from [Releases](https://github.com/Tupig/GitHubDesktop2Chinese/releases) (Windows x64 / macOS x64·arm64 / Linux x64).
+1. Download the `TuPigGHD2Chinese` executable for your platform from [Releases](https://github.com/Tupig/TuPigGHD2Chinese/releases) (Windows x64 / macOS x64·arm64 / Linux x64).
 2. Double-click to run it (on macOS / Linux, run the binary in a terminal). The program will:
    - Automatically locate the GitHub Desktop installation directory from the registry (Windows);
    - Automatically fetch the latest `localization.json` mapping over the network;
@@ -162,8 +162,8 @@ Running into problems? Check the [FAQ](常见问题.md) first.
 
 | Platform | Artifact | Notes |
 | --- | --- | --- |
-| Windows | `GitHubDesktop2Chinese.exe` (x64) | Automatically detects the install directory from the registry; interface texts follow the Windows build of GitHub Desktop |
-| macOS | `GitHubDesktop2Chinese-macos-x64` / `GitHubDesktop2Chinese-macos-arm64` | Pick the single-architecture package for your machine; statically linked OpenSSL, self-contained; the install directory must be entered manually or passed via `-g` |
+| Windows | `TuPigGHD2Chinese.exe` (x64) | Automatically detects the install directory from the registry; interface texts follow the Windows build of GitHub Desktop |
+| macOS | `TuPigGHD2Chinese-macos-x64` / `TuPigGHD2Chinese-macos-arm64` | Pick the single-architecture package for your machine; statically linked OpenSSL, self-contained; the install directory must be entered manually or passed via `-g` |
 | Linux | x64 executable | Depends on the system OpenSSL (`libssl-dev`); the install directory must be entered manually or passed via `-g` |
 
 > Only 64-bit builds and runs are supported; 32-bit versions are no longer provided (since v1.2.6).

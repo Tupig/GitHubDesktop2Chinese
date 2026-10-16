@@ -24,7 +24,7 @@
 
 ---
 
-- [主仓库 Main Repo](https://github.com/Tupig/GitHubDesktop2Chinese)
-- [Releases 下载 Downloads](https://github.com/Tupig/GitHubDesktop2Chinese/releases)
-- [安全政策 Security Policy](https://github.com/Tupig/GitHubDesktop2Chinese/blob/main/SECURITY.md)
+- [主仓库 Main Repo](https://github.com/Tupig/TuPigGHD2Chinese)
+- [Releases 下载 Downloads](https://github.com/Tupig/TuPigGHD2Chinese/releases)
+- [安全政策 Security Policy](https://github.com/Tupig/TuPigGHD2Chinese/blob/main/SECURITY.md)
 - [上游项目 Upstream](https://github.com/cngege/GitHubDesktop2Chinese)

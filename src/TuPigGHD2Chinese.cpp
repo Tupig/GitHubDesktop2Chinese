@@ -1,4 +1,4 @@
-// GitHubDesktop2Chinese.cpp: 定义应用程序的入口点。
+// TuPigGHD2Chinese.cpp: 定义应用程序的入口点。
 
 
 #define _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING
@@ -17,7 +17,7 @@
 #define PAUSE do { if(!no_pause) { spdlog::info("按回车键继续..."); WaitAnyKey(); } } while(0);
 #endif
 
-#include "GitHubDesktop2Chinese.h"
+#include "TuPigGHD2Chinese.h"
 #include <string>
 #include <vector>
 #include <limits>
@@ -57,13 +57,13 @@
 // ---------------------------------------------------------------------------
 constexpr const char kApiHost[] = "https://api.github.com";                                            // GitHub REST API 主机
 constexpr const char kRawHost[] = "https://raw.githubusercontent.com";                                 // 仓库原始内容主机
-constexpr const char kReleasesPageUrl[] = "https://github.com/Tupig/GitHubDesktop2Chinese/releases";   // 发布页(提示用)
-constexpr const char kRepoApiPath[] = "/repos/Tupig/GitHubDesktop2Chinese";                            // 本仓库信息
-constexpr const char kLatestReleaseApiPath[] = "/repos/Tupig/GitHubDesktop2Chinese/releases/latest";   // 本仓库最新 Release
-constexpr const char kContributorsApiPath[] = "/repos/Tupig/GitHubDesktop2Chinese/contributors";       // 本仓库贡献者列表
+constexpr const char kReleasesPageUrl[] = "https://github.com/Tupig/TuPigGHD2Chinese/releases";   // 发布页(提示用)
+constexpr const char kRepoApiPath[] = "/repos/Tupig/TuPigGHD2Chinese";                            // 本仓库信息
+constexpr const char kLatestReleaseApiPath[] = "/repos/Tupig/TuPigGHD2Chinese/releases/latest";   // 本仓库最新 Release
+constexpr const char kContributorsApiPath[] = "/repos/Tupig/TuPigGHD2Chinese/contributors";       // 本仓库贡献者列表
 // #134: 以下两常量仅 _WIN32 注册表分支使用, macOS/Linux 下未用(-Wunused-const-variable)
 [[maybe_unused]] constexpr const char kDesktopLatestReleaseApiPath[] = "/repos/desktop/desktop/releases/latest";        // GitHub Desktop 上游最新 Release
-constexpr const char kLocalizationJsonRawPath[] = "/Tupig/GitHubDesktop2Chinese/main/json/localization.json"; // 远程汉化映射文件
+constexpr const char kLocalizationJsonRawPath[] = "/Tupig/TuPigGHD2Chinese/main/json/localization.json"; // 远程汉化映射文件
 constexpr int kMaxContributorsShown = 10;                          // 贡献者列表展示条数上限(完整获取, 仅限展示)
 [[maybe_unused]] constexpr std::size_t kDesktopTagPrefixLen = 8;                    // GitHub Desktop 官方 tag 前缀 "release-" 的长度
 
@@ -756,7 +756,7 @@ static bool CheckForUpdates(const std::pair<std::string, int>& proxy, const fs::
                         const json* asset = nullptr;
                         if(infojson.contains("assets") && infojson["assets"].is_array()) {
                             for(const auto& a : infojson["assets"]) {
-                                if(a.value("name", std::string()) == "GitHubDesktop2Chinese.exe") { asset = &a; break; }
+                                if(a.value("name", std::string()) == "TuPigGHD2Chinese.exe") { asset = &a; break; }
                             }
                             if(!asset) {
                                 for(const auto& a : infojson["assets"]) {
@@ -782,7 +782,7 @@ static bool CheckForUpdates(const std::pair<std::string, int>& proxy, const fs::
                             bool autoupdate = utils::ReadUserInput_bool({ "n", "y" }, 0);
                             if(autoupdate) {
                                 // 下载地址形如:
-                                //https://github.com/Tupig/GitHubDesktop2Chinese/releases/download/v1.0.14/GitHubDesktop2Chinese.exe
+                                //https://github.com/Tupig/TuPigGHD2Chinese/releases/download/v1.0.14/TuPigGHD2Chinese.exe
                                 std::regex url_regex(R"(^((?:https://)[^/]+)(/.*)?$)", std::regex::optimize);
                                 std::smatch matches;
                                 if(std::regex_match(downlink, matches, url_regex)) {
@@ -1266,7 +1266,7 @@ static void ShowContributors(const std::pair<std::string, int>& proxy) {
         return;
     }
     // 获取项目参与者:
-    // https://api.github.com/repos/Tupig/GitHubDesktop2Chinese/contributors
+    // https://api.github.com/repos/Tupig/TuPigGHD2Chinese/contributors
     try {
         spdlog::info("正在获取项目参与者");
         std::string contributors;
@@ -1299,8 +1299,8 @@ static int RunMain(int argc, char** argv, const fs::path& self_path);
 // 日志文件路径(InitFileLogging 成功后非空, 供崩溃提示)
 static fs::path g_log_file;
 
-// 附加轮转文件 sink(1MB×3)到默认 logger: Windows %TEMP%\GitHubDesktop2Chinese\app.log,
-// POSIX $TMPDIR(缺省 /tmp)/GitHubDesktop2Chinese/app.log
+// 附加轮转文件 sink(1MB×3)到默认 logger: Windows %TEMP%\TuPigGHD2Chinese\app.log,
+// POSIX $TMPDIR(缺省 /tmp)/TuPigGHD2Chinese/app.log
 // 初始化自身绝不抛出: 目录创建/文件打开失败时降级为仅控制台日志, 不影响主流程
 static void InitFileLogging()
 {
@@ -1308,14 +1308,14 @@ static void InitFileLogging()
         fs::path log_dir;
 #ifdef _WIN32
         if(const wchar_t* tmp = _wgetenv(L"TEMP")) {
-            log_dir = fs::path(tmp) / "GitHubDesktop2Chinese";
+            log_dir = fs::path(tmp) / "TuPigGHD2Chinese";
         }
 #else
         if(const char* tmp = std::getenv("TMPDIR")) {
-            log_dir = fs::path(tmp) / "GitHubDesktop2Chinese";
+            log_dir = fs::path(tmp) / "TuPigGHD2Chinese";
         }
         else {
-            log_dir = fs::path("/tmp") / "GitHubDesktop2Chinese";
+            log_dir = fs::path("/tmp") / "TuPigGHD2Chinese";
         }
 #endif
         std::error_code ec;

@@ -1,7 +1,7 @@
-GitHubDesktop2Chinese 第三方组件许可声明（Third-Party Notices）
+TuPigGHD2Chinese 第三方组件许可声明（Third-Party Notices）
 ================================================================
 
-本文件列出 GitHubDesktop2Chinese 二进制发行版中静态链接/内嵌的第三方组件
+本文件列出 TuPigGHD2Chinese 二进制发行版中静态链接/内嵌的第三方组件
 及其许可条款，满足 BSD-3-Clause / Apache-2.0 / MIT 各许可证的分发要求。
 
 上游版本清单与更新方式见仓库 third_party/README.md。

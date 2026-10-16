@@ -58,7 +58,7 @@ class CheckWorkflowTest(unittest.TestCase):
         self.workflows_dir.mkdir()
 
     # -- 夹具辅助 --
-    def write_workflow(self, content: str, filename: str = "ghdesktop2chinese.yml") -> Path:
+    def write_workflow(self, content: str, filename: str = "tupigghd2chinese.yml") -> Path:
         path = self.workflows_dir / filename
         path.write_text(content, encoding="utf-8")
         return path
@@ -70,7 +70,7 @@ class CheckWorkflowTest(unittest.TestCase):
     def test_valid_chain_passes(self) -> None:
         self.write_workflow(VALID_CHAIN)
         names, violations = check_workflow.run_checks(self.workflows_dir)
-        self.assertEqual(names, ["ghdesktop2chinese.yml"])
+        self.assertEqual(names, ["tupigghd2chinese.yml"])
         self.assertEqual(violations, [])
 
     def test_duplicate_workflow_rejected(self) -> None:
@@ -110,7 +110,7 @@ class CheckWorkflowTest(unittest.TestCase):
         self.assertIn("W2", rules)
         self.assertIn("W3", rules)
         w2 = [v for v in violations if v.rule == "W2"]
-        self.assertEqual([v.target for v in w2], ["ghdesktop2chinese.yml/c"])
+        self.assertEqual([v.target for v in w2], ["tupigghd2chinese.yml/c"])
 
     def test_disconnected_components_without_orphans(self) -> None:
         self.write_workflow(
@@ -162,7 +162,7 @@ class CheckWorkflowTest(unittest.TestCase):
         )
         _, violations = check_workflow.run_checks(self.workflows_dir)
         self.assertEqual(self.rules_of(violations), {"W5"})
-        self.assertEqual(violations[0].target, "ghdesktop2chinese.yml/b")
+        self.assertEqual(violations[0].target, "tupigghd2chinese.yml/b")
         self.assertIn("ghost", violations[0].message)
 
     # -- W6 needs 表达式引用有效性 --
@@ -182,7 +182,7 @@ class CheckWorkflowTest(unittest.TestCase):
         _, violations = check_workflow.run_checks(self.workflows_dir)
         self.assertEqual(self.rules_of(violations), {"W6"})
         violation = violations[0]
-        self.assertEqual(violation.target, "ghdesktop2chinese.yml/c")
+        self.assertEqual(violation.target, "tupigghd2chinese.yml/c")
         self.assertIn("非直接依赖", violation.message)
         self.assertIn("间接依赖不传递", violation.message)
 
@@ -284,7 +284,7 @@ class CheckWorkflowTest(unittest.TestCase):
         _, violations = check_workflow.run_checks(self.workflows_dir)
         w6 = [v for v in violations if v.rule == "W6"]
         self.assertEqual(len(w6), 1)
-        self.assertEqual(w6[0].target, "ghdesktop2chinese.yml/b")
+        self.assertEqual(w6[0].target, "tupigghd2chinese.yml/b")
         self.assertIn("不存在的任务", w6[0].message)
 
     def test_w6_notify_like_multi_result_pass(self) -> None:
@@ -309,7 +309,7 @@ class CheckWorkflowTest(unittest.TestCase):
         self.assertEqual(len(violations), 1)
         violation = violations[0]
         self.assertEqual(violation.rule, "W0")
-        self.assertEqual(violation.target, "ghdesktop2chinese.yml")
+        self.assertEqual(violation.target, "tupigghd2chinese.yml")
         self.assertIn("解析失败", violation.message)
         # #146: 上限引用被测模块导出常量(前缀 + collapse 截断), 改常量测试自动跟随
         prefix = "工作流 YAML 解析失败: "
@@ -317,7 +317,7 @@ class CheckWorkflowTest(unittest.TestCase):
 
     def test_non_utf8_workflow_reported(self) -> None:
         # GBK 编码的中文在 UTF-8 解码时抛 UnicodeDecodeError(ValueError 子类, 非 OSError)
-        path = self.workflows_dir / "ghdesktop2chinese.yml"
+        path = self.workflows_dir / "tupigghd2chinese.yml"
         path.write_bytes("name: 测试\non: push\njobs:\n  a:\n    runs-on: ubuntu-24.04\n".encode("gbk"))
         _, violations = check_workflow.run_checks(self.workflows_dir)
         self.assertEqual([v.rule for v in violations], ["W0"])
@@ -351,7 +351,7 @@ class CheckWorkflowTest(unittest.TestCase):
         self.write_workflow("on: push\njobs:\n  a: 123\n")
         _, violations = check_workflow.run_checks(self.workflows_dir)
         self.assertEqual([v.rule for v in violations], ["W0"])
-        self.assertEqual(violations[0].target, "ghdesktop2chinese.yml/a")
+        self.assertEqual(violations[0].target, "tupigghd2chinese.yml/a")
         self.assertIn("定义必须是映射", violations[0].message)
 
     def test_needs_with_non_string_element(self) -> None:
@@ -363,7 +363,7 @@ class CheckWorkflowTest(unittest.TestCase):
         )
         _, violations = check_workflow.run_checks(self.workflows_dir)
         self.assertEqual([v.rule for v in violations], ["W0"])
-        self.assertEqual(violations[0].target, "ghdesktop2chinese.yml/b")
+        self.assertEqual(violations[0].target, "tupigghd2chinese.yml/b")
         self.assertIn("needs 必须是字符串或字符串列表", violations[0].message)
 
     # #146: 补覆盖缺口——非字符串 job 名(YAML 数字键被解析为 int)
@@ -401,7 +401,7 @@ class CheckWorkflowTest(unittest.TestCase):
         self.write_workflow("on: push\njobs:\n  solo:\n    runs-on: ubuntu-24.04\n")
         names, violations = check_workflow.run_checks(self.workflows_dir)
         self.assertEqual(violations, [])
-        self.assertEqual(names, ["ghdesktop2chinese.yml"])
+        self.assertEqual(names, ["tupigghd2chinese.yml"])
 
     # -- main() 行为 --
     def test_main_json_format(self) -> None:
@@ -413,7 +413,7 @@ class CheckWorkflowTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         payload = json.loads(stdout.getvalue())
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["workflows"], ["ghdesktop2chinese.yml"])
+        self.assertEqual(payload["workflows"], ["tupigghd2chinese.yml"])
         self.assertEqual(payload["violations"], [])
 
     def test_main_exit_code_and_annotation(self) -> None:

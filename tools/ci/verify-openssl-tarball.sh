@@ -2,7 +2,7 @@
 # =====================================================================
 # verify-openssl-tarball.sh — OpenSSL 源码包 openssl.org 官方哈希独立比对(#184)
 #
-# 用法（CI 内由 .github/workflows/ghdesktop2chinese.yml 四个产库任务下载
+# 用法（CI 内由 .github/workflows/tupigghd2chinese.yml 四个产库任务下载
 #      tarball 后调用；本地亦可手动运行）:
 #   bash tools/ci/verify-openssl-tarball.sh <版本号> <tarball 路径>
 #   例: bash tools/ci/verify-openssl-tarball.sh 3.5.9 openssl-3.5.9.tar.gz
