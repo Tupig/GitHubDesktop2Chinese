@@ -5,11 +5,18 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   getLatestRelease, downloadZip, extractJs, extractSourceId, buildLatestReleaseUrl,
 } from '../src/fetch.js';
 
 /** 构造一个 EOCD 完整的假 zip（尾部含 PK\x05\x06） */
+/** 计算与 downloadZip 期望格式一致的 digest（sha256:<hex>）；#276 起 digest 缺失即 fail-closed，
+ * 故成功路径必须提供正确 digest（已核实上游 desktop/desktop 资产恒带 digest）。 */
+function digestOf(buf) {
+  return 'sha256:' + createHash('sha256').update(buf).digest('hex');
+}
+
 function fakeZipBytes(padding = 30) {
   return Buffer.concat([Buffer.alloc(padding, 1), Buffer.from([0x50, 0x4b, 0x05, 0x06])]);
 }
@@ -83,7 +90,7 @@ describe('downloadZip：下载、续传与完整性校验', () => {
     const fetchMock = vi.fn(async () => new Response(bytes, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const zipPath = await downloadZip('https://example.invalid/a.nupkg', workDir, bytes.length, null);
+    const zipPath = await downloadZip('https://example.invalid/a.nupkg', workDir, bytes.length, digestOf(bytes));
     expect(fs.existsSync(zipPath)).toBe(true);
     expect(fs.readFileSync(zipPath).length).toBe(bytes.length);
     expect(fs.existsSync(zipPath + '.part')).toBe(false);
@@ -97,7 +104,7 @@ describe('downloadZip：下载、续传与完整性校验', () => {
     const fetchMock = vi.fn(async () => { throw new Error('不该被调用'); });
     vi.stubGlobal('fetch', fetchMock);
 
-    const got = await downloadZip('https://example.invalid/a.nupkg', workDir, bytes.length, null);
+    const got = await downloadZip('https://example.invalid/a.nupkg', workDir, bytes.length, digestOf(bytes));
     expect(got).toBe(zipPath);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -109,7 +116,7 @@ describe('downloadZip：下载、续传与完整性校验', () => {
     const fetchMock = vi.fn(async () => new Response(bytes, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await downloadZip('https://example.invalid/a.nupkg', workDir, bytes.length, null);
+    await downloadZip('https://example.invalid/a.nupkg', workDir, bytes.length, digestOf(bytes));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fs.readFileSync(zipPath).length).toBe(bytes.length);
   });
@@ -122,7 +129,7 @@ describe('downloadZip：下载、续传与完整性校验', () => {
     const fetchMock = vi.fn(async () => new Response(bytes, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await downloadZip('https://example.invalid/NEW.nupkg', workDir, bytes.length, null);
+    await downloadZip('https://example.invalid/NEW.nupkg', workDir, bytes.length, digestOf(bytes));
     expect(fetchMock.mock.calls[0][1].headers.Range).toBeUndefined(); // 未携带续传 Range
     expect(fs.readFileSync(zipPath).length).toBe(bytes.length);
   });
@@ -163,6 +170,19 @@ describe('downloadZip：下载、续传与完整性校验', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(bytes, { status: 200 })));
     await expect(downloadZip('https://example.invalid/a.nupkg', workDir, bytes.length + 1, null))
       .rejects.toThrow(/尺寸/);
+  });
+
+  it('digest 缺失 → fail-closed 拒绝（#276，不再按满足基线放行）', async () => {
+    const bytes = fakeZipBytes();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(bytes, { status: 200 })));
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      await expect(downloadZip('https://example.invalid/a.nupkg', workDir, bytes.length, null))
+        .rejects.toThrow(/digest/);
+    } finally {
+      console.warn = warn;
+    }
   });
 
   it('digest 不符 → 删除断点并抛错', async () => {

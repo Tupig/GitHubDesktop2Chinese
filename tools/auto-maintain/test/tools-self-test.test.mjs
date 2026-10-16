@@ -216,14 +216,15 @@ describe('fetch.js: 文件级完整性（EOCD / sha256 / digest）', () => {
       // 流式哈希与已知值对齐
       expect(await sha256File(abcFile)).toBe(ABC_SHA256);
 
-      // digest 校验(#118): 一致放行(false), 不一致拦截(true), 缺失/格式异常放行(false, 维持基线)
+      // digest 校验(#118/#276): 一致放行(false), 不一致拦截(true)；
+      // #276 改为 fail-closed: 缺失/格式异常不再放行, 而是按不匹配处理(true) —— 与产品侧一致
       const origWarn = console.warn;
       console.warn = () => {};
       try {
         expect(await digestMismatch(abcFile, `sha256:${ABC_SHA256}`)).toBe(false);
         expect(await digestMismatch(abcFile, `sha256:${'0'.repeat(64)}`)).toBe(true);
-        expect(await digestMismatch(abcFile, null)).toBe(false);
-        expect(await digestMismatch(abcFile, 'md5:deadbeef')).toBe(false);
+        expect(await digestMismatch(abcFile, null)).toBe(true);
+        expect(await digestMismatch(abcFile, 'md5:deadbeef')).toBe(true);
       } finally {
         console.warn = origWarn;
       }

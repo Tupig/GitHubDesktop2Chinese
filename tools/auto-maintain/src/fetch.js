@@ -157,14 +157,21 @@ export function sha256File(filePath) {
 
 /**
  * 校验文件内容是否与 release 资产 digest（形如 "sha256:hex"）一致（#118 下载完整性）。
- * digest 缺失或格式异常时视为通过（告警，维持 size+EOCD 基线）；不匹配返回 true。
+ * **fail-closed（#276）**：digest 缺失或格式异常一律视为**不匹配**（返回 true）并告警 ——
+ * 与产品侧 `VerifyDownloadedFile` 的 fail-closed 策略对齐；此前 fail-open 会让「尺寸/EOCD 正确但内容被篡改」
+ * 的资产被接受（SECURITY.md 声称的完整性保证失效）。
+ * 前提已核实：上游 desktop/desktop 的 release 资产**均带 `digest`（sha256:…）**，故 fail-closed 不影响正常流程。
+ * 返回 true = 不匹配/无法校验（调用方拒绝或重新下载）；false = 一致。
  */
 export async function digestMismatch(filePath, expectedDigest) {
-  if (!expectedDigest) return false;
+  if (!expectedDigest) {
+    console.warn('release 资产未提供 digest 字段，无法校验内容完整性，按不匹配处理（fail-closed，#276）');
+    return true;
+  }
   const [algo, expected] = expectedDigest.split(':');
   if (algo !== 'sha256' || !/^[0-9a-f]{64}$/.test(expected ?? '')) {
-    console.warn(`release 资产 digest 字段格式异常: ${expectedDigest}，跳过内容哈希校验`);
-    return false;
+    console.warn(`release 资产 digest 字段格式异常: ${expectedDigest}，按不匹配处理（fail-closed，#276）`);
+    return true;
   }
   const got = await sha256File(filePath);
   if (got !== expected) {

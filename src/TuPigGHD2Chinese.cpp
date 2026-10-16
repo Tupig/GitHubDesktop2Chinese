@@ -340,9 +340,19 @@ static int ProcessJsFile(const char* fileTag, const char* logTag, const char* ba
     // 如果"从备份文件中汉化"选项打开 则判断备份文件是否存在,以便尝试从备份文件中读取
     // exists 用 error_code 重载: 底层错误(权限等)不抛异常, 等价于"视为不存在"走目标文件分支(#122 B3)
     std::error_code bak_exists_ec;
-    std::string js_str = ((_debug_translation_from_bak || _debug_invalid_check_mode) && fs::exists(bak, bak_exists_ec))
-        ? utils::ReadFile(bak.string())
-        : utils::ReadFile(target.string());
+    std::string js_str;
+    const bool prefer_bak = (_debug_translation_from_bak || _debug_invalid_check_mode) && fs::exists(bak, bak_exists_ec);
+    if(prefer_bak) {
+        js_str = utils::ReadFile(bak.string());
+        if(js_str.empty()) {
+            // #276: .bak 为空/读取失败时回退读目标文件 —— 此前直接中止, 即便目标文件完好可用
+            spdlog::warn("备份文件 {} 为空或读取失败, 已回退读取 {}", bak.filename().string(), fileTag);
+            js_str = utils::ReadFile(target.string());
+        }
+    }
+    else {
+        js_str = utils::ReadFile(target.string());
+    }
     if(js_str.empty()) {
         spdlog::error("读取 {} 失败或内容为空, 已中止以免覆盖源文件; 若文件损坏可从 {}.bak 恢复", fileTag, fileTag);
         return 1;
@@ -1055,6 +1065,15 @@ static void CleanupStaleTempFiles() {
             name.find(".update") != std::string::npos &&
             name.size() >= 3 && name.compare(name.size() - 3, 3, ".sh") == 0;
         if(std::regex_match(name, kWritingRe) || is_legacy_update_script) {
+            // #276: 跳过「刚刚写入」的临时文件 —— 并发双实例(同 Base)时, 一方可能正在写
+            // main.js.writingXXXX, 本实例若删除它, 对方的 rename 会失败并中止汉化。
+            // 残留临时文件的清理本就不紧急(下次启动仍会清), 故对 5 分钟内的文件保守跳过。
+            std::error_code mt_ec;
+            const auto mtime = fs::last_write_time(it->path(), mt_ec);
+            if(!mt_ec && (fs::file_time_type::clock::now() - mtime) < std::chrono::minutes(5)) {
+                spdlog::debug("跳过可能仍在写入的临时文件 {}", name);
+                continue;
+            }
             stale.push_back(it->path());
         }
     }
@@ -1142,8 +1161,12 @@ static int CheckMinVersionGate() {
             spdlog::warn("文件要求加载器版本至少为: {}, 但加载器版本为: {}", JsonVer.toString(), FileVer.toString());
             spdlog::info("请更新：{}", kReleasesPageUrl);
             // 询问是否强制执行
-
-            if(!no_pause) {
+            // #276: --force 显式强制优先于交互提示 —— 此前 !no_pause 分支在前, 交互模式下
+            // 即使传了 --force 仍被要求输入 f, 与 --force 帮助文案「仍强制执行替换」不符
+            if(force_execute) {
+                spdlog::warn("版本不满足要求, 已按 --force 强制执行");
+            }
+            else if(!no_pause) {
                 spdlog::info("输入(f)强制执行替换(可能会导致无法打开), 其他退出..");
                 std::string input;
                 if(std::cin >> input) {
@@ -1153,9 +1176,6 @@ static int CheckMinVersionGate() {
                     PAUSE
                     return 1;
                 }
-            }
-            else if(force_execute) {
-                spdlog::warn("版本不满足要求, 已按 --force 强制执行");
             }
             else {
                 // 非交互(--nopause)默认中止: 兼容性未知的强制替换风险过高, 需 --force 显式确认

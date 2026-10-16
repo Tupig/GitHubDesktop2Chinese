@@ -296,9 +296,16 @@ namespace utils {
         httplib::Result res = GetWithRetry(url_host, params, proxy, &body, kMaxResponseBytes, &oversized,
                                            kRequestTotalBudgetSec, &budget_exceeded);
 
-        // 超限为服务端/代理侧确定性异常, 不触发代理降级(直连同样会被服务端超限拒绝)
-        if(oversized) {
-            spdlog::warn("请求 {}{} 响应体超过上限({} bytes), 已断开并拒绝", url_host, params, kMaxResponseBytes);
+        // 超限与预算中止均为**服务端/代理侧确定性异常**, 一律不触发代理降级直连重试(#276):
+        // 直连同样会被服务端超限拒绝、同样会被滴流拖到超预算 —— 此前只短路 oversized,
+        // budget_exceeded 会被误判为「代理不可达」而对同一慢服务端再跑一轮预算(最坏多等一轮 120s)
+        if(oversized || budget_exceeded) {
+            if(oversized) {
+                spdlog::warn("请求 {}{} 响应体超过上限({} bytes), 已断开并拒绝", url_host, params, kMaxResponseBytes);
+            }
+            else {
+                spdlog::warn("请求 {}{} 超过单请求总时长预算({} 秒), 已中止(不降级重试)", url_host, params, kRequestTotalBudgetSec);
+            }
             out.clear();
             return false;
         }
@@ -316,7 +323,7 @@ namespace utils {
             }
         }
 
-        // 滴流服务端/代理被单请求总时长预算中止(#172): 单次 recv 超时无法约束持续续命的慢速响应
+        // 直连降级后的第二次调用同样可能被预算中止(#172)
         if(budget_exceeded) {
             spdlog::warn("请求 {}{} 超过单请求总时长预算({} 秒), 已中止", url_host, params, kRequestTotalBudgetSec);
         }
