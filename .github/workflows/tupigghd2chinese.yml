@@ -654,7 +654,7 @@ jobs:
           gcovr --root . \
             --filter 'src/utils/' --filter 'src/version/' \
             --exclude 'third_party/' \
-            --txt --fail-under-line 60
+            --txt --fail-under-line 80
 
   # ═════════════════════════════════════════════════
   # 3. 安全与维护门（CodeQL 安全扫描 + 自动维护 + Wiki 同步 + 构建跳过说明）
