@@ -1,4 +1,4 @@
-// CLI 参数解析(#174 从 index.js 抽出为无副作用纯模块, tools/ci/tools-self-test.mjs 覆盖各分支)
+// CLI 参数解析(#174 从 index.js 抽出为无副作用纯模块, test/tools-self-test.test.mjs(Vitest) 覆盖各分支)
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 

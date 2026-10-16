@@ -205,19 +205,40 @@ endif()
 
 set_property(TARGET GitHubDesktop2Chinese PROPERTY CXX_STANDARD 20)
 
-# ── 单元测试(#123): Version 表驱动解析/比较测试, 无外部依赖 ──
+# ── 测试框架: GoogleTest(随仓库 vendored, 构建期不下载) ──
+# 仅构建 gtest/gtest_main(关闭 gmock 与安装规则); MSVC 强制共享 CRT 与主工程一致。
+# 三方源码不参与本仓告警策略: 子目录内关掉 warning-as-error(CI 传 CMAKE_COMPILE_WARNING_AS_ERROR=ON),
+# 并把 gtest 目标告警级别降到最低, 保持主工程「构建零告警」基线不被三方代码污染。
+set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+set(_ghd2c_warn_as_error "${CMAKE_COMPILE_WARNING_AS_ERROR}")
+set(CMAKE_COMPILE_WARNING_AS_ERROR OFF)
+add_subdirectory(third_party/googletest EXCLUDE_FROM_ALL)
+set(CMAKE_COMPILE_WARNING_AS_ERROR "${_ghd2c_warn_as_error}")
+if(TARGET gtest)
+    if(MSVC)
+        target_compile_options(gtest PRIVATE /W0)
+    else()
+        target_compile_options(gtest PRIVATE -w)
+    endif()
+endif()
+
+# ── 单元测试(#123): Version 表驱动解析/比较测试 ──
 # 构建: cmake --build . --target version_test;  运行: ctest --output-on-failure
 enable_testing()
 add_executable(version_test tests/version_test.cpp)
 set_property(TARGET version_test PROPERTY CXX_STANDARD 20)
 target_include_directories(version_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(version_test PRIVATE GTest::gtest_main)
 add_test(NAME version_test COMMAND version_test)
 
 # ── 替换引擎等价性测试(#129): 字面量快路径/单遍正则 与 regex_replace 逐字节等价 ──
-# 内嵌用例无外部依赖(CI 必跑); 真实数据对比可选传 argv[1]=json argv[2]=js 本地运行
+# 内嵌用例无外部依赖(CI 必跑); 真实数据对比可选: 设环境变量 GHD2C_TEST_JSON / GHD2C_TEST_JS 本地运行
 add_executable(replace_engine_test tests/replace_engine_test.cpp)
 set_property(TARGET replace_engine_test PROPERTY CXX_STANDARD 20)
 target_include_directories(replace_engine_test PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(replace_engine_test PRIVATE GTest::gtest_main)
 add_test(NAME replace_engine_test COMMAND replace_engine_test)
 
 # ── 自更新残留清理与替换前置检查测试(#182/#183): 依赖 http.hpp(OpenSSL/httplib 头) ──
@@ -231,19 +252,22 @@ target_include_directories(selfupdate_test SYSTEM PRIVATE
 if(WIN32)
     target_link_libraries(selfupdate_test PRIVATE
         ${GHD2C_OPENSSL_ROOT}/lib/${OPENSSL_SSL_NAME}
-        ${GHD2C_OPENSSL_ROOT}/lib/${OPENSSL_CRYPTO_NAME})
+        ${GHD2C_OPENSSL_ROOT}/lib/${OPENSSL_CRYPTO_NAME}
+        GTest::gtest_main)
 elseif(APPLE)
     target_link_libraries(selfupdate_test PRIVATE
         ${GHD2C_OPENSSL_ROOT}/lib/libssl.a
         ${GHD2C_OPENSSL_ROOT}/lib/libcrypto.a
         Threads::Threads
         ${COREFOUNDATION_FW}
-        ${SECURITY_FW})
+        ${SECURITY_FW}
+        GTest::gtest_main)
 else()
     target_link_libraries(selfupdate_test PRIVATE
         ${GHD2C_OPENSSL_ROOT}/lib/libssl.a
         ${GHD2C_OPENSSL_ROOT}/lib/libcrypto.a
         Threads::Threads
-        ${CMAKE_DL_LIBS})
+        ${CMAKE_DL_LIBS}
+        GTest::gtest_main)
 endif()
 add_test(NAME selfupdate_test COMMAND selfupdate_test)

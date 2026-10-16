@@ -606,8 +606,14 @@ jobs:
           for f in src/*.js; do node --check "$f"; done
           echo "所有源文件语法检查通过"
 
-      - name: 单元测试（提取过滤 + 草稿生成逻辑）
-        run: node tools/ci/tools-self-test.mjs
+      # 测试框架迁移: Node 工具测试由自研 runner(tools/ci/tools-self-test.mjs)迁移至 Vitest
+      - name: 安装 Node 测试依赖
+        working-directory: tools/auto-maintain
+        run: npm ci
+
+      - name: 单元测试（Vitest：提取过滤 / 草稿生成 / 报告契约 / fetch 纯逻辑 / 参数解析）
+        working-directory: tools/auto-maintain
+        run: npm test
 
       - name: Markdown 链接检查
         run: python tools/ci/md-check.py
@@ -615,8 +621,12 @@ jobs:
       - name: 单工作流规范校验（W0-W6）
         run: python tools/ci/check-workflow.py
 
-      - name: 单工作流校验器单元测试
-        run: python tools/ci/check-workflow-test.py
+      # 测试框架迁移: Python 校验器测试由自研运行器迁移至 pytest(收集 tools/ci 全部 *-test.py)
+      - name: 安装 Python 测试依赖
+        run: python -m pip install -r tools/ci/requirements-dev.txt
+
+      - name: 校验器单元测试（pytest）
+        run: python -m pytest
 
   # ═════════════════════════════════════════════════
   # 3. 安全与维护门（CodeQL 安全扫描 + 自动维护 + Wiki 同步 + 构建跳过说明）

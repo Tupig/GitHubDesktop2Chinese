@@ -1,0 +1,4 @@
+# CI / 本地开发用的 Python 测试依赖（校验器测试）
+# 安装: python -m pip install -r tools/ci/requirements-dev.txt
+# 运行: python -m pytest
+pytest==9.0.2

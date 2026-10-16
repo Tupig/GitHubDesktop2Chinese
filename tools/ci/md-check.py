@@ -16,7 +16,9 @@ if isinstance(sys.stdout, io.TextIOWrapper):
 # 路径按脚本位置推导(tools/ci -> 仓库根), 不依赖当前工作目录
 ROOT = Path(__file__).resolve().parents[2]
 # 构建产物/依赖缓存目录不参与扫描
-PRUNE_DIRS = {".git", "out", "build", "dist", "node_modules", ".deveco"}
+# 剪枝目录: 非本仓维护内容不参与链接校验(third_party 为随仓提交的三方源码, 其自带文档
+# 的相对链接不适用本仓规范; 与 check-encoding.py 的 exclude_dirs third_party/ 口径一致)
+PRUNE_DIRS = {".git", "out", "build", "dist", "node_modules", ".deveco", "third_party"}
 
 SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:")
 HEADING_RE = re.compile(r"^ {0,3}(#{1,6})\s+(.*?)\s*$")

@@ -2,7 +2,7 @@ import { buildDraftLine } from './extract-new.js';
 
 // 表格最多渲染行数; 超出部分以说明行代替。
 // 目的: 防止 Issue 正文超出 GitHub 65536 字符上限导致创建/更新失败(恰在最需要报告时丢失)。
-// #146: 导出供 tools-self-test.mjs 引用, 测试不再隐式绑定常量数值(改常量即碎且碎法误导)
+// #146: 导出供 test/tools-self-test.test.mjs(Vitest) 引用, 测试不再隐式绑定常量数值(改常量即碎且碎法误导)
 export const MAX_FAILED_ROWS = 150;
 export const MAX_CANDIDATE_ROWS = 200;
 
