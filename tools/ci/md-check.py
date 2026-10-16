@@ -4,6 +4,7 @@
 #          / 代码围栏与行内代码内的链接(不参与渲染)
 # 约定:   无扩展名目标按 GitHub Wiki 页引用处理(同目录 <名>.md 存在即有效)
 import io
+import os
 import re
 import sys
 from pathlib import Path
@@ -13,8 +14,11 @@ from urllib.parse import unquote
 if isinstance(sys.stdout, io.TextIOWrapper):
     sys.stdout.reconfigure(encoding="utf-8")
 
-# 路径按脚本位置推导(tools/ci -> 仓库根), 不依赖当前工作目录
-ROOT = Path(__file__).resolve().parents[2]
+# 路径按脚本位置推导(tools/ci -> 仓库根), 不依赖当前工作目录。
+# 允许用环境变量 GHD2C_CHECK_ROOT 覆盖扫描根(测试夹具与集成场景使用, 默认行为不变;
+# 该接缝使单测可直接加载本脚本而非复制副本, 覆盖率可归因到本源文件)。
+_ENV_ROOT = os.environ.get("GHD2C_CHECK_ROOT")
+ROOT = Path(_ENV_ROOT).resolve() if _ENV_ROOT else Path(__file__).resolve().parents[2]
 # 构建产物/依赖缓存目录不参与扫描
 # 剪枝目录: 非本仓维护内容不参与链接校验(third_party 为随仓提交的三方源码, 其自带文档
 # 的相对链接不适用本仓规范; 与 check-encoding.py 的 exclude_dirs third_party/ 口径一致)

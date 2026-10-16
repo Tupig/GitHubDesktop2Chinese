@@ -1,4 +1,6 @@
-# CI / 本地开发用的 Python 测试依赖（校验器测试）
+# CI / 本地开发用的 Python 测试依赖（校验器测试 + 覆盖率门禁）
 # 安装: python -m pip install -r tools/ci/requirements-dev.txt
 # 运行: python -m pytest
+# 覆盖率门禁: python -m pytest --cov --cov-report=term-missing --cov-fail-under=90
 pytest==9.0.2
+pytest-cov==7.0.0

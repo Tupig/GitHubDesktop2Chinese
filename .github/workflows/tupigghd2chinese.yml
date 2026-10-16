@@ -48,9 +48,10 @@
 #                         构建差异检测: 与上次成功构建对比, 无差异时输出 build_changed=false
 #   1. Build              构建矩阵(三平台四目标) Matrix build + 产物功能测试（无差异时跳过, 见注4）
 #                         sccache 编译缓存加速增量构建
-#   2. JsonCheck          质量校验门（json/编码/工具/md/工作流）
-#                         （json 深度校验 + 源码编码格式检查 #88 + 自动维护工具语法/自测
-#                          + Markdown 链接检查 + 单工作流规范校验 W0-W6 及校验器单测;
+#   2. JsonCheck          质量校验门（json/编码/工具/md/工作流; name 为分支保护必需 check, 不改名）
+#                         （json 深度校验 + 源码编码格式检查 #88 + 自动维护工具语法/单测
+#                          + Markdown 链接检查 + 单工作流规范校验 W0-W6 及校验器单测
+#                          + 覆盖率门禁 #263: Python pytest-cov / Node Vitest v8 / C++ gcov+gcovr;
 #                          合并原 json-quality / encoding-check / tools-test 三任务）
 #   3. CodeqlScan         安全与维护门（保持 windows-2025 以扫描 _WIN32 代码分支, 四块独立控制）:
 #                         ├ CodeQL 安全扫描（原 codeql, 增量扫描 + 数据库缓存）
@@ -573,6 +574,7 @@ jobs:
   #    合并原 json-quality / encoding-check / tools-test 三任务:
   #    三者依赖一致(均 ← version), 触发条件近同, 合并减少排队开销;
   #    另含 Markdown 链接检查与单工作流规范校验(W0-W6)及校验器单测;
+  #    另含覆盖率门禁(#263): Python pytest-cov(≥90%) / Node Vitest v8 阈值 / C++ gcov+gcovr(≥65%);
   #    任一检查失败即本任务失败, 维持原质量门语义;
   #    注意: name 即分支保护必需 check, 改名须同步
   #    branches/main/protection required_status_checks(#156)
@@ -630,8 +632,29 @@ jobs:
       - name: 安装 Python 测试依赖
         run: python -m pip install -r tools/ci/requirements-dev.txt
 
-      - name: 校验器单元测试（pytest）
-        run: python -m pytest
+      - name: 校验器单元测试（pytest + 覆盖率门禁）
+        run: python -m pytest --cov --cov-report=term-missing --cov-fail-under=90
+
+      # 覆盖率门禁(#263): Python 见上(pytest-cov)；Node 见 npm test(Vitest v8 阈值在 vitest.config.mjs)；
+      # C++ 在此以 gcov 度量 —— 仅构建无 OpenSSL 依赖的单测目标(快), 阈值针对 src/ 下的头文件逻辑
+      - name: 安装 C++ 覆盖率报告工具（gcovr）
+        run: python -m pip install gcovr
+
+      - name: C++ 单测覆盖率（gcov + gcovr 行覆盖率门禁）
+        run: |
+          cmake -B build-cov -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS=--coverage -DCMAKE_EXE_LINKER_FLAGS=--coverage
+          cmake --build build-cov --target version_test replace_engine_test utils_test
+          ./build-cov/version_test
+          ./build-cov/replace_engine_test
+          ./build-cov/utils_test
+          # 仅度量本仓被这三个单测目标编译到的头(src/utils、src/version)。
+          # 注意: gcovr 的 --filter/--exclude 按相对 --root 的路径匹配, 且是子串匹配,
+          # 故不能用 '.*/src/.*'(会连带匹配 vendored googletest 的 src/); 用目录子串最稳。
+          gcovr --root . \
+            --filter 'src/utils/' --filter 'src/version/' \
+            --exclude 'third_party/' \
+            --txt --fail-under-line 80
 
   # ═════════════════════════════════════════════════
   # 3. 安全与维护门（CodeQL 安全扫描 + 自动维护 + Wiki 同步 + 构建跳过说明）

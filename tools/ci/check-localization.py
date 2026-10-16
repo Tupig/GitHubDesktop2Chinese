@@ -1,14 +1,18 @@
 # localization.json 数据质量校验(工作流 json-quality job 调用; 自 YAML 外置, 行为不变)
 # 检查项: 草稿占位符/节点结构/正则合法性/std::regex 不兼容黑名单/ReDoS 启发式/译文问句风格
-import io, json, re, sys
+import io, json, os, re, sys
 from pathlib import Path
 
 # 与 check-workflow.py 统一: 守卫非 TextIOWrapper 的环境(#119)
 if isinstance(sys.stdout, io.TextIOWrapper):
     sys.stdout.reconfigure(encoding="utf-8")
 
-# 路径按脚本位置推导(tools/ci -> 仓库根), 不依赖当前工作目录(#119); 文件缺失/损坏输出可读错误而非裸 traceback
-JSON_PATH = Path(__file__).resolve().parents[2] / "json" / "localization.json"
+# 路径按脚本位置推导(tools/ci -> 仓库根), 不依赖当前工作目录(#119); 文件缺失/损坏输出可读错误而非裸 traceback。
+# 允许用环境变量 GHD2C_CHECK_ROOT 覆盖仓库根(测试夹具与集成场景使用, 默认行为不变;
+# 该接缝使单测可直接加载本脚本而非复制副本, 覆盖率可归因到本源文件)。
+_ENV_ROOT = os.environ.get("GHD2C_CHECK_ROOT")
+ROOT = Path(_ENV_ROOT).resolve() if _ENV_ROOT else Path(__file__).resolve().parents[2]
+JSON_PATH = ROOT / "json" / "localization.json"
 try:
     raw = JSON_PATH.read_text(encoding="utf-8")
     data = json.loads(raw)
@@ -33,8 +37,7 @@ for key in ["main", "renderer", "main_dev", "renderer_dev"]:
         errors.append(f"{key} 应为数组, 实际为 {type(data[key]).__name__}")
 
 # std::regex 不兼容语法黑名单 + ReDoS 启发式: 与 tools/auto-maintain 共用单一事实来源(#119)
-# 路径按脚本位置推导(tools/ci -> 仓库根), 不依赖当前工作目录
-BLACKLIST_PATH = Path(__file__).resolve().parents[2] / "tools" / "auto-maintain" / "regex-blacklist.json"
+BLACKLIST_PATH = ROOT / "tools" / "auto-maintain" / "regex-blacklist.json"
 try:
     with open(BLACKLIST_PATH, encoding="utf-8") as f:
         _bl = json.load(f)

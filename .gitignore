@@ -31,6 +31,15 @@ id_ed25519*
 # Python 缓存（tools/ci/ 校验脚本运行产物）
 __pycache__/
 
+# 覆盖率产物（pytest-cov / gcovr）
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.gcov
+*.gcda
+*.gcno
+
 # Node 依赖（Vitest 等测试依赖本地安装，不提交；锁文件 package-lock.json 提交）
 node_modules/
 
